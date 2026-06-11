@@ -20,10 +20,6 @@ jobs:
         include:
           - platform: macos-latest
             args: --target aarch64-apple-darwin
-          - platform: macos-latest
-            args: --target x86_64-apple-darwin
-          - platform: ubuntu-22.04
-            args: ""
           - platform: windows-latest
             args: ""
     runs-on: ${{ matrix.platform }}
@@ -102,7 +98,7 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_ENV, `APP_VERSION=${appVersion}\n`)
           NODE
 
-      - uses: tauri-apps/tauri-action@v1
+      - uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
