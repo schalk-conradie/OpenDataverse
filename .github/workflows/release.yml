@@ -1,0 +1,120 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: windows-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Set release version
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs")
+
+          function readJson(path) {
+            return JSON.parse(fs.readFileSync(path, "utf8"))
+          }
+
+          function writeJson(path, value) {
+            fs.writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
+          }
+
+          const packageJson = readJson("package.json")
+          const versionMatch = packageJson.version.match(/^(\d+)\.(\d+)\./)
+
+          if (!versionMatch) {
+            throw new Error(`Package version is not semver-like: ${packageJson.version}`)
+          }
+
+          const appVersion = `${versionMatch[1]}.${versionMatch[2]}.${process.env.GITHUB_RUN_NUMBER}`
+          packageJson.version = appVersion
+          writeJson("package.json", packageJson)
+
+          const packageLock = readJson("package-lock.json")
+          packageLock.version = appVersion
+          if (packageLock.packages?.[""]) {
+            packageLock.packages[""].version = appVersion
+          }
+          writeJson("package-lock.json", packageLock)
+
+          const tauriConfig = readJson("src-tauri/tauri.conf.json")
+          tauriConfig.version = appVersion
+          writeJson("src-tauri/tauri.conf.json", tauriConfig)
+
+          const cargoPath = "src-tauri/Cargo.toml"
+          const cargoToml = fs
+            .readFileSync(cargoPath, "utf8")
+            .replace(/^(version\s*=\s*)".*"/m, `$1"${appVersion}"`)
+          fs.writeFileSync(cargoPath, cargoToml)
+
+          fs.appendFileSync(process.env.GITHUB_ENV, `APP_VERSION=${appVersion}\n`)
+          NODE
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          APPLE_SIGNING_IDENTITY: "-"
+        with:
+          tagName: app-v__VERSION__
+          releaseName: OpenDataverse v__VERSION__
+          releaseBody: Automated OpenDataverse build from ${{ github.sha }}.
+          releaseDraft: false
+          prerelease: false
+          generateReleaseNotes: true
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true
+          args: ${{ matrix.args }}

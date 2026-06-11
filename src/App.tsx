@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 import {
   DatabaseZap,
+  Download,
   Loader2,
   Plus,
   Settings,
@@ -29,6 +30,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import {
+  checkForAppUpdate,
+  installAvailableAppUpdate,
+  type AvailableAppUpdate,
+  type AppUpdateProgress,
+} from "@/core/desktop/updater"
 import {
   dataverseUrlPattern,
   getEnvironmentById,
@@ -140,10 +147,69 @@ function App() {
   const openTool = useWorkspaceStore((state) => state.openTool)
   const closeWindow = useWorkspaceStore((state) => state.closeWindow)
   const activateWindow = useWorkspaceStore((state) => state.activateWindow)
+  const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
+  const [availableUpdate, setAvailableUpdate] =
+    useState<AvailableAppUpdate | null>(null)
+  const [installingUpdate, setInstallingUpdate] = useState(false)
+  const [updateProgress, setUpdateProgress] = useState<AppUpdateProgress>()
 
   useEffect(() => {
     void hydrate()
   }, [hydrate])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function refreshAvailableUpdate() {
+      try {
+        const update = await checkForAppUpdate()
+        if (cancelled) {
+          return
+        }
+
+        setAvailableUpdate(update)
+      } catch {
+        if (!cancelled) {
+          setAvailableUpdate(null)
+        }
+      }
+    }
+
+    void refreshAvailableUpdate()
+    const interval = window.setInterval(refreshAvailableUpdate, 30 * 60 * 1000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [])
+
+  async function installUpdate() {
+    if (installingUpdate) {
+      return
+    }
+
+    setInstallingUpdate(true)
+    setUpdateProgress(undefined)
+    setLastMessage(
+      availableUpdate
+        ? `Installing OpenDataverse ${availableUpdate.version}`
+        : "Checking for updates",
+    )
+
+    try {
+      const installed = await installAvailableAppUpdate(setUpdateProgress)
+      if (!installed) {
+        setAvailableUpdate(null)
+        setLastMessage("OpenDataverse is up to date")
+      }
+    } catch (error) {
+      setInstallingUpdate(false)
+      setLastMessage(
+        error instanceof Error ? error.message : "Could not install update",
+      )
+    }
+  }
 
   const activeEnvironment = getEnvironmentById(
     config,
@@ -162,7 +228,31 @@ function App() {
             <DatabaseZap className="size-5 text-primary" />
           </div>
           <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold">OpenDataverse</h1>
+            <div className="flex min-w-0 items-center gap-2">
+              <h1 className="truncate text-base font-semibold">
+                OpenDataverse
+              </h1>
+              {availableUpdate && (
+                <button
+                  className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-primary px-2 text-[11px] font-medium leading-none text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-default disabled:opacity-80"
+                  type="button"
+                  title={`Install OpenDataverse ${availableUpdate.version}`}
+                  onClick={installUpdate}
+                  disabled={installingUpdate}
+                >
+                  {installingUpdate ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <Download className="size-3" />
+                  )}
+                  <span>
+                    {installingUpdate && updateProgress?.percentage
+                      ? `${updateProgress.percentage}%`
+                      : "Update"}
+                  </span>
+                </button>
+              )}
+            </div>
             <div className="text-xs text-muted-foreground">Desktop</div>
           </div>
         </header>
