@@ -253,7 +253,6 @@ function App() {
                 </button>
               )}
             </div>
-            <div className="text-xs text-muted-foreground">Desktop</div>
           </div>
         </header>
 
