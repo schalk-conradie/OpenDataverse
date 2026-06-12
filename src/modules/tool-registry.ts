@@ -23,7 +23,7 @@ export const toolRegistry: ToolDefinition[] = [
     title: "FetchXML Builder",
     description: "Query builder workspace",
     icon: Braces,
-    status: "planned",
+    status: "ready",
   },
   {
     id: "solution-explorer",

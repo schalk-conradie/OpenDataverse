@@ -7,9 +7,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
-  collections::HashMap,
-  env,
-  fs,
+  collections::{HashMap, HashSet},
+  env, fs,
   io::{BufRead, BufReader, Read, Write},
   net::TcpListener,
   path::PathBuf,
@@ -211,6 +210,74 @@ struct PublishResult {
   message: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchXmlEntitySummary {
+  logical_name: String,
+  entity_set_name: String,
+  display_name: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  primary_name_attribute: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  primary_id_attribute: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchXmlOptionValue {
+  value: i32,
+  label: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchXmlAttributeSummary {
+  logical_name: String,
+  display_name: String,
+  attribute_type: String,
+  is_valid_for_read: bool,
+  #[serde(skip_serializing_if = "Vec::is_empty")]
+  option_values: Vec<FetchXmlOptionValue>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchXmlRelationshipSummary {
+  id: String,
+  schema_name: String,
+  relationship_type: String,
+  from_entity: String,
+  to_entity: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  from_attribute: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  to_attribute: Option<String>,
+  display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchXmlEntityMetadata {
+  logical_name: String,
+  entity_set_name: String,
+  display_name: String,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  primary_name_attribute: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  primary_id_attribute: Option<String>,
+  attributes: Vec<FetchXmlAttributeSummary>,
+  relationships: Vec<FetchXmlRelationshipSummary>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FetchXmlQueryResult {
+  rows: Vec<Value>,
+  columns: Vec<String>,
+  entity_set_name: String,
+  web_api_url: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AiChatMessage {
@@ -339,7 +406,9 @@ fn create_code_challenge(verifier: &str) -> String {
 
 fn read_auth_code_request(mut stream: std::net::TcpStream) -> Result<AuthCodeResult, String> {
   let mut buffer = [0_u8; 8192];
-  let bytes_read = stream.read(&mut buffer).map_err(|error| error.to_string())?;
+  let bytes_read = stream
+    .read(&mut buffer)
+    .map_err(|error| error.to_string())?;
   let request = String::from_utf8_lossy(&buffer[..bytes_read]);
   let request_line = request
     .lines()
@@ -419,7 +488,10 @@ fn legacy_opendataverse_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn legacy_app_config_dir(app: &AppHandle) -> Result<PathBuf, String> {
-  app.path().app_config_dir().map_err(|error| error.to_string())
+  app
+    .path()
+    .app_config_dir()
+    .map_err(|error| error.to_string())
 }
 
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -633,6 +705,335 @@ async fn dataverse_json_request<T: Serialize + ?Sized>(
   Ok(())
 }
 
+async fn dataverse_get_json_value(
+  app: &AppHandle,
+  environment: &DataverseEnvironment,
+  path: &str,
+  query: &[(&str, &str)],
+) -> Result<Value, String> {
+  let body = dataverse_get(app, environment, path, query).await?;
+  serde_json::from_str(&body).map_err(|error| format!("Parse Dataverse JSON response: {error}"))
+}
+
+fn normalize_dataverse_next_link(
+  environment: &DataverseEnvironment,
+  next_link: &str,
+) -> Result<(String, Vec<(String, String)>), String> {
+  let parsed = Url::parse(next_link).map_err(|error| error.to_string())?;
+  let org_url =
+    Url::parse(&normalize_org_url(&environment.url)).map_err(|error| error.to_string())?;
+
+  if parsed.scheme() != org_url.scheme()
+    || parsed.host_str() != org_url.host_str()
+    || parsed.port_or_known_default() != org_url.port_or_known_default()
+  {
+    return Err("Dataverse nextLink did not match the selected environment.".to_string());
+  }
+
+  let api_prefix = "/api/data/v9.2";
+  let path = parsed
+    .path()
+    .strip_prefix(api_prefix)
+    .ok_or_else(|| "Dataverse nextLink used an unexpected API path.".to_string())?;
+  let query = parsed
+    .query_pairs()
+    .map(|(key, value)| (key.into_owned(), value.into_owned()))
+    .collect();
+
+  Ok((format!("/{}", path.trim_start_matches('/')), query))
+}
+
+async fn dataverse_get_collection_values(
+  app: &AppHandle,
+  environment: &DataverseEnvironment,
+  path: &str,
+  query: Vec<(String, String)>,
+) -> Result<Vec<Value>, String> {
+  let mut values = Vec::new();
+  let mut current_path = path.to_string();
+  let mut current_query = query;
+
+  for _ in 0..30 {
+    let query_refs = current_query
+      .iter()
+      .map(|(key, value)| (key.as_str(), value.as_str()))
+      .collect::<Vec<_>>();
+    let page = dataverse_get_json_value(app, environment, &current_path, &query_refs).await?;
+
+    if let Some(items) = page.get("value").and_then(Value::as_array) {
+      values.extend(items.iter().cloned());
+    }
+
+    let Some(next_link) = page.get("@odata.nextLink").and_then(Value::as_str) else {
+      return Ok(values);
+    };
+    let (next_path, next_query) = normalize_dataverse_next_link(environment, next_link)?;
+    current_path = next_path;
+    current_query = next_query;
+  }
+
+  Err("Dataverse paging exceeded the metadata page limit.".to_string())
+}
+
+fn json_string(value: &Value, key: &str) -> Option<String> {
+  value
+    .get(key)
+    .and_then(Value::as_str)
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .map(ToString::to_string)
+}
+
+fn json_bool(value: &Value, key: &str) -> Option<bool> {
+  value.get(key).and_then(|item| {
+    item
+      .as_bool()
+      .or_else(|| item.get("Value").and_then(Value::as_bool))
+  })
+}
+
+fn localized_label(value: &Value, key: &str, fallback: &str) -> String {
+  value
+    .get(key)
+    .and_then(|display_name| {
+      display_name
+        .get("UserLocalizedLabel")
+        .and_then(|label| label.get("Label"))
+        .and_then(Value::as_str)
+        .or_else(|| {
+          display_name
+            .get("LocalizedLabels")
+            .and_then(Value::as_array)
+            .and_then(|labels| labels.first())
+            .and_then(|label| label.get("Label"))
+            .and_then(Value::as_str)
+        })
+    })
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .map(ToString::to_string)
+    .unwrap_or_else(|| fallback.to_string())
+}
+
+fn is_advanced_find_entity(value: &Value) -> bool {
+  json_bool(value, "IsValidForAdvancedFind").unwrap_or(false)
+    && !json_bool(value, "IsPrivate").unwrap_or(false)
+    && !json_bool(value, "IsIntersect").unwrap_or(false)
+}
+
+fn fetchxml_entity_summary_from_value(value: &Value) -> FetchXmlEntitySummary {
+  let logical_name = json_string(value, "LogicalName").unwrap_or_default();
+  let entity_set_name = json_string(value, "EntitySetName").unwrap_or_else(|| logical_name.clone());
+  let display_name = localized_label(value, "DisplayName", &logical_name);
+
+  FetchXmlEntitySummary {
+    logical_name,
+    entity_set_name,
+    display_name,
+    primary_name_attribute: json_string(value, "PrimaryNameAttribute"),
+    primary_id_attribute: json_string(value, "PrimaryIdAttribute"),
+  }
+}
+
+fn is_advanced_find_attribute(value: &Value) -> bool {
+  value
+    .get("IsValidForRead")
+    .and_then(Value::as_bool)
+    .unwrap_or(true)
+    && json_bool(value, "IsValidForAdvancedFind").unwrap_or(true)
+}
+
+fn fetchxml_attribute_from_value(value: &Value) -> Option<FetchXmlAttributeSummary> {
+  let logical_name = json_string(value, "LogicalName")?;
+  let attribute_type = json_string(value, "AttributeType").unwrap_or_else(|| "Unknown".to_string());
+  let display_name = localized_label(value, "DisplayName", &logical_name);
+  let is_valid_for_read = value
+    .get("IsValidForRead")
+    .and_then(Value::as_bool)
+    .unwrap_or(true);
+
+  Some(FetchXmlAttributeSummary {
+    logical_name,
+    display_name,
+    attribute_type,
+    is_valid_for_read,
+    option_values: Vec::new(),
+  })
+}
+
+async fn advanced_find_entity_logical_names(
+  app: &AppHandle,
+  environment: &DataverseEnvironment,
+) -> Result<HashSet<String>, String> {
+  let values = dataverse_get_collection_values(
+    app,
+    environment,
+    "/EntityDefinitions",
+    vec![(
+      "$select".to_string(),
+      "LogicalName,IsValidForAdvancedFind,IsPrivate,IsIntersect".to_string(),
+    )],
+  )
+  .await?;
+
+  Ok(
+    values
+      .iter()
+      .filter(|value| is_advanced_find_entity(value))
+      .filter_map(|value| json_string(value, "LogicalName"))
+      .collect(),
+  )
+}
+
+fn sort_fetchxml_attributes(attributes: &mut [FetchXmlAttributeSummary]) {
+  attributes.sort_by(|left, right| {
+    left
+      .display_name
+      .to_lowercase()
+      .cmp(&right.display_name.to_lowercase())
+      .then_with(|| left.logical_name.cmp(&right.logical_name))
+  });
+}
+
+fn sort_fetchxml_relationships(relationships: &mut [FetchXmlRelationshipSummary]) {
+  relationships.sort_by(|left, right| {
+    left
+      .display_name
+      .to_lowercase()
+      .cmp(&right.display_name.to_lowercase())
+      .then_with(|| left.schema_name.cmp(&right.schema_name))
+  });
+}
+
+fn many_to_one_relationship_from_value(value: &Value) -> Option<FetchXmlRelationshipSummary> {
+  let schema_name = json_string(value, "SchemaName")?;
+  let from_entity = json_string(value, "ReferencedEntity")?;
+  let to_entity = json_string(value, "ReferencingEntity")?;
+  let from_attribute = json_string(value, "ReferencedAttribute");
+  let to_attribute = json_string(value, "ReferencingAttribute");
+
+  Some(FetchXmlRelationshipSummary {
+    id: format!("many-to-one:{schema_name}"),
+    display_name: format!("{schema_name} ({from_entity})"),
+    schema_name,
+    relationship_type: "many-to-one".to_string(),
+    from_entity,
+    to_entity,
+    from_attribute,
+    to_attribute,
+  })
+}
+
+fn one_to_many_relationship_from_value(value: &Value) -> Option<FetchXmlRelationshipSummary> {
+  let schema_name = json_string(value, "SchemaName")?;
+  let from_entity = json_string(value, "ReferencingEntity")?;
+  let to_entity = json_string(value, "ReferencedEntity")?;
+  let from_attribute = json_string(value, "ReferencingAttribute");
+  let to_attribute = json_string(value, "ReferencedAttribute");
+
+  Some(FetchXmlRelationshipSummary {
+    id: format!("one-to-many:{schema_name}"),
+    display_name: format!("{schema_name} ({from_entity})"),
+    schema_name,
+    relationship_type: "one-to-many".to_string(),
+    from_entity,
+    to_entity,
+    from_attribute,
+    to_attribute,
+  })
+}
+
+fn many_to_many_relationship_from_value(
+  current_entity: &str,
+  value: &Value,
+) -> Option<FetchXmlRelationshipSummary> {
+  let schema_name = json_string(value, "SchemaName")?;
+  let entity_one = json_string(value, "Entity1LogicalName")?;
+  let entity_two = json_string(value, "Entity2LogicalName")?;
+  let from_entity = if entity_one == current_entity {
+    entity_two
+  } else {
+    entity_one
+  };
+
+  Some(FetchXmlRelationshipSummary {
+    id: format!("many-to-many:{schema_name}"),
+    display_name: format!("{schema_name} ({from_entity})"),
+    schema_name,
+    relationship_type: "many-to-many".to_string(),
+    from_entity,
+    to_entity: current_entity.to_string(),
+    from_attribute: None,
+    to_attribute: None,
+  })
+}
+
+fn extract_fetchxml_entity_name(fetch_xml: &str) -> Result<String, String> {
+  let lower = fetch_xml.to_lowercase();
+  let entity_start = lower
+    .find("<entity")
+    .ok_or_else(|| "FetchXML must include one entity element.".to_string())?;
+  let entity_slice = fetch_xml
+    .get(entity_start..)
+    .ok_or_else(|| "FetchXML entity element could not be read.".to_string())?;
+  let tag_end = entity_slice
+    .find('>')
+    .ok_or_else(|| "FetchXML entity element is not closed.".to_string())?;
+  let tag = &entity_slice[..tag_end];
+
+  for quote in ['"', '\''] {
+    let marker = format!("name={quote}");
+    if let Some(name_start) = tag.to_lowercase().find(&marker) {
+      let value_start = name_start + marker.len();
+      let rest = &tag[value_start..];
+      let value_end = rest
+        .find(quote)
+        .ok_or_else(|| "FetchXML entity name attribute is not closed.".to_string())?;
+      return validate_logical_name(&rest[..value_end]);
+    }
+  }
+
+  Err("FetchXML entity element must include a name attribute.".to_string())
+}
+
+fn collect_result_columns(rows: &[Value]) -> Vec<String> {
+  let mut columns = Vec::new();
+
+  for row in rows {
+    let Some(object) = row.as_object() else {
+      continue;
+    };
+
+    for key in object.keys() {
+      if key.starts_with('@') || key.contains("@odata.") {
+        continue;
+      }
+
+      if !columns.iter().any(|column| column == key) {
+        columns.push(key.clone());
+      }
+    }
+  }
+
+  columns
+}
+
+fn fetchxml_web_api_url(
+  environment: &DataverseEnvironment,
+  entity_set_name: &str,
+  fetch_xml: &str,
+) -> String {
+  let mut query = form_urlencoded::Serializer::new(String::new());
+  query.append_pair("fetchXml", fetch_xml);
+
+  format!(
+    "{}/api/data/v9.2/{}?{}",
+    normalize_org_url(&environment.url),
+    entity_set_name,
+    query.finish()
+  )
+}
+
 fn map_resource_type(value: Option<i32>) -> String {
   match value {
     Some(1) => "html",
@@ -772,7 +1173,8 @@ fn ai_sidecar_script_path(app: &AppHandle) -> Result<PathBuf, String> {
     candidates.push(current_dir.join("src-sidecar/ai/dist/index.js"));
   }
 
-  candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src-sidecar/ai/dist/index.js"));
+  candidates
+    .push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../src-sidecar/ai/dist/index.js"));
 
   if let Ok(resource_dir) = app.path().resource_dir() {
     candidates.push(resource_dir.join("src-sidecar/ai/dist/index.js"));
@@ -810,13 +1212,11 @@ fn spawn_ai_sidecar(app: &AppHandle) -> Result<AiSidecarProcess, String> {
     .stdout(Stdio::piped())
     .stderr(Stdio::null());
 
-  let mut child = command
-    .spawn()
-    .map_err(|error| {
-      format!(
-        "Could not start AI sidecar with Node. Install Node or set OPENDATAVERSE_AI_NODE. {error}"
-      )
-    })?;
+  let mut child = command.spawn().map_err(|error| {
+    format!(
+      "Could not start AI sidecar with Node. Install Node or set OPENDATAVERSE_AI_NODE. {error}"
+    )
+  })?;
   let stdin = child
     .stdin
     .take()
@@ -910,9 +1310,11 @@ fn run_ai_sidecar_stream_request(
       return Ok(response.result.unwrap_or(Value::Null));
     }
 
-    return Err(response
-      .error
-      .unwrap_or_else(|| "AI sidecar request failed.".to_string()));
+    return Err(
+      response
+        .error
+        .unwrap_or_else(|| "AI sidecar request failed.".to_string()),
+    );
   }
 }
 
@@ -999,7 +1401,8 @@ fn sanitize_json_value(value: Value) -> Value {
   match value {
     Value::Array(values) => Value::Array(values.into_iter().map(sanitize_json_value).collect()),
     Value::Object(map) => Value::Object(
-      map.into_iter()
+      map
+        .into_iter()
         .filter_map(|(key, value)| {
           if is_sensitive_json_key(&key) {
             None
@@ -1068,9 +1471,7 @@ fn normalize_ai_get_request(input: &str) -> Result<AiGetRequest, String> {
   }
 
   if trimmed.contains('#') || trimmed.contains('\\') {
-    return Err(
-      "Fragments and backslashes are not allowed in Dataverse GET paths.".to_string(),
-    );
+    return Err("Fragments and backslashes are not allowed in Dataverse GET paths.".to_string());
   }
 
   let without_slash = trimmed.trim_start_matches('/');
@@ -1446,14 +1847,17 @@ async fn build_codex_ai_chat_response(
   )?;
   emit_ai_chat_message(app, &thread.id, &codex_turn_message);
   let first_turn = run_codex_turn(app, state, thread, environment, message, Vec::new())?;
-  thread.codex_thread_id = first_turn.codex_thread_id.clone().or(thread.codex_thread_id.clone());
+  thread.codex_thread_id = first_turn
+    .codex_thread_id
+    .clone()
+    .or(thread.codex_thread_id.clone());
   let mut codex_turn_message = mark_ai_message_status(&codex_turn_message, "complete");
   codex_turn_message.metadata = Some(serde_json::json!({
-      "codexThreadId": thread.codex_thread_id,
-      "toolRequestCount": first_turn.tool_requests.len(),
-      "model": thread.model,
-      "reasoningEffort": thread.reasoning_effort,
-    }));
+    "codexThreadId": thread.codex_thread_id,
+    "toolRequestCount": first_turn.tool_requests.len(),
+    "model": thread.model,
+    "reasoningEffort": thread.reasoning_effort,
+  }));
   emit_ai_chat_message(app, &thread.id, &codex_turn_message);
   messages.push(codex_turn_message);
 
@@ -1501,15 +1905,25 @@ async fn build_codex_ai_chat_response(
     })),
   )?;
   emit_ai_chat_message(app, &thread.id, &codex_summary_message);
-  let final_turn = run_codex_turn(app, state, thread, environment, message, tool_results.clone())?;
-  thread.codex_thread_id = final_turn.codex_thread_id.clone().or(thread.codex_thread_id.clone());
+  let final_turn = run_codex_turn(
+    app,
+    state,
+    thread,
+    environment,
+    message,
+    tool_results.clone(),
+  )?;
+  thread.codex_thread_id = final_turn
+    .codex_thread_id
+    .clone()
+    .or(thread.codex_thread_id.clone());
   let mut codex_summary_message = mark_ai_message_status(&codex_summary_message, "complete");
   codex_summary_message.metadata = Some(serde_json::json!({
-      "codexThreadId": thread.codex_thread_id,
-      "toolResultCount": tool_results.len(),
-      "model": thread.model,
-      "reasoningEffort": thread.reasoning_effort,
-    }));
+    "codexThreadId": thread.codex_thread_id,
+    "toolResultCount": tool_results.len(),
+    "model": thread.model,
+    "reasoningEffort": thread.reasoning_effort,
+  }));
   emit_ai_chat_message(app, &thread.id, &codex_summary_message);
   messages.push(codex_summary_message);
 
@@ -1536,8 +1950,7 @@ fn load_config(app: AppHandle) -> Result<AppConfig, String> {
   if !path.exists() {
     let legacy_home_path = legacy_home_config_path(&app)?;
     if legacy_home_path.exists() {
-      let legacy_data =
-        fs::read_to_string(&legacy_home_path).map_err(|error| error.to_string())?;
+      let legacy_data = fs::read_to_string(&legacy_home_path).map_err(|error| error.to_string())?;
       if !legacy_data.trim().is_empty() {
         fs::write(&path, &legacy_data).map_err(|error| error.to_string())?;
         return serde_json::from_str(&legacy_data).map_err(|error| error.to_string());
@@ -1546,8 +1959,7 @@ fn load_config(app: AppHandle) -> Result<AppConfig, String> {
 
     let legacy_path = legacy_config_path(&app)?;
     if legacy_path.exists() {
-      let legacy_data =
-        fs::read_to_string(&legacy_path).map_err(|error| error.to_string())?;
+      let legacy_data = fs::read_to_string(&legacy_path).map_err(|error| error.to_string())?;
       if !legacy_data.trim().is_empty() {
         fs::write(&path, &legacy_data).map_err(|error| error.to_string())?;
         return serde_json::from_str(&legacy_data).map_err(|error| error.to_string());
@@ -1806,21 +2218,23 @@ async fn list_web_resources(
   let response: WebResourceApiResponse = serde_json::from_str(&body)
     .map_err(|error| format!("Parse web resources response: {error}"))?;
 
-  Ok(response
-    .value
-    .into_iter()
-    .map(|resource| WebResource {
-      id: resource.id,
-      name: resource.name,
-      resource_type: map_resource_type(resource.web_resource_type),
-      version: resource
-        .version
-        .map(|version| version.to_string())
-        .unwrap_or_default(),
-      is_managed: resource.is_managed,
-      solution: "Dataverse".to_string(),
-    })
-    .collect())
+  Ok(
+    response
+      .value
+      .into_iter()
+      .map(|resource| WebResource {
+        id: resource.id,
+        name: resource.name,
+        resource_type: map_resource_type(resource.web_resource_type),
+        version: resource
+          .version
+          .map(|version| version.to_string())
+          .unwrap_or_default(),
+        is_managed: resource.is_managed,
+        solution: "Dataverse".to_string(),
+      })
+      .collect(),
+  )
 }
 
 #[tauri::command]
@@ -1972,10 +2386,7 @@ async fn send_ai_chat_message(
         create_ai_tool_message("codex", "run_turn", "error", None)?,
         create_ai_message(
           "assistant",
-          format!(
-            "Codex request failed: {}",
-            user_safe_ai_error(error)
-          ),
+          format!("Codex request failed: {}", user_safe_ai_error(error)),
           "error",
         )?,
       ],
@@ -2029,6 +2440,186 @@ async fn dataverse_ai_get(
   dataverse_ai_get_value(&app, &environment, &path)
     .await
     .map(|(value, _)| value)
+}
+
+#[tauri::command]
+async fn list_fetchxml_entities(
+  app: AppHandle,
+  environment: DataverseEnvironment,
+) -> Result<Vec<FetchXmlEntitySummary>, String> {
+  let values = dataverse_get_collection_values(
+    &app,
+    &environment,
+    "/EntityDefinitions",
+    vec![(
+      "$select".to_string(),
+      "LogicalName,EntitySetName,DisplayName,PrimaryNameAttribute,PrimaryIdAttribute,IsValidForAdvancedFind,IsPrivate,IsIntersect".to_string(),
+    )],
+  )
+  .await?;
+  let mut entities = values
+    .iter()
+    .filter(|value| is_advanced_find_entity(value))
+    .map(fetchxml_entity_summary_from_value)
+    .filter(|entity| !entity.logical_name.is_empty() && !entity.entity_set_name.is_empty())
+    .collect::<Vec<_>>();
+
+  entities.sort_by(|left, right| {
+    left
+      .display_name
+      .to_lowercase()
+      .cmp(&right.display_name.to_lowercase())
+      .then_with(|| left.logical_name.cmp(&right.logical_name))
+  });
+
+  Ok(entities)
+}
+
+#[tauri::command]
+async fn get_fetchxml_entity_metadata(
+  app: AppHandle,
+  environment: DataverseEnvironment,
+  logical_name: String,
+) -> Result<FetchXmlEntityMetadata, String> {
+  let logical_name = validate_logical_name(&logical_name)?;
+  let entity_value = dataverse_get_json_value(
+    &app,
+    &environment,
+    &format!("/EntityDefinitions(LogicalName='{logical_name}')"),
+    &[(
+      "$select",
+      "LogicalName,EntitySetName,DisplayName,PrimaryNameAttribute,PrimaryIdAttribute",
+    )],
+  )
+  .await?;
+  let entity = fetchxml_entity_summary_from_value(&entity_value);
+
+  let attribute_values = dataverse_get_collection_values(
+    &app,
+    &environment,
+    &format!("/EntityDefinitions(LogicalName='{logical_name}')/Attributes"),
+    vec![(
+      "$select".to_string(),
+      "LogicalName,AttributeType,DisplayName,IsValidForRead,IsValidForAdvancedFind".to_string(),
+    )],
+  )
+  .await?;
+  let mut attributes = attribute_values
+    .iter()
+    .filter(|value| is_advanced_find_attribute(value))
+    .filter_map(fetchxml_attribute_from_value)
+    .collect::<Vec<_>>();
+  sort_fetchxml_attributes(&mut attributes);
+
+  let mut relationships = Vec::new();
+  let many_to_one_values = dataverse_get_collection_values(
+    &app,
+    &environment,
+    &format!("/EntityDefinitions(LogicalName='{logical_name}')/ManyToOneRelationships"),
+    vec![(
+      "$select".to_string(),
+      "SchemaName,ReferencedEntity,ReferencedAttribute,ReferencingEntity,ReferencingAttribute"
+        .to_string(),
+    )],
+  )
+  .await?;
+  relationships.extend(
+    many_to_one_values
+      .iter()
+      .filter_map(many_to_one_relationship_from_value),
+  );
+
+  let one_to_many_values = dataverse_get_collection_values(
+    &app,
+    &environment,
+    &format!("/EntityDefinitions(LogicalName='{logical_name}')/OneToManyRelationships"),
+    vec![(
+      "$select".to_string(),
+      "SchemaName,ReferencedEntity,ReferencedAttribute,ReferencingEntity,ReferencingAttribute"
+        .to_string(),
+    )],
+  )
+  .await?;
+  relationships.extend(
+    one_to_many_values
+      .iter()
+      .filter_map(one_to_many_relationship_from_value),
+  );
+
+  let many_to_many_values = dataverse_get_collection_values(
+    &app,
+    &environment,
+    &format!("/EntityDefinitions(LogicalName='{logical_name}')/ManyToManyRelationships"),
+    vec![(
+      "$select".to_string(),
+      "SchemaName,Entity1LogicalName,Entity1IntersectAttribute,Entity2LogicalName,Entity2IntersectAttribute"
+        .to_string(),
+    )],
+  )
+  .await?;
+  relationships.extend(
+    many_to_many_values
+      .iter()
+      .filter_map(|value| many_to_many_relationship_from_value(&logical_name, value)),
+  );
+  let advanced_find_entities = advanced_find_entity_logical_names(&app, &environment).await?;
+  relationships.retain(|relationship| advanced_find_entities.contains(&relationship.from_entity));
+  sort_fetchxml_relationships(&mut relationships);
+
+  Ok(FetchXmlEntityMetadata {
+    logical_name: entity.logical_name,
+    entity_set_name: entity.entity_set_name,
+    display_name: entity.display_name,
+    primary_name_attribute: entity.primary_name_attribute,
+    primary_id_attribute: entity.primary_id_attribute,
+    attributes,
+    relationships,
+  })
+}
+
+#[tauri::command]
+async fn execute_fetchxml_query(
+  app: AppHandle,
+  environment: DataverseEnvironment,
+  fetch_xml: String,
+) -> Result<FetchXmlQueryResult, String> {
+  let logical_name = extract_fetchxml_entity_name(&fetch_xml)?;
+  let entity_value = dataverse_get_json_value(
+    &app,
+    &environment,
+    &format!("/EntityDefinitions(LogicalName='{logical_name}')"),
+    &[("$select", "LogicalName,EntitySetName")],
+  )
+  .await?;
+  let entity = fetchxml_entity_summary_from_value(&entity_value);
+
+  if entity.entity_set_name.is_empty() {
+    return Err(format!(
+      "Could not resolve an entity set name for {logical_name}."
+    ));
+  }
+
+  let response = dataverse_get_json_value(
+    &app,
+    &environment,
+    &format!("/{}", entity.entity_set_name),
+    &[("fetchXml", &fetch_xml)],
+  )
+  .await?;
+  let rows = response
+    .get("value")
+    .and_then(Value::as_array)
+    .cloned()
+    .unwrap_or_default();
+  let columns = collect_result_columns(&rows);
+  let web_api_url = fetchxml_web_api_url(&environment, &entity.entity_set_name, &fetch_xml);
+
+  Ok(FetchXmlQueryResult {
+    rows,
+    columns,
+    entity_set_name: entity.entity_set_name,
+    web_api_url,
+  })
 }
 
 #[cfg(test)]
@@ -2121,7 +2712,10 @@ pub fn run() {
       dataverse_ai_whoami,
       dataverse_ai_list_entity_sets,
       dataverse_ai_metadata,
-      dataverse_ai_get
+      dataverse_ai_get,
+      list_fetchxml_entities,
+      get_fetchxml_entity_metadata,
+      execute_fetchxml_query
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

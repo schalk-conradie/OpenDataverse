@@ -83,6 +83,50 @@ export type WebResourceContent = {
   content: string
 }
 
+export type FetchXmlEntitySummary = {
+  logicalName: string
+  entitySetName: string
+  displayName: string
+  primaryNameAttribute?: string
+  primaryIdAttribute?: string
+}
+
+export type FetchXmlOptionValue = {
+  value: number
+  label: string
+}
+
+export type FetchXmlAttributeSummary = {
+  logicalName: string
+  displayName: string
+  attributeType: string
+  isValidForRead: boolean
+  optionValues?: FetchXmlOptionValue[]
+}
+
+export type FetchXmlRelationshipSummary = {
+  id: string
+  schemaName: string
+  relationshipType: "many-to-one" | "one-to-many" | "many-to-many"
+  fromEntity: string
+  toEntity: string
+  fromAttribute?: string
+  toAttribute?: string
+  displayName: string
+}
+
+export type FetchXmlEntityMetadata = FetchXmlEntitySummary & {
+  attributes: FetchXmlAttributeSummary[]
+  relationships: FetchXmlRelationshipSummary[]
+}
+
+export type FetchXmlQueryResult = {
+  rows: Record<string, unknown>[]
+  columns: string[]
+  entitySetName: string
+  webApiUrl: string
+}
+
 export type BrowserAuthStart = {
   sessionId: string
   authUrl: string

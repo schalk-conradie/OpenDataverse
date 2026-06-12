@@ -55,6 +55,7 @@ import {
 import { cn } from "@/lib/utils"
 import { AiChatModule } from "@/modules/ai-chat/AiChatModule"
 import { AutopublisherModule } from "@/modules/autopublisher/AutopublisherModule"
+import { FetchXmlBuilderModule } from "@/modules/fetchxml-builder/FetchXmlBuilderModule"
 import { getToolDefinition, toolRegistry } from "@/modules/tool-registry"
 import { useWorkspaceStore } from "@/store/workspace-store"
 
@@ -184,6 +185,10 @@ function renderToolWindow(window: ToolWindow) {
 
   if (window.toolId === "ai-chat") {
     return <AiChatModule window={window} />
+  }
+
+  if (window.toolId === "fetchxml-builder") {
+    return <FetchXmlBuilderModule window={window} />
   }
 
   const tool = getToolDefinition(window.toolId)
