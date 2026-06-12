@@ -44,6 +44,9 @@
     }
   },
   "plugins": {
+    "fs": {
+      "requireLiteralLeadingDot": false
+    },
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJGMUQ2Q0M0RDlCNzYyRjgKUldUNFlyZlp4R3dkTDNEUE9XalU0aWFkVHFmNlQzZ1JPT2xUMXVJV0Nka29wTWZnYjZPVzRIbkgK",
       "endpoints": [

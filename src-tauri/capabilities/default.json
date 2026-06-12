@@ -10,6 +10,21 @@
     "core:window:allow-set-title",
     "dialog:default",
     "fs:default",
+    {
+      "identifier": "fs:allow-watch",
+      "allow": [
+        {
+          "path": "**"
+        },
+        {
+          "path": "/"
+        },
+        {
+          "path": "/**"
+        }
+      ]
+    },
+    "fs:allow-unwatch",
     "opener:default",
     "process:default",
     "updater:default"

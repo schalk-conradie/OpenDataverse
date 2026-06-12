@@ -1,11 +1,18 @@
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { dirname, normalize } from "@tauri-apps/api/path"
+import { watch, type UnwatchFn, type WatchEvent } from "@tauri-apps/plugin-fs"
 import { openUrl } from "@tauri-apps/plugin-opener"
 import Editor from "@monaco-editor/react"
 import {
+  ChevronDown,
+  ChevronRight,
   Code2,
   Copy,
+  FileCode2,
   FileSymlink,
+  Folder,
+  FolderOpen,
   FolderSync,
   Loader2,
   Play,
@@ -79,6 +86,45 @@ type ResourceViewerDialogProps = {
   loading: boolean
 }
 
+type ResourceTreeFolder = {
+  type: "folder"
+  id: string
+  name: string
+  path: string
+  children: ResourceTreeNode[]
+  resourceCount: number
+  boundCount: number
+}
+
+type ResourceTreeFile = {
+  type: "file"
+  id: string
+  name: string
+  resource: WebResource
+}
+
+type ResourceTreeNode = ResourceTreeFolder | ResourceTreeFile
+
+type ResourceTreeRow =
+  | {
+      type: "folder"
+      folder: ResourceTreeFolder
+      depth: number
+    }
+  | {
+      type: "file"
+      file: ResourceTreeFile
+      depth: number
+    }
+
+type WatchedBinding = {
+  binding: WebResourceBinding
+  directoryPath: string
+  localPath: string
+}
+
+type AutoPublishTimer = ReturnType<typeof globalThis.setTimeout>
+
 function typeBadge(resource: WebResource) {
   const labels: Record<WebResource["type"], string> = {
     html: "HTML",
@@ -90,6 +136,183 @@ function typeBadge(resource: WebResource) {
   }
 
   return labels[resource.type]
+}
+
+function splitResourceName(name: string) {
+  const parts = name.split("/").filter(Boolean)
+
+  return parts.length > 0 ? parts : [name]
+}
+
+function sortResourceTree(nodes: ResourceTreeNode[]) {
+  nodes.sort((left, right) => {
+    if (left.type !== right.type) {
+      return left.type === "folder" ? -1 : 1
+    }
+
+    return left.name.localeCompare(right.name, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    })
+  })
+
+  for (const node of nodes) {
+    if (node.type === "folder") {
+      sortResourceTree(node.children)
+    }
+  }
+}
+
+function buildResourceTree(
+  resources: WebResource[],
+  boundResourceIds: Set<string>,
+) {
+  const root: ResourceTreeFolder = {
+    type: "folder",
+    id: "folder:",
+    name: "",
+    path: "",
+    children: [],
+    resourceCount: 0,
+    boundCount: 0,
+  }
+  const folderByPath = new Map<string, ResourceTreeFolder>()
+
+  for (const resource of resources) {
+    const parts = splitResourceName(resource.name)
+    const fileName = parts.at(-1) ?? resource.name
+    const isBound = boundResourceIds.has(resource.id)
+    let parent = root
+    const pathParts: string[] = []
+
+    root.resourceCount += 1
+    if (isBound) {
+      root.boundCount += 1
+    }
+
+    for (const part of parts.slice(0, -1)) {
+      pathParts.push(part)
+      const folderPath = pathParts.join("/")
+      let folder = folderByPath.get(folderPath)
+
+      if (!folder) {
+        folder = {
+          type: "folder",
+          id: `folder:${folderPath}`,
+          name: part,
+          path: folderPath,
+          children: [],
+          resourceCount: 0,
+          boundCount: 0,
+        }
+        folderByPath.set(folderPath, folder)
+        parent.children.push(folder)
+      }
+
+      folder.resourceCount += 1
+      if (isBound) {
+        folder.boundCount += 1
+      }
+      parent = folder
+    }
+
+    parent.children.push({
+      type: "file",
+      id: `file:${resource.id}`,
+      name: fileName,
+      resource,
+    })
+  }
+
+  sortResourceTree(root.children)
+
+  return root.children
+}
+
+function collectFolderIds(nodes: ResourceTreeNode[]) {
+  const ids: string[] = []
+
+  for (const node of nodes) {
+    if (node.type === "folder") {
+      ids.push(node.id)
+      ids.push(...collectFolderIds(node.children))
+    }
+  }
+
+  return ids
+}
+
+function flattenResourceTree(
+  nodes: ResourceTreeNode[],
+  expandedFolderIds: Set<string>,
+  forceExpanded: boolean,
+  depth = 0,
+) {
+  const rows: ResourceTreeRow[] = []
+
+  for (const node of nodes) {
+    if (node.type === "folder") {
+      rows.push({ type: "folder", folder: node, depth })
+
+      if (forceExpanded || expandedFolderIds.has(node.id)) {
+        rows.push(
+          ...flattenResourceTree(
+            node.children,
+            expandedFolderIds,
+            forceExpanded,
+            depth + 1,
+          ),
+        )
+      }
+    } else {
+      rows.push({ type: "file", file: node, depth })
+    }
+  }
+
+  return rows
+}
+
+function formatResourceCount(count: number) {
+  return count === 1 ? "1 item" : `${count} items`
+}
+
+function isAccessOnlyEvent(event: WatchEvent) {
+  return (
+    typeof event.type === "object" &&
+    "access" in event.type &&
+    !("create" in event.type) &&
+    !("modify" in event.type) &&
+    !("remove" in event.type)
+  )
+}
+
+async function normalizeFilePath(path: string) {
+  return normalize(path)
+}
+
+async function createWatchedBindings(bindings: WebResourceBinding[]) {
+  const watchedBindings = await Promise.all(
+    bindings.map(async (binding) => {
+      const localPath = await normalizeFilePath(binding.localPath)
+
+      return {
+        binding,
+        directoryPath: await dirname(localPath),
+        localPath,
+      } satisfies WatchedBinding
+    }),
+  )
+  const bindingsByDirectory = new Map<string, WatchedBinding[]>()
+
+  for (const watchedBinding of watchedBindings) {
+    const directoryBindings =
+      bindingsByDirectory.get(watchedBinding.directoryPath) ?? []
+
+    directoryBindings.push(watchedBinding)
+    bindingsByDirectory.set(watchedBinding.directoryPath, directoryBindings)
+  }
+
+  return bindingsByDirectory
 }
 
 function AuthDialog({
@@ -286,6 +509,9 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
   const [includeManaged, setIncludeManaged] = useState(false)
   const [selectedResourceId, setSelectedResourceId] = useState<string>()
   const [resourceViewerOpen, setResourceViewerOpen] = useState(false)
+  const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
+    () => new Set(),
+  )
   const [publishingIds, setPublishingIds] = useState<Set<string>>(new Set())
   const [authDialog, setAuthDialog] = useState<AuthDialogState>({
     open: false,
@@ -302,13 +528,23 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
   const environment =
     getEnvironmentById(config, window.environmentId) ??
     getEnvironmentById(config, config.currentEnvironmentId)
-  const bindings = getBindingsForEnvironment(config, environment?.id)
+  const bindings = useMemo(
+    () => getBindingsForEnvironment(config, environment?.id),
+    [config, environment?.id],
+  )
+  const autoPublishBindings = useMemo(
+    () => bindings.filter((binding) => binding.autoPublish),
+    [bindings],
+  )
+  const publishingBindingIdsRef = useRef<Set<string>>(new Set())
+  const autoPublishTimersRef = useRef<Map<string, AutoPublishTimer>>(new Map())
 
   const resourceQuery = useQuery({
     queryKey: ["webResources", environment?.id, includeManaged],
     enabled: Boolean(environment),
     queryFn: () => listWebResources(environment as DataverseEnvironment, includeManaged),
   })
+  const refetchResources = resourceQuery.refetch
 
   const selectedResource = useMemo(
     () =>
@@ -339,6 +575,52 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
       return resource.name.toLowerCase().includes(normalizedQuery)
     })
   }, [query, resourceQuery.data])
+  const boundResourceIds = useMemo(
+    () => new Set(bindings.map((binding) => binding.webResourceId)),
+    [bindings],
+  )
+  const resourceTree = useMemo(
+    () => buildResourceTree(resources, boundResourceIds),
+    [boundResourceIds, resources],
+  )
+  const folderIds = useMemo(() => collectFolderIds(resourceTree), [resourceTree])
+  const searchActive = query.trim().length > 0
+  const resourceTreeRows = useMemo(
+    () => flattenResourceTree(resourceTree, expandedFolderIds, searchActive),
+    [expandedFolderIds, resourceTree, searchActive],
+  )
+
+  function toggleFolder(folderId: string) {
+    setExpandedFolderIds((current) => {
+      const next = new Set(current)
+
+      if (next.has(folderId)) {
+        next.delete(folderId)
+      } else {
+        next.add(folderId)
+      }
+
+      return next
+    })
+  }
+
+  const setBindingPublishing = useCallback((
+    bindingId: string,
+    publishing: boolean,
+  ) => {
+    setPublishingIds((current) => {
+      const next = new Set(current)
+
+      if (publishing) {
+        next.add(bindingId)
+      } else {
+        next.delete(bindingId)
+      }
+
+      publishingBindingIdsRef.current = next
+      return next
+    })
+  }, [])
 
   async function startAuthFlow(environment: DataverseEnvironment) {
     setAuthDialog({ open: true, waiting: true })
@@ -358,7 +640,7 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
       )
       setEnvironmentAuthState(environment.id, "connected", session.message)
       setAuthDialog({ open: false, waiting: false })
-      await resourceQuery.refetch()
+      await refetchResources()
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error ?? "Sign-in failed")
@@ -397,12 +679,23 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
     setResourceViewerOpen(true)
   }
 
-  async function publishBinding(binding: WebResourceBinding) {
+  const publishBinding = useCallback(async (
+    binding: WebResourceBinding,
+    trigger: "manual" | "auto" = "manual",
+  ) => {
     if (!environment) {
       return
     }
 
-    setPublishingIds((current) => new Set(current).add(binding.id))
+    if (publishingBindingIdsRef.current.has(binding.id)) {
+      return
+    }
+
+    setBindingPublishing(binding.id, true)
+    if (trigger === "auto") {
+      setLastMessage(`Auto-publishing ${binding.webResourceName}`)
+    }
+
     try {
       const result = await publishWebResource(environment, binding)
       updateBinding(binding.id, {
@@ -410,28 +703,150 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
           resources.find((resource) => resource.id === binding.webResourceId)
             ?.version ?? binding.lastKnownVersion,
       })
-      setLastMessage(result.message)
-      await resourceQuery.refetch()
+      setLastMessage(
+        trigger === "auto"
+          ? `Auto-published ${binding.webResourceName}`
+          : result.message,
+      )
+      await refetchResources()
     } catch (error) {
       setLastMessage(
         error instanceof Error
-          ? error.message
+          ? `${trigger === "auto" ? "Auto-publish failed: " : ""}${error.message}`
           : String(error ?? "Publish failed"),
       )
     } finally {
-      setPublishingIds((current) => {
-        const next = new Set(current)
-        next.delete(binding.id)
-        return next
-      })
+      setBindingPublishing(binding.id, false)
     }
-  }
+  }, [
+    environment,
+    refetchResources,
+    resources,
+    setBindingPublishing,
+    setLastMessage,
+    updateBinding,
+  ])
+
+  const queueAutoPublish = useCallback((binding: WebResourceBinding) => {
+    const existingTimer = autoPublishTimersRef.current.get(binding.id)
+
+    if (existingTimer) {
+      globalThis.clearTimeout(existingTimer)
+    }
+
+    const timer = globalThis.setTimeout(() => {
+      autoPublishTimersRef.current.delete(binding.id)
+      void publishBinding(binding, "auto")
+    }, 300)
+
+    autoPublishTimersRef.current.set(binding.id, timer)
+  }, [publishBinding])
 
   async function publishAllBindings() {
     for (const binding of bindings) {
       await publishBinding(binding)
     }
   }
+
+  useEffect(() => {
+    const autoPublishTimers = autoPublishTimersRef.current
+
+    return () => {
+      for (const timer of autoPublishTimers.values()) {
+        globalThis.clearTimeout(timer)
+      }
+      autoPublishTimers.clear()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!environment || !isTauriRuntime() || autoPublishBindings.length === 0) {
+      return
+    }
+
+    let cancelled = false
+    let unwatch: UnwatchFn | undefined
+    const autoPublishTimers = autoPublishTimersRef.current
+
+    async function startAutoPublishWatcher() {
+      const bindingsByDirectory =
+        await createWatchedBindings(autoPublishBindings)
+      const directoryPaths = [...bindingsByDirectory.keys()]
+
+      if (cancelled || directoryPaths.length === 0) {
+        return
+      }
+
+      unwatch = await watch(
+        directoryPaths,
+        (event) => {
+          if (cancelled || isAccessOnlyEvent(event)) {
+            return
+          }
+
+          void (async () => {
+            const changedBindings = new Map<string, WebResourceBinding>()
+
+            for (const eventPath of event.paths) {
+              const changedPath = await normalizeFilePath(eventPath)
+              const changedDirectory = await dirname(changedPath)
+              const directoryBindings =
+                bindingsByDirectory.get(changedDirectory) ?? []
+
+              for (const watchedBinding of directoryBindings) {
+                if (watchedBinding.localPath === changedPath) {
+                  changedBindings.set(
+                    watchedBinding.binding.id,
+                    watchedBinding.binding,
+                  )
+                }
+              }
+            }
+
+            for (const binding of changedBindings.values()) {
+              queueAutoPublish(binding)
+            }
+          })().catch((error: unknown) => {
+            setLastMessage(
+              error instanceof Error
+                ? `Auto-publish watcher failed: ${error.message}`
+                : "Auto-publish watcher failed",
+            )
+          })
+        },
+        {
+          delayMs: 500,
+          recursive: false,
+        },
+      )
+
+      if (cancelled) {
+        unwatch()
+      }
+    }
+
+    void startAutoPublishWatcher().catch((error: unknown) => {
+      setLastMessage(
+        error instanceof Error
+          ? `Could not start auto-publish watcher: ${error.message}`
+          : "Could not start auto-publish watcher",
+      )
+    })
+
+    return () => {
+      cancelled = true
+      unwatch?.()
+
+      for (const binding of autoPublishBindings) {
+        const timer = autoPublishTimers.get(binding.id)
+
+        if (timer) {
+          globalThis.clearTimeout(timer)
+          autoPublishTimers.delete(binding.id)
+        }
+      }
+    }
+  }, [autoPublishBindings, environment, queueAutoPublish, setLastMessage])
 
   if (!environment) {
     return (
@@ -548,6 +963,26 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
             <TabsTrigger value="activity">Activity</TabsTrigger>
           </TabsList>
           <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setExpandedFolderIds(new Set(folderIds))}
+                disabled={folderIds.length === 0}
+              >
+                <FolderOpen />
+                Expand
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setExpandedFolderIds(new Set())}
+                disabled={folderIds.length === 0}
+              >
+                <Folder />
+                Collapse
+              </Button>
+            </div>
             <Label className="flex items-center gap-2 text-xs text-muted-foreground">
               Managed
               <Switch
@@ -600,7 +1035,81 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
                 )}
 
                 {!resourceQuery.isLoading &&
-                  resources.map((resource) => {
+                  resourceTreeRows.map((row) => {
+                    if (row.type === "folder") {
+                      const expanded =
+                        searchActive || expandedFolderIds.has(row.folder.id)
+
+                      return (
+                        <TableRow
+                          key={row.folder.id}
+                          aria-expanded={expanded}
+                          className={cn(
+                            "bg-muted/20 font-medium",
+                            !searchActive && "cursor-pointer",
+                          )}
+                          onClick={() => {
+                            if (!searchActive) {
+                              toggleFolder(row.folder.id)
+                            }
+                          }}
+                        >
+                          <TableCell className="max-w-96">
+                            <div
+                              className="flex min-w-0 items-center gap-1.5"
+                              style={{
+                                paddingLeft: `${row.depth * 1.25}rem`,
+                              }}
+                              title={row.folder.path}
+                            >
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-expanded={expanded}
+                                aria-label={`${
+                                  expanded ? "Collapse" : "Expand"
+                                } ${row.folder.path}`}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  toggleFolder(row.folder.id)
+                                }}
+                                disabled={searchActive}
+                              >
+                                {expanded ? <ChevronDown /> : <ChevronRight />}
+                              </Button>
+                              {expanded ? (
+                                <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                              ) : (
+                                <Folder className="size-4 shrink-0 text-muted-foreground" />
+                              )}
+                              <span className="truncate font-mono text-xs">
+                                {row.folder.name}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">Folder</Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">
+                            {formatResourceCount(row.folder.resourceCount)}
+                          </TableCell>
+                          <TableCell>
+                            {row.folder.boundCount > 0 ? (
+                              <span className="text-muted-foreground">
+                                {row.folder.boundCount} bound
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">
+                                Unbound
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right" />
+                        </TableRow>
+                      )
+                    }
+
+                    const resource = row.file.resource
                     const binding = bindings.find(
                       (item) => item.webResourceId === resource.id,
                     )
@@ -615,8 +1124,19 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
                         )}
                         onClick={() => openResourceViewer(resource)}
                       >
-                        <TableCell className="max-w-96 truncate font-mono text-xs">
-                          {resource.name}
+                        <TableCell className="max-w-96">
+                          <div
+                            className="flex min-w-0 items-center gap-1.5"
+                            style={{
+                              paddingLeft: `${row.depth * 1.25 + 1.75}rem`,
+                            }}
+                            title={resource.name}
+                          >
+                            <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
+                            <span className="truncate font-mono text-xs">
+                              {row.file.name}
+                            </span>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Badge variant="secondary">
