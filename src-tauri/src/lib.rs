@@ -33,8 +33,8 @@ const AI_DEFAULT_TOP: u32 = 25;
 const AI_MAX_TOP: u32 = 100;
 const AI_MAX_RESPONSE_BYTES: usize = 1_000_000;
 const AI_CHAT_EVENT: &str = "ai-chat-event";
-const AI_DEFAULT_MODEL: &str = "gpt-5.5";
-const AI_DEFAULT_REASONING_EFFORT: &str = "low";
+const AI_DEFAULT_MODEL: &str = "gpt-5.4-mini";
+const AI_DEFAULT_REASONING_EFFORT: &str = "medium";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

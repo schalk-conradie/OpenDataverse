@@ -12,6 +12,12 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -43,6 +49,7 @@ import {
   dataverseUrlPattern,
   getEnvironmentById,
   normalizeEnvironmentUrl,
+  type ToolId,
   type ToolWindow,
 } from "@/core/dataverse/schemas"
 import { cn } from "@/lib/utils"
@@ -192,6 +199,11 @@ function renderToolWindow(window: ToolWindow) {
   )
 }
 
+type PendingToolOpen = {
+  toolId: ToolId
+  newWindow?: boolean
+}
+
 function App() {
   const hydrate = useWorkspaceStore((state) => state.hydrate)
   const config = useWorkspaceStore((state) => state.config)
@@ -214,6 +226,7 @@ function App() {
     useState<AvailableAppUpdate | null>(null)
   const [installingUpdate, setInstallingUpdate] = useState(false)
   const [updateProgress, setUpdateProgress] = useState<AppUpdateProgress>()
+  const [pendingToolOpen, setPendingToolOpen] = useState<PendingToolOpen>()
 
   useEffect(() => {
     void hydrate()
@@ -314,9 +327,95 @@ function App() {
     () => openWindows.find((window) => window.id === activeWindowId),
     [activeWindowId, openWindows],
   )
+  const pendingTool = pendingToolOpen
+    ? getToolDefinition(pendingToolOpen.toolId)
+    : undefined
+
+  function requestEnvironmentForTool(
+    toolId: ToolId,
+    options?: Pick<PendingToolOpen, "newWindow">,
+  ) {
+    setPendingToolOpen({ toolId, newWindow: options?.newWindow })
+    setLastMessage("Select an environment before opening a tool")
+  }
+
+  function handleOpenTool(
+    toolId: ToolId,
+    options?: Pick<PendingToolOpen, "newWindow">,
+  ) {
+    if (!activeEnvironment) {
+      requestEnvironmentForTool(toolId, options)
+      return
+    }
+
+    openTool(toolId, options)
+  }
+
+  function selectPromptEnvironment(environmentId: string) {
+    const toolOpen = pendingToolOpen
+
+    selectEnvironment(environmentId)
+    setPendingToolOpen(undefined)
+
+    if (toolOpen) {
+      openTool(toolOpen.toolId, { newWindow: toolOpen.newWindow })
+    }
+  }
 
   return (
-    <main className="grid h-screen min-h-0 grid-cols-[280px_minmax(0,1fr)] bg-muted/30 text-sm text-foreground">
+    <>
+      <Dialog
+        open={Boolean(pendingToolOpen)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingToolOpen(undefined)
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select Environment</DialogTitle>
+            <DialogDescription>
+              Choose an environment before opening {pendingTool?.title ?? "a tool"}.
+            </DialogDescription>
+          </DialogHeader>
+          {config.environments.length > 0 ? (
+            <div className="grid gap-2">
+              <Label htmlFor="environment-prompt-select">Environment</Label>
+              <Select value="" onValueChange={selectPromptEnvironment}>
+                <SelectTrigger
+                  id="environment-prompt-select"
+                  className="w-full bg-background"
+                >
+                  <SelectValue placeholder="Select environment" />
+                </SelectTrigger>
+                <SelectContent>
+                  {config.environments.map((environment) => (
+                    <SelectItem key={environment.id} value={environment.id}>
+                      {environment.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Add an environment before opening tools.
+            </p>
+          )}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPendingToolOpen(undefined)}
+            >
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <main className="grid h-screen min-h-0 grid-cols-[280px_minmax(0,1fr)] bg-muted/30 text-sm text-foreground">
       <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r bg-sidebar">
         <header className="flex h-16 items-center gap-3 border-b px-4">
           <div className="flex size-9 items-center justify-center border bg-background">
@@ -392,30 +491,43 @@ function App() {
           </div>
           <div className="grid gap-1">
             {toolRegistry.map((tool) => (
-              <button
-                key={tool.id}
-                className={cn(
-                  "flex w-full min-w-0 items-center gap-3 border border-transparent px-2 py-2 text-left transition-colors hover:border-border hover:bg-background",
-                  tool.status === "planned" && "opacity-60",
-                )}
-                type="button"
-                onClick={() => openTool(tool.id)}
-              >
-                <tool.icon className="size-4 text-muted-foreground" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">
-                    {tool.title}
-                  </span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {tool.description}
-                  </span>
-                </span>
-                {tool.status === "planned" && (
-                  <Badge variant="secondary" className="shrink-0">
-                    Planned
-                  </Badge>
-                )}
-              </button>
+              <ContextMenu key={tool.id}>
+                <ContextMenuTrigger asChild>
+                  <button
+                    className={cn(
+                      "flex w-full min-w-0 items-center gap-3 border border-transparent px-2 py-2 text-left transition-colors hover:border-border hover:bg-background",
+                      tool.status === "planned" && "opacity-60",
+                    )}
+                    type="button"
+                    onClick={() => handleOpenTool(tool.id)}
+                  >
+                    <tool.icon className="size-4 text-muted-foreground" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium">
+                        {tool.title}
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {tool.description}
+                      </span>
+                    </span>
+                    {tool.status === "planned" && (
+                      <Badge variant="secondary" className="shrink-0">
+                        Planned
+                      </Badge>
+                    )}
+                  </button>
+                </ContextMenuTrigger>
+                <ContextMenuContent>
+                  <ContextMenuItem
+                    onSelect={() =>
+                      handleOpenTool(tool.id, { newWindow: true })
+                    }
+                  >
+                    <Plus className="size-3.5" />
+                    Open Second Tab
+                  </ContextMenuItem>
+                </ContextMenuContent>
+              </ContextMenu>
             ))}
           </div>
         </section>
@@ -494,7 +606,7 @@ function App() {
 
           {loadState !== "loading" && !activeWindow && (
             <div className="flex h-full items-center justify-center bg-background">
-              <Button onClick={() => openTool("autopublisher")}>
+              <Button onClick={() => handleOpenTool("autopublisher")}>
                 <SquareStack />
                 Open Tool
               </Button>
@@ -502,7 +614,8 @@ function App() {
           )}
         </div>
       </section>
-    </main>
+      </main>
+    </>
   )
 }
 

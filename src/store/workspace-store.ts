@@ -34,6 +34,10 @@ type NewEnvironmentInput = {
   url: string
 }
 
+type OpenToolOptions = {
+  newWindow?: boolean
+}
+
 type WorkspaceStore = {
   config: AppConfig
   userSettings: UserSettings
@@ -53,7 +57,7 @@ type WorkspaceStore = {
   ) => void
   setLastMessage: (message?: string) => void
   setDarkMode: (enabled: boolean) => void
-  openTool: (toolId: ToolId) => void
+  openTool: (toolId: ToolId, options?: OpenToolOptions) => void
   closeWindow: (windowId: string) => void
   activateWindow: (windowId: string) => void
   updateWindowState: (
@@ -262,10 +266,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         loadedConfig,
         loadedConfig.currentEnvironmentId,
       )
-      const firstWindow = createToolWindow(
-        "autopublisher",
-        currentEnvironment?.id,
-      )
+      const firstWindow = currentEnvironment
+        ? createToolWindow("autopublisher", currentEnvironment.id)
+        : undefined
 
       set({
         config: currentEnvironment
@@ -273,8 +276,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           : { ...loadedConfig, currentEnvironmentId: undefined },
         userSettings: loadedUserSettings,
         loadState: "ready",
-        openWindows: [firstWindow],
-        activeWindowId: firstWindow.id,
+        openWindows: firstWindow ? [firstWindow] : [],
+        activeWindowId: firstWindow?.id,
         lastMessage: undefined,
       })
     } catch (error) {
@@ -389,7 +392,15 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     persistUserSettings(nextSettings, set)
   },
 
-  openTool(toolId) {
+  openTool(toolId, options) {
+    const config = get().config
+    const environment = getEnvironmentById(config, config.currentEnvironmentId)
+
+    if (!environment) {
+      set({ lastMessage: "Select an environment before opening a tool" })
+      return
+    }
+
     const tool = getToolDefinition(toolId)
 
     if (tool.status === "planned") {
@@ -397,7 +408,19 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       return
     }
 
-    const window = createToolWindow(toolId, get().config.currentEnvironmentId)
+    if (!options?.newWindow) {
+      const existingWindow = get().openWindows.find(
+        (window) =>
+          window.toolId === toolId && window.environmentId === environment.id,
+      )
+
+      if (existingWindow) {
+        set({ activeWindowId: existingWindow.id, lastMessage: undefined })
+        return
+      }
+    }
+
+    const window = createToolWindow(toolId, environment.id)
     set({
       openWindows: [...get().openWindows, window],
       activeWindowId: window.id,
