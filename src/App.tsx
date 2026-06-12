@@ -30,6 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import { appNightlyLabel, appWindowTitle } from "@/core/build-info"
 import {
   checkForAppUpdate,
   installAvailableAppUpdate,
@@ -158,6 +159,20 @@ function App() {
   }, [hydrate])
 
   useEffect(() => {
+    document.title = appWindowTitle
+
+    if (!("__TAURI_INTERNALS__" in window)) {
+      return
+    }
+
+    void import("@tauri-apps/api/window")
+      .then(({ getCurrentWindow }) =>
+        getCurrentWindow().setTitle(appWindowTitle),
+      )
+      .catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
     let cancelled = false
 
     async function refreshAvailableUpdate() {
@@ -252,6 +267,9 @@ function App() {
                   </span>
                 </button>
               )}
+            </div>
+            <div className="mt-0.5 truncate text-xs text-muted-foreground">
+              {appNightlyLabel}
             </div>
           </div>
         </header>
