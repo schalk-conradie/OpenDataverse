@@ -19,7 +19,9 @@ use url::Url;
 use uuid::Uuid;
 
 const CONFIG_FILE_NAME: &str = "config.json";
-const APP_HOME_DIR_NAME: &str = ".OpenDataverse";
+const USER_SETTINGS_FILE_NAME: &str = "user-settings.json";
+const APP_HOME_DIR_NAME: &str = ".openDataverse";
+const LEGACY_APP_HOME_DIR_NAME: &str = ".OpenDataverse";
 const TOKENS_DIR_NAME: &str = "tokens";
 const CLIENT_ID: &str = "51f81489-12ee-4a9e-aaae-a2591f45987d";
 const AUTHORITY_BASE: &str = "https://login.microsoftonline.com/common";
@@ -66,6 +68,20 @@ impl Default for AppConfig {
       bindings: Vec::new(),
     }
   }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppearanceSettings {
+  #[serde(default)]
+  dark_mode: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UserSettings {
+  #[serde(default)]
+  appearance: AppearanceSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -286,6 +302,16 @@ fn opendataverse_dir(app: &AppHandle) -> Result<PathBuf, String> {
   Ok(dir)
 }
 
+fn legacy_opendataverse_dir(app: &AppHandle) -> Result<PathBuf, String> {
+  Ok(
+    app
+      .path()
+      .home_dir()
+      .map_err(|error| error.to_string())?
+      .join(LEGACY_APP_HOME_DIR_NAME),
+  )
+}
+
 fn legacy_app_config_dir(app: &AppHandle) -> Result<PathBuf, String> {
   app.path().app_config_dir().map_err(|error| error.to_string())
 }
@@ -299,10 +325,27 @@ fn legacy_config_path(app: &AppHandle) -> Result<PathBuf, String> {
   Ok(legacy_app_config_dir(app)?.join(CONFIG_FILE_NAME))
 }
 
+fn legacy_home_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+  Ok(legacy_opendataverse_dir(app)?.join(CONFIG_FILE_NAME))
+}
+
+fn user_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+  let dir = opendataverse_dir(app)?;
+  Ok(dir.join(USER_SETTINGS_FILE_NAME))
+}
+
 fn token_path(app: &AppHandle, environment_id: &str) -> Result<PathBuf, String> {
   let dir = opendataverse_dir(app)?.join(TOKENS_DIR_NAME);
   fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
   Ok(dir.join(format!("token-{}.json", environment_id)))
+}
+
+fn legacy_home_token_path(app: &AppHandle, environment_id: &str) -> Result<PathBuf, String> {
+  Ok(
+    legacy_opendataverse_dir(app)?
+      .join(TOKENS_DIR_NAME)
+      .join(format!("token-{}.json", environment_id)),
+  )
 }
 
 fn legacy_token_path(app: &AppHandle, environment_id: &str) -> Result<PathBuf, String> {
@@ -324,6 +367,14 @@ fn load_token(app: &AppHandle, environment_id: &str) -> Result<StoredToken, Stri
   let data = match fs::read_to_string(&path) {
     Ok(data) => data,
     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+      let legacy_home_path = legacy_home_token_path(app, environment_id)?;
+      if legacy_home_path.exists() {
+        let legacy_data =
+          fs::read_to_string(&legacy_home_path).map_err(|error| error.to_string())?;
+        fs::write(&path, &legacy_data).map_err(|write_error| write_error.to_string())?;
+        return serde_json::from_str(&legacy_data).map_err(|error| error.to_string());
+      }
+
       let legacy_path = legacy_token_path(app, environment_id)?;
       let legacy_data = fs::read_to_string(&legacy_path).map_err(|legacy_error| {
         format!(
@@ -518,6 +569,15 @@ fn load_config(app: AppHandle) -> Result<AppConfig, String> {
   let path = config_path(&app)?;
 
   if !path.exists() {
+    let legacy_home_path = legacy_home_config_path(&app)?;
+    if legacy_home_path.exists() {
+      let legacy_data = fs::read_to_string(&legacy_home_path).map_err(|error| error.to_string())?;
+      if !legacy_data.trim().is_empty() {
+        fs::write(&path, &legacy_data).map_err(|error| error.to_string())?;
+        return serde_json::from_str(&legacy_data).map_err(|error| error.to_string());
+      }
+    }
+
     let legacy_path = legacy_config_path(&app)?;
     if legacy_path.exists() {
       let legacy_data = fs::read_to_string(&legacy_path).map_err(|error| error.to_string())?;
@@ -543,6 +603,30 @@ fn load_config(app: AppHandle) -> Result<AppConfig, String> {
 fn save_config(app: AppHandle, config: AppConfig) -> Result<(), String> {
   let path = config_path(&app)?;
   let data = serde_json::to_string_pretty(&config).map_err(|error| error.to_string())?;
+  fs::write(path, data).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn load_user_settings(app: AppHandle) -> Result<UserSettings, String> {
+  let path = user_settings_path(&app)?;
+
+  if !path.exists() {
+    return Ok(UserSettings::default());
+  }
+
+  let data = fs::read_to_string(path).map_err(|error| error.to_string())?;
+
+  if data.trim().is_empty() {
+    return Ok(UserSettings::default());
+  }
+
+  serde_json::from_str(&data).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn save_user_settings(app: AppHandle, settings: UserSettings) -> Result<(), String> {
+  let path = user_settings_path(&app)?;
+  let data = serde_json::to_string_pretty(&settings).map_err(|error| error.to_string())?;
   fs::write(path, data).map_err(|error| error.to_string())
 }
 
@@ -873,6 +957,8 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       load_config,
       save_config,
+      load_user_settings,
+      save_user_settings,
       start_browser_auth,
       complete_browser_auth,
       check_dataverse_connection,

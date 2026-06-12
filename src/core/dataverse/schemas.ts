@@ -41,6 +41,12 @@ export const appConfigSchema = z.object({
   bindings: z.array(webResourceBindingSchema),
 })
 
+export const userSettingsSchema = z.object({
+  appearance: z.object({
+    darkMode: z.boolean(),
+  }),
+})
+
 export const defaultAppConfig: AppConfig = {
   currentEnvironmentId: undefined,
   publisherPrefix: "new",
@@ -48,10 +54,17 @@ export const defaultAppConfig: AppConfig = {
   bindings: [],
 }
 
+export const defaultUserSettings: UserSettings = {
+  appearance: {
+    darkMode: false,
+  },
+}
+
 export type AuthState = z.infer<typeof authStateSchema>
 export type DataverseEnvironment = z.infer<typeof dataverseEnvironmentSchema>
 export type WebResourceBinding = z.infer<typeof webResourceBindingSchema>
 export type AppConfig = z.infer<typeof appConfigSchema>
+export type UserSettings = z.infer<typeof userSettingsSchema>
 
 export type WebResource = {
   id: string

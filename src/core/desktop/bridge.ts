@@ -11,6 +11,9 @@ import {
   type WebResourceBinding,
   type WebResourceContent,
   defaultAppConfig,
+  defaultUserSettings,
+  userSettingsSchema,
+  type UserSettings,
 } from "@/core/dataverse/schemas"
 
 declare global {
@@ -20,6 +23,7 @@ declare global {
 }
 
 const storageKey = "opendataverse.config"
+const userSettingsStorageKey = "opendataverse.user-settings"
 
 export function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
@@ -48,6 +52,34 @@ export async function saveAppConfig(config: AppConfig) {
   }
 
   window.localStorage.setItem(storageKey, JSON.stringify(parsed, null, 2))
+}
+
+export async function loadUserSettings() {
+  if (isTauriRuntime()) {
+    const settings = await invoke<unknown>("load_user_settings")
+    return userSettingsSchema.parse(settings)
+  }
+
+  const stored = window.localStorage.getItem(userSettingsStorageKey)
+  if (!stored) {
+    return defaultUserSettings
+  }
+
+  return userSettingsSchema.catch(defaultUserSettings).parse(JSON.parse(stored))
+}
+
+export async function saveUserSettings(settings: UserSettings) {
+  const parsed = userSettingsSchema.parse(settings)
+
+  if (isTauriRuntime()) {
+    await invoke("save_user_settings", { settings: parsed })
+    return
+  }
+
+  window.localStorage.setItem(
+    userSettingsStorageKey,
+    JSON.stringify(parsed, null, 2),
+  )
 }
 
 export async function startBrowserAuth(

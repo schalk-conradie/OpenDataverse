@@ -3,18 +3,22 @@ import { create } from "zustand"
 import {
   checkDataverseConnection,
   loadAppConfig,
+  loadUserSettings,
   saveAppConfig,
+  saveUserSettings,
 } from "@/core/desktop/bridge"
 import {
   createId,
   dataverseEnvironmentSchema,
   defaultAppConfig,
+  defaultUserSettings,
   getEnvironmentById,
   normalizeEnvironmentUrl,
   type AppConfig,
   type DataverseEnvironment,
   type ToolId,
   type ToolWindow,
+  type UserSettings,
   type WebResourceBinding,
 } from "@/core/dataverse/schemas"
 import { getToolDefinition } from "@/modules/tool-registry"
@@ -28,6 +32,7 @@ type NewEnvironmentInput = {
 
 type WorkspaceStore = {
   config: AppConfig
+  userSettings: UserSettings
   loadState: LoadState
   openWindows: ToolWindow[]
   activeWindowId?: string
@@ -42,6 +47,7 @@ type WorkspaceStore = {
     message?: string,
   ) => void
   setLastMessage: (message?: string) => void
+  setDarkMode: (enabled: boolean) => void
   openTool: (toolId: ToolId) => void
   closeWindow: (windowId: string) => void
   activateWindow: (windowId: string) => void
@@ -50,6 +56,7 @@ type WorkspaceStore = {
     bindingId: string,
     changes: Partial<Omit<WebResourceBinding, "id">>,
   ) => void
+  removeBinding: (bindingId: string) => void
 }
 
 function createToolWindow(toolId: ToolId, environmentId?: string): ToolWindow {
@@ -73,6 +80,18 @@ function persistConfig(config: AppConfig, set: (state: Partial<WorkspaceStore>) 
   })
 }
 
+function persistUserSettings(
+  settings: UserSettings,
+  set: (state: Partial<WorkspaceStore>) => void,
+) {
+  void saveUserSettings(settings).catch((error: unknown) => {
+    set({
+      lastMessage:
+        error instanceof Error ? error.message : "Could not save user settings",
+    })
+  })
+}
+
 function applyEnvironmentAuthState(
   config: AppConfig,
   environmentId: string,
@@ -90,6 +109,7 @@ function applyEnvironmentAuthState(
 
 export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   config: defaultAppConfig,
+  userSettings: defaultUserSettings,
   loadState: "idle",
   openWindows: [],
   activeWindowId: undefined,
@@ -99,7 +119,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     set({ loadState: "loading" })
 
     try {
-      const loadedConfig = await loadAppConfig()
+      const [loadedConfig, loadedUserSettings] = await Promise.all([
+        loadAppConfig(),
+        loadUserSettings(),
+      ])
       const currentEnvironment = getEnvironmentById(
         loadedConfig,
         loadedConfig.currentEnvironmentId,
@@ -113,6 +136,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         config: currentEnvironment
           ? loadedConfig
           : { ...loadedConfig, currentEnvironmentId: undefined },
+        userSettings: loadedUserSettings,
         loadState: "ready",
         openWindows: [firstWindow],
         activeWindowId: firstWindow.id,
@@ -122,6 +146,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       set({
         loadState: "error",
         config: defaultAppConfig,
+        userSettings: defaultUserSettings,
         lastMessage:
           error instanceof Error ? error.message : "Could not load app config",
       })
@@ -225,6 +250,20 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     set({ lastMessage: message })
   },
 
+  setDarkMode(enabled) {
+    const settings = get().userSettings
+    const nextSettings = {
+      ...settings,
+      appearance: {
+        ...settings.appearance,
+        darkMode: enabled,
+      },
+    }
+
+    set({ userSettings: nextSettings, lastMessage: undefined })
+    persistUserSettings(nextSettings, set)
+  },
+
   openTool(toolId) {
     const tool = getToolDefinition(toolId)
 
@@ -290,6 +329,26 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       ),
     }
     set({ config: nextConfig, lastMessage: "Binding updated" })
+    persistConfig(nextConfig, set)
+  },
+
+  removeBinding(bindingId) {
+    const config = get().config
+    const binding = config.bindings.find((item) => item.id === bindingId)
+
+    if (!binding) {
+      return
+    }
+
+    const nextConfig = {
+      ...config,
+      bindings: config.bindings.filter((item) => item.id !== bindingId),
+    }
+
+    set({
+      config: nextConfig,
+      lastMessage: `Unbound ${binding.webResourceName}`,
+    })
     persistConfig(nextConfig, set)
   },
 }))

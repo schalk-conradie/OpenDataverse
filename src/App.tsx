@@ -30,6 +30,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { appNightlyLabel, appWindowTitle } from "@/core/build-info"
 import {
   checkForAppUpdate,
@@ -119,6 +121,54 @@ function EnvironmentDialog() {
   )
 }
 
+function SettingsDialog() {
+  const darkMode = useWorkspaceStore(
+    (state) => state.userSettings.appearance.darkMode,
+  )
+  const setDarkMode = useWorkspaceStore((state) => state.setDarkMode)
+
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="outline" className="w-full justify-start" size="sm">
+          <Settings />
+          Settings
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Settings</DialogTitle>
+          <DialogDescription className="sr-only">
+            Configure OpenDataverse settings.
+          </DialogDescription>
+        </DialogHeader>
+        <Tabs defaultValue="appearance">
+          <TabsList variant="line" className="w-full justify-start">
+            <TabsTrigger value="appearance" className="flex-none px-2">
+              Appearance
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="appearance" className="pt-3">
+            <div className="flex min-h-12 items-center justify-between gap-4 border bg-background px-3">
+              <Label
+                htmlFor="settings-dark-mode"
+                className="text-sm font-medium"
+              >
+                Dark mode
+              </Label>
+              <Switch
+                id="settings-dark-mode"
+                checked={darkMode}
+                onCheckedChange={setDarkMode}
+              />
+            </div>
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function renderToolWindow(window: ToolWindow) {
   if (window.toolId === "autopublisher") {
     return <AutopublisherModule window={window} />
@@ -149,6 +199,9 @@ function App() {
   const closeWindow = useWorkspaceStore((state) => state.closeWindow)
   const activateWindow = useWorkspaceStore((state) => state.activateWindow)
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
+  const darkMode = useWorkspaceStore(
+    (state) => state.userSettings.appearance.darkMode,
+  )
   const [availableUpdate, setAvailableUpdate] =
     useState<AvailableAppUpdate | null>(null)
   const [installingUpdate, setInstallingUpdate] = useState(false)
@@ -157,6 +210,10 @@ function App() {
   useEffect(() => {
     void hydrate()
   }, [hydrate])
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", darkMode)
+  }, [darkMode])
 
   useEffect(() => {
     document.title = appWindowTitle
@@ -341,10 +398,7 @@ function App() {
         </section>
 
         <footer className="border-t p-3">
-          <Button variant="outline" className="w-full justify-start" size="sm">
-            <Settings />
-            Settings
-          </Button>
+          <SettingsDialog />
           {lastMessage && (
             <>
               <Separator className="my-3" />

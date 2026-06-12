@@ -18,6 +18,7 @@ import {
   Play,
   RefreshCw,
   Search,
+  Unlink,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -520,6 +521,7 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
   const config = useWorkspaceStore((state) => state.config)
   const addBinding = useWorkspaceStore((state) => state.addBinding)
   const updateBinding = useWorkspaceStore((state) => state.updateBinding)
+  const removeBinding = useWorkspaceStore((state) => state.removeBinding)
   const checkConnection = useWorkspaceStore((state) => state.connectEnvironment)
   const setEnvironmentAuthState = useWorkspaceStore(
     (state) => state.setEnvironmentAuthState,
@@ -672,6 +674,17 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
       lastKnownVersion: resource.version,
       autoPublish: true,
     })
+  }
+
+  function unbindResource(binding: WebResourceBinding) {
+    const pendingTimer = autoPublishTimersRef.current.get(binding.id)
+
+    if (pendingTimer) {
+      globalThis.clearTimeout(pendingTimer)
+      autoPublishTimersRef.current.delete(binding.id)
+    }
+
+    removeBinding(binding.id)
   }
 
   function openResourceViewer(resource: WebResource) {
@@ -1171,17 +1184,33 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
                             >
                               <Code2 />
                             </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                void bindResource(resource)
-                              }}
-                            >
-                              <FileSymlink />
-                              Bind
-                            </Button>
+                            {binding ? (
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                aria-label={`Unbind ${resource.name}`}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  unbindResource(binding)
+                                }}
+                                disabled={publishingIds.has(binding.id)}
+                              >
+                                <Unlink />
+                                Unbind
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  void bindResource(resource)
+                                }}
+                              >
+                                <FileSymlink />
+                                Bind
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -1211,7 +1240,7 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
                 <TableHead>Web Resource</TableHead>
                 <TableHead>Version</TableHead>
                 <TableHead>Auto</TableHead>
-                <TableHead className="text-right">Action</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1233,19 +1262,30 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
                     />
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void publishBinding(binding)}
-                      disabled={publishingIds.has(binding.id)}
-                    >
-                      {publishingIds.has(binding.id) ? (
-                        <Loader2 className="animate-spin" />
-                      ) : (
-                        <Play />
-                      )}
-                      Publish
-                    </Button>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void publishBinding(binding)}
+                        disabled={publishingIds.has(binding.id)}
+                      >
+                        {publishingIds.has(binding.id) ? (
+                          <Loader2 className="animate-spin" />
+                        ) : (
+                          <Play />
+                        )}
+                        Publish
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => unbindResource(binding)}
+                        disabled={publishingIds.has(binding.id)}
+                      >
+                        <Unlink />
+                        Unbind
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
