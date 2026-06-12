@@ -200,6 +200,9 @@ function App() {
   const activeWindowId = useWorkspaceStore((state) => state.activeWindowId)
   const lastMessage = useWorkspaceStore((state) => state.lastMessage)
   const selectEnvironment = useWorkspaceStore((state) => state.selectEnvironment)
+  const heartbeatEnvironment = useWorkspaceStore(
+    (state) => state.heartbeatEnvironment,
+  )
   const openTool = useWorkspaceStore((state) => state.openTool)
   const closeWindow = useWorkspaceStore((state) => state.closeWindow)
   const activateWindow = useWorkspaceStore((state) => state.activateWindow)
@@ -219,6 +222,21 @@ function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode)
   }, [darkMode])
+
+  useEffect(() => {
+    const environmentId = config.currentEnvironmentId
+    if (loadState !== "ready" || !environmentId) {
+      return
+    }
+
+    const interval = window.setInterval(() => {
+      void heartbeatEnvironment(environmentId)
+    }, 10 * 1000)
+
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [config.currentEnvironmentId, heartbeatEnvironment, loadState])
 
   useEffect(() => {
     document.title = appWindowTitle

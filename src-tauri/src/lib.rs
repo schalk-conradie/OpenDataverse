@@ -34,7 +34,7 @@ const AI_MAX_TOP: u32 = 100;
 const AI_MAX_RESPONSE_BYTES: usize = 1_000_000;
 const AI_CHAT_EVENT: &str = "ai-chat-event";
 const AI_DEFAULT_MODEL: &str = "gpt-5.5";
-const AI_DEFAULT_REASONING_EFFORT: &str = "xhigh";
+const AI_DEFAULT_REASONING_EFFORT: &str = "low";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -797,11 +797,20 @@ fn ai_node_command() -> String {
 
 fn spawn_ai_sidecar(app: &AppHandle) -> Result<AiSidecarProcess, String> {
   let script_path = ai_sidecar_script_path(app)?;
-  let mut child = Command::new(ai_node_command())
+  let home_dir = app.path().home_dir().map_err(|error| error.to_string())?;
+  let codex_home = env::var_os("CODEX_HOME")
+    .map(PathBuf::from)
+    .unwrap_or_else(|| home_dir.join(".codex"));
+  let mut command = Command::new(ai_node_command());
+  command
     .arg(&script_path)
+    .env("HOME", &home_dir)
+    .env("CODEX_HOME", &codex_home)
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
-    .stderr(Stdio::null())
+    .stderr(Stdio::null());
+
+  let mut child = command
     .spawn()
     .map_err(|error| {
       format!(
@@ -954,6 +963,23 @@ fn user_safe_ai_error(error: String) -> String {
 
   if lower.contains("token refresh failed") || lower.contains("invalid_grant") {
     return "Reconnect this environment.".to_string();
+  }
+
+  redacted
+}
+
+fn user_safe_codex_error(error: String) -> String {
+  let redacted = redact_sensitive_error(&error);
+  let lower = redacted.to_lowercase();
+
+  if lower.contains("token was not found")
+    || lower.contains("not logged in")
+    || lower.contains("auth.json")
+    || lower.contains("codex login")
+    || lower.contains("codex_access_token")
+    || lower.contains("codex_api_key")
+  {
+    return "Codex could not read your local Codex credentials. OpenDataverse passes CODEX_HOME to the AI sidecar; if this continues, run `codex login` once and restart OpenDataverse.".to_string();
   }
 
   redacted
@@ -1281,7 +1307,8 @@ fn run_codex_turn(
       "toolResults": tool_results,
     }),
     |_event| {},
-  )?;
+  )
+  .map_err(user_safe_codex_error)?;
 
   serde_json::from_value(result).map_err(|error| format!("Parse Codex sidecar response: {error}"))
 }

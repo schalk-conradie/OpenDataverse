@@ -39,6 +39,7 @@ export type AiChatWindowState = {
   composerValue: string
   running: boolean
   error?: string
+  settingsVersion?: number
 }
 
 export type AiChatStreamEvent = {

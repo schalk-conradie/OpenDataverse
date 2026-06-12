@@ -219,9 +219,10 @@ const markdownComponents: Components = {
 
 const defaultAiChatState: AiChatWindowState = {
   model: "gpt-5.5",
-  reasoningEffort: "xhigh",
+  reasoningEffort: "low",
   composerValue: "",
   running: false,
+  settingsVersion: 2,
 }
 
 function isAiChatModel(value: unknown): value is AiChatModel {
@@ -237,8 +238,12 @@ function getAiChatWindowState(window: ToolWindow): AiChatWindowState {
   const model = isAiChatModel(candidate?.model)
     ? candidate.model
     : defaultAiChatState.model
-  const reasoningEffort = isAiReasoningEffort(candidate?.reasoningEffort)
-    ? candidate.reasoningEffort
+  const legacyDefaultReasoning =
+    candidate?.settingsVersion === undefined &&
+    candidate?.reasoningEffort === "xhigh"
+  const reasoningEffort =
+    isAiReasoningEffort(candidate?.reasoningEffort) && !legacyDefaultReasoning
+      ? candidate.reasoningEffort
     : defaultAiChatState.reasoningEffort
 
   return {

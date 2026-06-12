@@ -1,11 +1,15 @@
 import { create } from "zustand"
+import { openUrl } from "@tauri-apps/plugin-opener"
 
 import {
   checkDataverseConnection,
+  completeBrowserAuth,
+  isTauriRuntime,
   loadAppConfig,
   loadUserSettings,
   saveAppConfig,
   saveUserSettings,
+  startBrowserAuth,
 } from "@/core/desktop/bridge"
 import {
   createId,
@@ -41,6 +45,7 @@ type WorkspaceStore = {
   addEnvironment: (input: NewEnvironmentInput) => void
   selectEnvironment: (environmentId: string) => void
   connectEnvironment: (environmentId: string) => Promise<void>
+  heartbeatEnvironment: (environmentId: string) => Promise<void>
   setEnvironmentAuthState: (
     environmentId: string,
     authState: DataverseEnvironment["authState"],
@@ -62,6 +67,8 @@ type WorkspaceStore = {
   ) => void
   removeBinding: (bindingId: string) => void
 }
+
+const activeConnectionChecks = new Set<string>()
 
 function createToolWindow(toolId: ToolId, environmentId?: string): ToolWindow {
   const tool = getToolDefinition(toolId)
@@ -108,6 +115,130 @@ function applyEnvironmentAuthState(
         ? { ...environment, authState }
         : environment,
     ),
+  }
+}
+
+function authStateForConnectionError(
+  error: unknown,
+): DataverseEnvironment["authState"] {
+  const message = error instanceof Error ? error.message : String(error ?? "")
+  const lower = message.toLowerCase()
+
+  if (
+    lower.includes("token was not found") ||
+    lower.includes("no refresh token") ||
+    lower.includes("sign in again") ||
+    lower.includes("invalid_grant") ||
+    lower.includes("token refresh failed")
+  ) {
+    return "expired"
+  }
+
+  return "error"
+}
+
+function connectionErrorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : String(error ?? fallback)
+}
+
+async function updateEnvironmentConnection(
+  environmentId: string,
+  options: {
+    get: () => WorkspaceStore
+    set: (state: Partial<WorkspaceStore>) => void
+    interactive: boolean
+    showConnecting: boolean
+  },
+) {
+  if (activeConnectionChecks.has(environmentId)) {
+    return
+  }
+
+  const { get, set, interactive, showConnecting } = options
+  const environment = getEnvironmentById(get().config, environmentId)
+  if (!environment) {
+    return
+  }
+
+  activeConnectionChecks.add(environmentId)
+
+  if (showConnecting) {
+    const connectingConfig = applyEnvironmentAuthState(
+      get().config,
+      environmentId,
+      "connecting",
+    )
+    set({ config: connectingConfig, lastMessage: "Checking Dataverse connection" })
+    persistConfig(connectingConfig, set)
+  }
+
+  try {
+    const session = await checkDataverseConnection(environment)
+    const nextState =
+      session.status === "connected" ? "connected" : "disconnected"
+    const nextConfig = applyEnvironmentAuthState(
+      get().config,
+      environmentId,
+      nextState,
+    )
+    set({ config: nextConfig, lastMessage: session.message })
+    persistConfig(nextConfig, set)
+  } catch (checkError) {
+    if (!interactive) {
+      const currentEnvironment = getEnvironmentById(get().config, environmentId)
+      const nextState = authStateForConnectionError(checkError)
+      const nextConfig = applyEnvironmentAuthState(
+        get().config,
+        environmentId,
+        nextState,
+      )
+
+      set({
+        config: nextConfig,
+        lastMessage:
+          currentEnvironment?.authState === "connected" ||
+          currentEnvironment?.authState === "connecting"
+            ? connectionErrorMessage(checkError, "Dataverse heartbeat failed")
+            : get().lastMessage,
+      })
+      persistConfig(nextConfig, set)
+      activeConnectionChecks.delete(environmentId)
+      return
+    }
+
+    try {
+      const browserAuth = await startBrowserAuth(environment)
+      set({ lastMessage: "Opening browser sign-in" })
+
+      if (isTauriRuntime()) {
+        await openUrl(browserAuth.authUrl)
+      }
+
+      const session = await completeBrowserAuth(
+        environment,
+        browserAuth.sessionId,
+      )
+      const nextConfig = applyEnvironmentAuthState(
+        get().config,
+        environmentId,
+        "connected",
+      )
+      set({ config: nextConfig, lastMessage: session.message })
+      persistConfig(nextConfig, set)
+    } catch (authError) {
+      const nextConfig = applyEnvironmentAuthState(
+        get().config,
+        environmentId,
+        authStateForConnectionError(authError),
+      )
+      set({
+        config: nextConfig,
+        lastMessage: connectionErrorMessage(authError, "Sign-in failed"),
+      })
+      persistConfig(nextConfig, set)
+    }
+  } finally {
+    activeConnectionChecks.delete(environmentId)
   }
 }
 
@@ -186,6 +317,12 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
     set({ config: nextConfig, lastMessage: "Environment added" })
     persistConfig(nextConfig, set)
+    void updateEnvironmentConnection(parsed.data.id, {
+      get,
+      set,
+      interactive: true,
+      showConnecting: true,
+    })
   },
 
   selectEnvironment(environmentId) {
@@ -198,46 +335,30 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     const nextConfig = { ...config, currentEnvironmentId: environmentId }
     set({ config: nextConfig, lastMessage: undefined })
     persistConfig(nextConfig, set)
+    void updateEnvironmentConnection(environmentId, {
+      get,
+      set,
+      interactive: true,
+      showConnecting: true,
+    })
   },
 
   async connectEnvironment(environmentId) {
-    const environment = getEnvironmentById(get().config, environmentId)
-    if (!environment) {
-      return
-    }
+    await updateEnvironmentConnection(environmentId, {
+      get,
+      set,
+      interactive: true,
+      showConnecting: true,
+    })
+  },
 
-    const connectingConfig = applyEnvironmentAuthState(
-      get().config,
-      environmentId,
-      "connecting",
-    )
-    set({ config: connectingConfig, lastMessage: "Opening browser sign-in" })
-    persistConfig(connectingConfig, set)
-
-    try {
-      const session = await checkDataverseConnection(environment)
-      const nextState =
-        session.status === "connected" ? "connected" : "disconnected"
-      const nextConfig = applyEnvironmentAuthState(
-        get().config,
-        environmentId,
-        nextState,
-      )
-      set({ config: nextConfig, lastMessage: session.message })
-      persistConfig(nextConfig, set)
-    } catch (error) {
-      const nextConfig = applyEnvironmentAuthState(
-        get().config,
-        environmentId,
-        "error",
-      )
-      set({
-        config: nextConfig,
-        lastMessage:
-          error instanceof Error ? error.message : "Could not start sign-in",
-      })
-      persistConfig(nextConfig, set)
-    }
+  async heartbeatEnvironment(environmentId) {
+    await updateEnvironmentConnection(environmentId, {
+      get,
+      set,
+      interactive: false,
+      showConnecting: false,
+    })
   },
 
   setEnvironmentAuthState(environmentId, authState, message) {
