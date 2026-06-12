@@ -104,6 +104,7 @@ export type PublishResult = {
 
 export type ToolId =
   | "autopublisher"
+  | "ai-chat"
   | "fetchxml-builder"
   | "solution-explorer"
 
@@ -113,6 +114,7 @@ export type ToolWindow = {
   environmentId?: string
   title: string
   createdAt: string
+  state?: Record<string, unknown>
 }
 
 export function createId(prefix: string) {

@@ -46,6 +46,7 @@ import {
   type ToolWindow,
 } from "@/core/dataverse/schemas"
 import { cn } from "@/lib/utils"
+import { AiChatModule } from "@/modules/ai-chat/AiChatModule"
 import { AutopublisherModule } from "@/modules/autopublisher/AutopublisherModule"
 import { getToolDefinition, toolRegistry } from "@/modules/tool-registry"
 import { useWorkspaceStore } from "@/store/workspace-store"
@@ -172,6 +173,10 @@ function SettingsDialog() {
 function renderToolWindow(window: ToolWindow) {
   if (window.toolId === "autopublisher") {
     return <AutopublisherModule window={window} />
+  }
+
+  if (window.toolId === "ai-chat") {
+    return <AiChatModule window={window} />
   }
 
   const tool = getToolDefinition(window.toolId)

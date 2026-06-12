@@ -51,6 +51,10 @@ type WorkspaceStore = {
   openTool: (toolId: ToolId) => void
   closeWindow: (windowId: string) => void
   activateWindow: (windowId: string) => void
+  updateWindowState: (
+    windowId: string,
+    state: NonNullable<ToolWindow["state"]>,
+  ) => void
   addBinding: (binding: Omit<WebResourceBinding, "id">) => void
   updateBinding: (
     bindingId: string,
@@ -296,6 +300,22 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   activateWindow(windowId) {
     set({ activeWindowId: windowId })
+  },
+
+  updateWindowState(windowId, state) {
+    set({
+      openWindows: get().openWindows.map((window) =>
+        window.id === windowId
+          ? {
+              ...window,
+              state: {
+                ...window.state,
+                ...state,
+              },
+            }
+          : window,
+      ),
+    })
   },
 
   addBinding(binding) {
