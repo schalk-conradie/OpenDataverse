@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 
 function getCommitHash() {
@@ -20,11 +21,24 @@ function getCommitHash() {
   }
 }
 
+function getPackageVersion() {
+  try {
+    const packageJson = JSON.parse(
+      readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'),
+    ) as { version?: string }
+
+    return packageJson.version ?? '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   define: {
     __APP_COMMIT_HASH__: JSON.stringify(getCommitHash()),
+    __APP_VERSION__: JSON.stringify(getPackageVersion()),
   },
   resolve: {
     alias: {

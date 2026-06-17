@@ -10,6 +10,7 @@ import {
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ChangelogContent, ChangelogDialog } from "@/components/changelog"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -37,7 +38,13 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { appNightlyLabel, appWindowTitle } from "@/core/build-info"
+import { appNightlyLabel, appVersion, appWindowTitle } from "@/core/build-info"
+import {
+  getChangelogBuildId,
+  markChangelogBuildSeen,
+  shouldShowChangelogForBuild,
+} from "@/core/changelog"
+import { getRunningAppVersion } from "@/core/desktop/app-version"
 import {
   checkForAppUpdate,
   installAvailableAppUpdate,
@@ -129,7 +136,7 @@ function EnvironmentDialog() {
   )
 }
 
-function SettingsDialog() {
+function SettingsDialog({ appVersion }: { appVersion: string }) {
   const darkMode = useWorkspaceStore(
     (state) => state.userSettings.appearance.darkMode,
   )
@@ -155,6 +162,9 @@ function SettingsDialog() {
             <TabsTrigger value="appearance" className="flex-none px-2">
               Appearance
             </TabsTrigger>
+            <TabsTrigger value="changelog" className="flex-none px-2">
+              Changelog
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="appearance" className="pt-3">
             <div className="flex min-h-12 items-center justify-between gap-4 border bg-background px-3">
@@ -170,6 +180,9 @@ function SettingsDialog() {
                 onCheckedChange={setDarkMode}
               />
             </div>
+          </TabsContent>
+          <TabsContent value="changelog" className="h-[min(520px,calc(100vh-14rem))] pt-3">
+            <ChangelogContent appVersion={appVersion} />
           </TabsContent>
         </Tabs>
       </DialogContent>
@@ -228,6 +241,8 @@ function App() {
   )
   const [availableUpdate, setAvailableUpdate] =
     useState<AvailableAppUpdate | null>(null)
+  const [runningAppVersion, setRunningAppVersion] = useState(appVersion)
+  const [changelogOpen, setChangelogOpen] = useState(false)
   const [installingUpdate, setInstallingUpdate] = useState(false)
   const [updateProgress, setUpdateProgress] = useState<AppUpdateProgress>()
   const [pendingToolOpen, setPendingToolOpen] = useState<PendingToolOpen>()
@@ -239,6 +254,31 @@ function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode)
   }, [darkMode])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function syncChangelogState() {
+      const version = await getRunningAppVersion()
+      if (cancelled) {
+        return
+      }
+
+      setRunningAppVersion(version)
+
+      const buildId = getChangelogBuildId(version)
+      if (shouldShowChangelogForBuild(buildId)) {
+        markChangelogBuildSeen(buildId)
+        setChangelogOpen(true)
+      }
+    }
+
+    void syncChangelogState()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     const environmentId = config.currentEnvironmentId
@@ -368,6 +408,12 @@ function App() {
 
   return (
     <>
+      <ChangelogDialog
+        appVersion={runningAppVersion}
+        open={changelogOpen}
+        onOpenChange={setChangelogOpen}
+      />
+
       <Dialog
         open={Boolean(pendingToolOpen)}
         onOpenChange={(open) => {
@@ -537,7 +583,7 @@ function App() {
         </section>
 
         <footer className="border-t p-3">
-          <SettingsDialog />
+          <SettingsDialog appVersion={runningAppVersion} />
           {lastMessage && (
             <>
               <Separator className="my-3" />
