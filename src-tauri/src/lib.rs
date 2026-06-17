@@ -368,12 +368,22 @@ struct AiProviderToolRequest {
 #[serde(rename_all = "camelCase")]
 struct AiProviderTurnResult {
   #[serde(default)]
-  #[serde(alias = "codexThreadId")]
   provider_thread_id: Option<String>,
+  #[serde(default)]
+  codex_thread_id: Option<String>,
   #[serde(default)]
   response: String,
   #[serde(default)]
   tool_requests: Vec<AiProviderToolRequest>,
+}
+
+impl AiProviderTurnResult {
+  fn provider_session_id(&self) -> Option<String> {
+    self
+      .provider_thread_id
+      .clone()
+      .or(self.codex_thread_id.clone())
+  }
 }
 
 fn now_unix() -> Result<i64, String> {
@@ -1127,7 +1137,16 @@ fn normalize_ai_model(provider: &str, model: Option<&str>) -> Result<String, Str
       _ => Err(format!("Unsupported Codex model: {model}")),
     },
     "claude" => match model {
-      "claude-sonnet-4-6" | "claude-opus-4-8" | "claude-opus-4-7" | "claude-opus-4-6"
+      "claude-fable-5"
+      | "claude-opus-4-8"
+      | "claude-opus-4-7"
+      | "claude-opus-4-6"
+      | "claude-opus-4-5-20251101"
+      | "claude-opus-4-5"
+      | "claude-sonnet-4-6"
+      | "claude-sonnet-4-5-20250929"
+      | "claude-sonnet-4-5"
+      | "claude-haiku-4-5-20251001"
       | "claude-haiku-4-5" => Ok(model.to_string()),
       _ => Err(format!("Unsupported Claude model: {model}")),
     },
@@ -1983,7 +2002,7 @@ async fn build_ai_chat_response(
   )?;
   emit_ai_chat_message(app, &thread.id, &provider_turn_message);
   let first_turn = run_ai_provider_turn(app, state, thread, environment, message, Vec::new())?;
-  update_ai_thread_provider_thread_id(thread, first_turn.provider_thread_id.clone());
+  update_ai_thread_provider_thread_id(thread, first_turn.provider_session_id());
   let mut provider_turn_message = mark_ai_message_status(&provider_turn_message, "complete");
   provider_turn_message.metadata = Some(serde_json::json!({
     "provider": thread.provider,
@@ -2048,7 +2067,7 @@ async fn build_ai_chat_response(
     message,
     tool_results.clone(),
   )?;
-  update_ai_thread_provider_thread_id(thread, final_turn.provider_thread_id.clone());
+  update_ai_thread_provider_thread_id(thread, final_turn.provider_session_id());
   let mut provider_summary_message = mark_ai_message_status(&provider_summary_message, "complete");
   provider_summary_message.metadata = Some(serde_json::json!({
     "provider": thread.provider,

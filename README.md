@@ -1,45 +1,119 @@
 # OpenDataverse
 
-A focused cross-platform desktop shell for Dataverse and Dynamics 365 tools.
+OpenDataverse is a desktop workbench for Microsoft Dataverse and Dynamics 365
+workflows that are awkward to do from a browser tab.
 
-The app is built with Tauri, Vite, React, TypeScript, Tailwind CSS, and shadcn/ui. The first registered tool is Autopublisher; future tools can be added through the module registry.
+## Current Features
 
-## Commands
+### Autopublisher
 
-```sh
-npm install
-npm run dev
-npm run tauri:dev
-npm run build:web
-npm run tauri:build
-npm run lint
-```
+Autopublisher connects to a Dataverse environment, lists web resources, shows
+resource content, and lets you bind a local file to a Dataverse web resource.
+Bound files can be published manually or watched for local changes and
+auto-published.
 
-Rust is pinned through `mise.toml`.
+Publishing uses the Dataverse Web API from the Tauri backend:
+
+- update the web resource content with `PATCH webresourceset`
+- publish the changed resource with `PublishXml`
+- refresh the resource list after a publish
+
+### AI Chat
+
+AI Chat lets you ask questions about the selected Dataverse environment through a
+local AI provider. It currently supports Codex and Claude, with provider, model,
+and reasoning controls in the chat header.
+
+The important boundary: AI providers do not receive Dataverse refresh tokens and
+do not get arbitrary shell access for Dataverse work. OpenDataverse owns
+Dataverse auth, and the AI sidecar can only request app-owned, read-only
+Dataverse tools such as `WhoAmI`, entity metadata, entity-set listing, and
+restricted JSON `GET` calls.
+
+Provider selection is per chat session. Once a thread starts with Codex or
+Claude, the thread stays with that provider until the chat is cleared.
+
+### FetchXML Builder
+
+FetchXML Builder is an Advanced Find-style query workspace. It has a visual
+Designer for table, column, row-count, condition, group, and related-table
+selection, plus a Monaco-backed FetchXML tab for hand-written XML.
+
+FetchXML is the canonical artifact. Designer-generated XML uses the visible row
+limit. Manual XML runs as written. Query results are shown in-app, and the tool
+can copy both the FetchXML and the Dataverse Web API `fetchXml` URL.
+
+## Local Setup
+
+Install the managed toolchain first. This repo uses `mise.toml` for Rust, and
+this machine convention is to use mise when a tool is missing.
 
 ```sh
 mise install
+npm install
+npm --prefix src-sidecar/ai install
+```
+
+Run the browser-only frontend when you want quick UI feedback:
+
+```sh
+npm run dev
+```
+
+Run the real desktop app when you need Dataverse auth, local file dialogs, file
+watching, updater checks, or AI sidecar behavior:
+
+```sh
+mise exec -- npm run tauri:dev
+```
+
+Build everything:
+
+```sh
+mise exec -- npm run build
 mise exec -- npm run tauri:build
 ```
 
-## Structure
+Useful checks:
 
-- `src/modules/tool-registry.ts` registers tool modules.
-- `src/modules/autopublisher/` contains the first tool window.
-- `src/store/workspace-store.ts` manages environments, open tool tabs, and bindings.
-- `src/core/dataverse/` contains shared Dataverse schemas and validation.
-- `src/core/desktop/` wraps Tauri commands and desktop APIs.
-- `src-tauri/src/lib.rs` contains native Tauri commands for app config persistence and the auth command seam.
+```sh
+npm run build:web
+npm run lint
+npm --prefix src-sidecar/ai run build
+```
 
-## Local Data
+## AI Provider Setup
+
+The AI sidecar is launched by the Tauri backend with Node. If Node is not on
+`PATH`, set `OPENDATAVERSE_AI_NODE` to the Node executable you want the app to
+use.
+
+Codex uses the local Codex auth directory. If `CODEX_HOME` is not set, the app
+passes `~/.codex` to the sidecar.
+
+```sh
+codex login
+```
+
+Claude uses the local Claude credentials expected by the Claude agent SDK.
+
+```sh
+claude auth login
+```
+
+AI Chat still requires a selected and connected Dataverse environment. Provider
+auth and Dataverse auth are intentionally separate.
+
+## Dataverse Auth And Local Data
+
+Environment sign-in uses Microsoft browser auth with a local loopback redirect
+at `http://localhost:8400`. Tokens stay on disk under the user's OpenDataverse
+data directory and are refreshed by the Tauri backend.
 
 OpenDataverse stores user-editable app data in `~/.OpenDataverse`:
 
-- `~/.OpenDataverse/config.json` stores environments, selected environment, publisher prefix, and file bindings.
-- `~/.OpenDataverse/tokens/token-<environment-id>.json` stores environment-specific auth tokens.
-
-If an older build wrote data to Tauri's platform app-config directory, the app migrates `config.json` on startup and token files when an environment token is next used.
-
-## Current Scope
-
-The base shell supports environment management, XRMToolBox-style tool tabs, modular tool registration, and persisted app config. The Autopublisher module can start Dataverse browser auth with the same public client and `http://localhost:8400` loopback redirect used by the reference TUI, store and refresh tokens locally, list real web resources through the Dataverse Web API, bind a local file to a web resource, and publish the bound file content through `PATCH webresourceset` plus `PublishXml`.
+- `config.json` stores environments, selected environment, publisher prefix, and
+  web resource bindings.
+- `user-settings.json` stores local UI preferences such as dark mode.
+- `tokens/token-<environment-id>.json` stores the Dataverse token for an
+  environment.
