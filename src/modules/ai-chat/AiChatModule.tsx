@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useRef, type FormEvent } from "react"
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import {
   BotMessageSquare,
   Brain,
   Circle,
   Cpu,
+  History,
   Loader2,
+  MessageSquarePlus,
   SendHorizontal,
-  Trash2,
 } from "lucide-react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -14,10 +15,20 @@ import remarkGfm from "remark-gfm"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
+  listAiChatThreads,
+  loadAiChatThread,
   listenToAiChatEvents,
   startAiChatThread,
   sendAiChatMessage,
 } from "@/core/desktop/ai-bridge"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Select,
   SelectContent,
@@ -37,6 +48,7 @@ import type {
   AiChatModel,
   AiChatProvider,
   AiChatThread,
+  AiChatThreadSummary,
   AiChatWindowState,
   AiReasoningEffort,
 } from "@/modules/ai-chat/types"
@@ -428,6 +440,29 @@ function getProviderThreadIdFromMessages(messages: AiChatMessage[]) {
       : undefined
 }
 
+function createChatTitle(message: string) {
+  const normalized = message.trim().replace(/\s+/g, " ")
+  if (!normalized) {
+    return "Dataverse Chat"
+  }
+
+  return normalized.length > 80 ? `${normalized.slice(0, 80)}...` : normalized
+}
+
+function formatChatTimestamp(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
 function MarkdownMessage({ content }: { content: string }) {
   return (
     <div className="break-words text-sm leading-6">
@@ -516,10 +551,15 @@ export function AiChatModule({ window }: AiChatModuleProps) {
   const running = aiState.running
   const error = aiState.error
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [chatHistory, setChatHistory] = useState<AiChatThreadSummary[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
   const messages = thread?.messages ?? []
   const lastTool = thread?.messages ? getLastTool(thread.messages) : undefined
   const canSend = Boolean(environment && composerValue.trim() && !running)
   const providerLocked = messages.length > 0
+  const scopedChatHistory = environment
+    ? chatHistory.filter((summary) => summary.environmentId === environment.id)
+    : []
 
   const persistAiState = useCallback(
     (changes: Partial<AiChatWindowState>) => {
@@ -533,6 +573,26 @@ export function AiChatModule({ window }: AiChatModuleProps) {
     },
     [updateWindowState, window.id],
   )
+
+  const refreshChatHistory = useCallback(async () => {
+    if (!environment) {
+      setChatHistory([])
+      return
+    }
+
+    setHistoryLoading(true)
+    try {
+      const summaries = await listAiChatThreads(environment.id)
+      setChatHistory(summaries)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not load AI chat history"
+      setLastMessage(message)
+      persistAiState({ error: message })
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [environment, persistAiState, setLastMessage])
 
   useEffect(() => {
     let unlisten: (() => void) | undefined
@@ -587,6 +647,36 @@ export function AiChatModule({ window }: AiChatModuleProps) {
     })
   }
 
+  async function loadSavedChat(summary: AiChatThreadSummary) {
+    if (!environment || running) {
+      return
+    }
+
+    persistAiState({ error: undefined })
+    try {
+      const savedThread = await loadAiChatThread({
+        environmentId: environment.id,
+        threadId: summary.id,
+      })
+      persistAiState({
+        thread: savedThread,
+        provider: savedThread.provider,
+        model: savedThread.model ?? defaultModelByProvider[savedThread.provider],
+        reasoningEffort:
+          savedThread.reasoningEffort ??
+          defaultReasoningByProvider[savedThread.provider],
+        composerValue: "",
+        running: false,
+        error: undefined,
+      })
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not load AI chat"
+      setLastMessage(message)
+      persistAiState({ error: message })
+    }
+  }
+
   async function submitMessage(event?: FormEvent<HTMLFormElement>, value?: string) {
     event?.preventDefault()
 
@@ -608,6 +698,10 @@ export function AiChatModule({ window }: AiChatModuleProps) {
     }
 
     const now = new Date().toISOString()
+    const threadTitle =
+      activeThread.messages.length === 0
+        ? createChatTitle(message)
+        : activeThread.title
     const pendingMessages: AiChatMessage[] = [
       ...activeThread.messages,
       {
@@ -629,6 +723,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
         provider: current.provider,
         model: current.model,
         reasoningEffort: current.reasoningEffort,
+        title: threadTitle,
         updatedAt: now,
         messages: pendingMessages,
       },
@@ -665,10 +760,12 @@ export function AiChatModule({ window }: AiChatModuleProps) {
               : activeThread.codexThreadId,
           model: current.model,
           reasoningEffort: current.reasoningEffort,
+          title: threadTitle,
           updatedAt: new Date().toISOString(),
           messages: responseMessages,
         },
       })
+      void refreshChatHistory()
     } catch (error) {
       const messageText =
         error instanceof Error ? error.message : "AI chat turn failed"
@@ -682,6 +779,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
           provider: current.provider,
           model: current.model,
           reasoningEffort: current.reasoningEffort,
+          title: threadTitle,
           updatedAt: new Date().toISOString(),
           messages: [
             ...activeThread.messages,
@@ -702,6 +800,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
           ],
         },
       })
+      void refreshChatHistory()
     }
   }
 
@@ -757,15 +856,58 @@ export function AiChatModule({ window }: AiChatModuleProps) {
             {environment?.url ?? "Select environment"}
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="icon-sm"
-          aria-label="Clear chat"
-          onClick={() => void clearChat()}
-          disabled={messages.length === 0 || running}
-        >
-          <Trash2 />
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <DropdownMenu onOpenChange={(open) => open && void refreshChatHistory()}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon-sm"
+                aria-label="Chat history"
+                disabled={!environment || running}
+              >
+                {historyLoading ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <History />
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-80">
+              <DropdownMenuLabel>Saved Chats</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {scopedChatHistory.length === 0 ? (
+                <DropdownMenuItem disabled>No saved chats</DropdownMenuItem>
+              ) : (
+                scopedChatHistory.map((summary) => (
+                  <DropdownMenuItem
+                    key={summary.id}
+                    className="items-start"
+                    onSelect={() => void loadSavedChat(summary)}
+                    disabled={summary.id === thread?.id}
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">{summary.title}</div>
+                      <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-muted-foreground">
+                        <span className="capitalize">{summary.provider}</span>
+                        <span>{summary.messageCount} messages</span>
+                        <span>{formatChatTimestamp(summary.updatedAt)}</span>
+                      </div>
+                    </div>
+                  </DropdownMenuItem>
+                ))
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            aria-label="New chat"
+            onClick={() => void clearChat()}
+            disabled={messages.length === 0 || running}
+          >
+            <MessageSquarePlus />
+          </Button>
+        </div>
       </header>
 
       <div className="flex min-h-10 items-center gap-2 overflow-x-auto border-b px-4 py-2 text-xs">

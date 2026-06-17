@@ -8,6 +8,7 @@ import type {
   AiChatStreamEvent,
   AiChatThread,
   AiChatThreadInput,
+  AiChatThreadSummary,
 } from "@/modules/ai-chat/types"
 
 const browserThreads = new Map<string, AiChatThread>()
@@ -64,6 +65,66 @@ function browserPreviewResponse(input: AiChatMessageInput) {
   return "Ask for WhoAmI, entity sets, metadata, or a bounded OData GET query."
 }
 
+function summarizeThread(thread: AiChatThread): AiChatThreadSummary | undefined {
+  if (!thread.environmentId) {
+    return undefined
+  }
+
+  return {
+    id: thread.id,
+    environmentId: thread.environmentId,
+    provider: thread.provider,
+    model: thread.model ?? "gpt-5.4-mini",
+    reasoningEffort: thread.reasoningEffort ?? "medium",
+    title: thread.title,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    messageCount: thread.messages.length,
+  }
+}
+
+function titleFromMessage(message: string) {
+  const normalized = message.trim().replace(/\s+/g, " ")
+  if (!normalized) {
+    return "Dataverse Chat"
+  }
+
+  return normalized.length > 80 ? `${normalized.slice(0, 80)}...` : normalized
+}
+
+export async function listAiChatThreads(environmentId: string) {
+  if (isTauriRuntime()) {
+    return invoke<AiChatThreadSummary[]>("list_ai_chat_threads", {
+      environmentId,
+    })
+  }
+
+  return Array.from(browserThreads.values())
+    .filter((thread) => thread.environmentId === environmentId)
+    .map(summarizeThread)
+    .filter((summary): summary is AiChatThreadSummary => Boolean(summary))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+}
+
+export async function loadAiChatThread(input: {
+  environmentId: string
+  threadId: string
+}) {
+  if (isTauriRuntime()) {
+    return invoke<AiChatThread>("load_ai_chat_thread", {
+      environmentId: input.environmentId,
+      threadId: input.threadId,
+    })
+  }
+
+  const thread = browserThreads.get(input.threadId)
+  if (!thread || thread.environmentId !== input.environmentId) {
+    throw new Error("Saved AI chat was not found.")
+  }
+
+  return thread
+}
+
 export async function startAiChatThread(input: AiChatThreadInput) {
   if (isTauriRuntime()) {
     return invoke<AiChatThread>("start_ai_chat_thread", {
@@ -102,6 +163,10 @@ export async function sendAiChatMessage(input: AiChatMessageInput) {
     codexThreadId: input.codexThreadId ?? thread.codexThreadId,
     model: input.model,
     reasoningEffort: input.reasoningEffort,
+    title:
+      thread.messages.length === 0
+        ? titleFromMessage(input.message)
+        : thread.title,
     updatedAt: new Date().toISOString(),
     messages: [...thread.messages, userMessage, toolMessage, assistantMessage],
   }

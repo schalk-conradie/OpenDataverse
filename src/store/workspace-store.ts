@@ -266,9 +266,6 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         loadedConfig,
         loadedConfig.currentEnvironmentId,
       )
-      const firstWindow = currentEnvironment
-        ? createToolWindow("autopublisher", currentEnvironment.id)
-        : undefined
 
       set({
         config: currentEnvironment
@@ -276,8 +273,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
           : { ...loadedConfig, currentEnvironmentId: undefined },
         userSettings: loadedUserSettings,
         loadState: "ready",
-        openWindows: firstWindow ? [firstWindow] : [],
-        activeWindowId: firstWindow?.id,
+        openWindows: [],
+        activeWindowId: undefined,
         lastMessage: undefined,
       })
     } catch (error) {
@@ -318,7 +315,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       environments: [...config.environments, parsed.data],
     }
 
-    set({ config: nextConfig, lastMessage: "Environment added" })
+    set({
+      config: nextConfig,
+      activeWindowId: undefined,
+      lastMessage: "Environment added",
+    })
     persistConfig(nextConfig, set)
     void updateEnvironmentConnection(parsed.data.id, {
       get,
@@ -336,7 +337,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }
 
     const nextConfig = { ...config, currentEnvironmentId: environmentId }
-    set({ config: nextConfig, lastMessage: undefined })
+    set({
+      config: nextConfig,
+      activeWindowId: undefined,
+      lastMessage: undefined,
+    })
     persistConfig(nextConfig, set)
     void updateEnvironmentConnection(environmentId, {
       get,

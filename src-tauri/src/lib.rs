@@ -25,6 +25,7 @@ const USER_SETTINGS_FILE_NAME: &str = "user-settings.json";
 const APP_HOME_DIR_NAME: &str = ".openDataverse";
 const LEGACY_APP_HOME_DIR_NAME: &str = ".OpenDataverse";
 const TOKENS_DIR_NAME: &str = "tokens";
+const AI_CHATS_DIR_NAME: &str = "ai-chats";
 const CLIENT_ID: &str = "51f81489-12ee-4a9e-aaae-a2591f45987d";
 const AUTHORITY_BASE: &str = "https://login.microsoftonline.com/common";
 const REDIRECT_URI: &str = "http://localhost:8400";
@@ -315,6 +316,20 @@ struct AiChatThread {
   messages: Vec<AiChatMessage>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiChatThreadSummary {
+  id: String,
+  environment_id: String,
+  provider: String,
+  model: String,
+  reasoning_effort: String,
+  title: String,
+  created_at: String,
+  updated_at: String,
+  message_count: usize,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AiChatStreamEvent {
@@ -549,6 +564,99 @@ fn legacy_token_path(app: &AppHandle, environment_id: &str) -> Result<PathBuf, S
       .join(TOKENS_DIR_NAME)
       .join(format!("token-{}.json", environment_id)),
   )
+}
+
+fn safe_storage_segment(value: &str) -> String {
+  let sanitized = value
+    .chars()
+    .map(|character| {
+      if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+        character
+      } else {
+        '_'
+      }
+    })
+    .collect::<String>();
+  let trimmed = sanitized.trim_matches('_');
+
+  if trimmed.is_empty() {
+    "unknown".to_string()
+  } else {
+    trimmed.to_string()
+  }
+}
+
+fn ai_chat_history_root(app: &AppHandle) -> Result<PathBuf, String> {
+  let dir = legacy_opendataverse_dir(app)?.join(AI_CHATS_DIR_NAME);
+  fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+  Ok(dir)
+}
+
+fn ai_chat_environment_dir(app: &AppHandle, environment_id: &str) -> Result<PathBuf, String> {
+  let dir = ai_chat_history_root(app)?.join(safe_storage_segment(environment_id));
+  fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+  Ok(dir)
+}
+
+fn ai_chat_thread_path(
+  app: &AppHandle,
+  environment_id: &str,
+  thread_id: &str,
+) -> Result<PathBuf, String> {
+  Ok(
+    ai_chat_environment_dir(app, environment_id)?
+      .join(format!("{}.json", safe_storage_segment(thread_id))),
+  )
+}
+
+fn save_ai_chat_thread(app: &AppHandle, thread: &AiChatThread) -> Result<(), String> {
+  let environment_id = thread
+    .environment_id
+    .as_deref()
+    .ok_or_else(|| "Cannot save an AI chat without an environment id.".to_string())?;
+  let path = ai_chat_thread_path(app, environment_id, &thread.id)?;
+  let data = serde_json::to_string_pretty(thread).map_err(|error| error.to_string())?;
+  fs::write(path, data).map_err(|error| error.to_string())
+}
+
+fn load_ai_chat_thread_from_disk(
+  app: &AppHandle,
+  environment_id: &str,
+  thread_id: &str,
+) -> Result<Option<AiChatThread>, String> {
+  let path = ai_chat_thread_path(app, environment_id, thread_id)?;
+  let data = match fs::read_to_string(&path) {
+    Ok(data) => data,
+    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+    Err(error) => return Err(error.to_string()),
+  };
+  let thread: AiChatThread = serde_json::from_str(&data).map_err(|error| error.to_string())?;
+
+  if thread.id != thread_id {
+    return Err("Saved AI chat id does not match the requested chat.".to_string());
+  }
+
+  if thread.environment_id.as_deref() != Some(environment_id) {
+    return Err("Saved AI chat belongs to a different environment.".to_string());
+  }
+
+  Ok(Some(thread))
+}
+
+fn summarize_ai_chat_thread(thread: &AiChatThread) -> Option<AiChatThreadSummary> {
+  let environment_id = thread.environment_id.clone()?;
+
+  Some(AiChatThreadSummary {
+    id: thread.id.clone(),
+    environment_id,
+    provider: thread.provider.clone(),
+    model: thread.model.clone(),
+    reasoning_effort: thread.reasoning_effort.clone(),
+    title: thread.title.clone(),
+    created_at: thread.created_at.clone(),
+    updated_at: thread.updated_at.clone(),
+    message_count: thread.messages.len(),
+  })
 }
 
 fn save_token(app: &AppHandle, environment_id: &str, token: &StoredToken) -> Result<(), String> {
@@ -1213,6 +1321,31 @@ fn create_ai_chat_thread(
     updated_at: now,
     messages: Vec::new(),
   })
+}
+
+fn ai_chat_title_from_message(message: &str) -> String {
+  let normalized = message
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ")
+    .trim()
+    .to_string();
+
+  if normalized.is_empty() {
+    return "Dataverse Chat".to_string();
+  }
+
+  let mut title = normalized.chars().take(80).collect::<String>();
+  if normalized.chars().count() > 80 {
+    title.push_str("...");
+  }
+  title
+}
+
+fn maybe_update_ai_chat_title(thread: &mut AiChatThread, message: &str) {
+  if thread.messages.is_empty() || thread.title == "Dataverse Chat" {
+    thread.title = ai_chat_title_from_message(message);
+  }
 }
 
 fn create_ai_message(
@@ -2472,6 +2605,64 @@ async fn publish_web_resource(
 }
 
 #[tauri::command]
+fn list_ai_chat_threads(
+  app: AppHandle,
+  environment_id: String,
+) -> Result<Vec<AiChatThreadSummary>, String> {
+  let dir = ai_chat_environment_dir(&app, &environment_id)?;
+  let entries = match fs::read_dir(&dir) {
+    Ok(entries) => entries,
+    Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+    Err(error) => return Err(error.to_string()),
+  };
+  let mut summaries = Vec::new();
+
+  for entry in entries {
+    let entry = entry.map_err(|error| error.to_string())?;
+    let path = entry.path();
+    if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+      continue;
+    }
+
+    let data = match fs::read_to_string(&path) {
+      Ok(data) => data,
+      Err(_) => continue,
+    };
+    let thread = match serde_json::from_str::<AiChatThread>(&data) {
+      Ok(thread) => thread,
+      Err(_) => continue,
+    };
+    if thread.environment_id.as_deref() != Some(environment_id.as_str()) {
+      continue;
+    }
+    if let Some(summary) = summarize_ai_chat_thread(&thread) {
+      summaries.push(summary);
+    }
+  }
+
+  summaries.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+  Ok(summaries)
+}
+
+#[tauri::command]
+fn load_ai_chat_thread(
+  app: AppHandle,
+  state: State<'_, AiChatState>,
+  environment_id: String,
+  thread_id: String,
+) -> Result<AiChatThread, String> {
+  let thread = load_ai_chat_thread_from_disk(&app, &environment_id, &thread_id)?
+    .ok_or_else(|| "Saved AI chat was not found.".to_string())?;
+  state
+    .threads
+    .lock()
+    .map_err(|error| error.to_string())?
+    .insert(thread.id.clone(), thread.clone());
+
+  Ok(thread)
+}
+
+#[tauri::command]
 fn start_ai_chat_thread(
   state: State<'_, AiChatState>,
   environment_id: Option<String>,
@@ -2518,24 +2709,28 @@ async fn send_ai_chat_message(
   let environment = environment_by_id(&app, environment_id.as_deref())?;
   let requested_provider = normalize_ai_provider(provider.as_deref())?;
   let provider_thread_id = provider_thread_id.or(codex_thread_id);
-  let mut thread = {
-    let mut threads = state.threads.lock().map_err(|error| error.to_string())?;
-    if let Some(thread) = threads.remove(&thread_id) {
-      thread
-    } else {
-      let model = normalize_ai_model(&requested_provider, model.as_deref())?;
-      let reasoning_effort =
-        normalize_ai_reasoning_effort(&requested_provider, reasoning_effort.as_deref())?;
-      let mut thread = create_ai_chat_thread(
-        Some(environment.id.clone()),
-        Some(&requested_provider),
-        Some(&model),
-        Some(&reasoning_effort),
-        provider_thread_id.clone(),
-      )?;
-      thread.id = thread_id.clone();
-      thread
-    }
+  let existing_thread = state
+    .threads
+    .lock()
+    .map_err(|error| error.to_string())?
+    .remove(&thread_id);
+  let mut thread = if let Some(thread) = existing_thread {
+    thread
+  } else if let Some(thread) = load_ai_chat_thread_from_disk(&app, &environment.id, &thread_id)? {
+    thread
+  } else {
+    let model = normalize_ai_model(&requested_provider, model.as_deref())?;
+    let reasoning_effort =
+      normalize_ai_reasoning_effort(&requested_provider, reasoning_effort.as_deref())?;
+    let mut thread = create_ai_chat_thread(
+      Some(environment.id.clone()),
+      Some(&requested_provider),
+      Some(&model),
+      Some(&reasoning_effort),
+      provider_thread_id.clone(),
+    )?;
+    thread.id = thread_id.clone();
+    thread
   };
 
   if !thread.messages.is_empty() && thread.provider != requested_provider {
@@ -2563,6 +2758,7 @@ async fn send_ai_chat_message(
   update_ai_thread_provider_thread_id(&mut thread, provider_thread_id);
   thread.model = model;
   thread.reasoning_effort = reasoning_effort;
+  maybe_update_ai_chat_title(&mut thread, trimmed);
   thread
     .messages
     .push(create_ai_message("user", trimmed, "complete")?);
@@ -2585,6 +2781,14 @@ async fn send_ai_chat_message(
     };
   thread.messages.extend(response_messages);
   thread.updated_at = now_rfc3339()?;
+  if let Err(error) = save_ai_chat_thread(&app, &thread) {
+    thread.messages.push(create_ai_message(
+      "assistant",
+      format!("AI response completed, but chat history was not saved: {error}"),
+      "error",
+    )?);
+    thread.updated_at = now_rfc3339()?;
+  }
 
   let messages = thread.messages.clone();
   state
@@ -2867,6 +3071,24 @@ mod tests {
 
     assert!(error.contains("mutating"));
   }
+
+  #[test]
+  fn safe_storage_segment_removes_path_characters() {
+    assert_eq!(safe_storage_segment("../environment/id"), "environment_id");
+    assert_eq!(safe_storage_segment(""), "unknown");
+  }
+
+  #[test]
+  fn ai_chat_title_is_generated_from_first_message() {
+    assert_eq!(
+      ai_chat_title_from_message("  Who   am I connected as?  "),
+      "Who am I connected as?"
+    );
+
+    let long_title = ai_chat_title_from_message(&"a".repeat(120));
+    assert!(long_title.ends_with("..."));
+    assert!(long_title.len() <= 83);
+  }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2900,6 +3122,8 @@ pub fn run() {
       list_web_resources,
       get_web_resource_content,
       publish_web_resource,
+      list_ai_chat_threads,
+      load_ai_chat_thread,
       start_ai_chat_thread,
       send_ai_chat_message,
       dataverse_ai_whoami,

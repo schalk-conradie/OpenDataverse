@@ -5,7 +5,6 @@ import {
   Loader2,
   Plus,
   Settings,
-  SquareStack,
   X,
 } from "lucide-react"
 
@@ -610,11 +609,8 @@ function App() {
           {loadState !== "loading" && activeWindow && renderToolWindow(activeWindow)}
 
           {loadState !== "loading" && !activeWindow && (
-            <div className="flex h-full items-center justify-center bg-background">
-              <Button onClick={() => handleOpenTool("autopublisher")}>
-                <SquareStack />
-                Open Tool
-              </Button>
+            <div className="flex h-full items-center justify-center bg-background text-sm text-muted-foreground">
+              Select a tool from the sidebar.
             </div>
           )}
         </div>

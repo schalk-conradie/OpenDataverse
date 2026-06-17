@@ -26,6 +26,18 @@ export type AiChatThread = {
   messages: AiChatMessage[]
 }
 
+export type AiChatThreadSummary = {
+  id: string
+  environmentId: string
+  provider: AiChatProvider
+  model: AiChatModel
+  reasoningEffort: AiReasoningEffort
+  title: string
+  createdAt: string
+  updatedAt: string
+  messageCount: number
+}
+
 export type AiChatProvider = "codex" | "claude"
 
 export type AiChatModel =
