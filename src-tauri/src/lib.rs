@@ -1,6 +1,6 @@
 use base64::{
-  engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD},
   Engine as _,
+  engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD},
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ use std::{
   time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
-use url::{form_urlencoded, Url};
+use url::{Url, form_urlencoded};
 use uuid::Uuid;
 
 const CONFIG_FILE_NAME: &str = "config.json";
@@ -32,8 +32,11 @@ const AI_DEFAULT_TOP: u32 = 25;
 const AI_MAX_TOP: u32 = 100;
 const AI_MAX_RESPONSE_BYTES: usize = 1_000_000;
 const AI_CHAT_EVENT: &str = "ai-chat-event";
+const AI_DEFAULT_PROVIDER: &str = "codex";
 const AI_DEFAULT_MODEL: &str = "gpt-5.4-mini";
 const AI_DEFAULT_REASONING_EFFORT: &str = "medium";
+const AI_DEFAULT_CLAUDE_MODEL: &str = "claude-sonnet-4-6";
+const AI_DEFAULT_CLAUDE_REASONING_EFFORT: &str = "medium";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -300,7 +303,10 @@ struct AiChatThread {
   #[serde(skip_serializing_if = "Option::is_none")]
   environment_id: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
+  provider_thread_id: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
   codex_thread_id: Option<String>,
+  provider: String,
   model: String,
   reasoning_effort: String,
   title: String,
@@ -352,7 +358,7 @@ struct AiSidecarResponse {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct AiCodexToolRequest {
+struct AiProviderToolRequest {
   name: String,
   #[serde(default)]
   arguments: Value,
@@ -360,13 +366,14 @@ struct AiCodexToolRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AiCodexTurnResult {
+struct AiProviderTurnResult {
   #[serde(default)]
-  codex_thread_id: Option<String>,
+  #[serde(alias = "codexThreadId")]
+  provider_thread_id: Option<String>,
   #[serde(default)]
   response: String,
   #[serde(default)]
-  tool_requests: Vec<AiCodexToolRequest>,
+  tool_requests: Vec<AiProviderToolRequest>,
 }
 
 fn now_unix() -> Result<i64, String> {
@@ -1092,45 +1099,96 @@ fn map_resource_language(resource_type: Option<i32>, name: &str) -> String {
   .to_string()
 }
 
-fn normalize_ai_model(model: Option<&str>) -> Result<String, String> {
-  let model = model
+fn normalize_ai_provider(provider: Option<&str>) -> Result<String, String> {
+  let provider = provider
     .map(str::trim)
     .filter(|value| !value.is_empty())
-    .unwrap_or(AI_DEFAULT_MODEL);
+    .unwrap_or(AI_DEFAULT_PROVIDER);
 
-  match model {
-    "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.3-codex-spark" => Ok(model.to_string()),
-    _ => Err(format!("Unsupported Codex model: {model}")),
+  match provider {
+    "codex" | "claude" => Ok(provider.to_string()),
+    _ => Err(format!("Unsupported AI provider: {provider}")),
   }
 }
 
-fn normalize_ai_reasoning_effort(reasoning_effort: Option<&str>) -> Result<String, String> {
+fn normalize_ai_model(provider: &str, model: Option<&str>) -> Result<String, String> {
+  let default_model = match provider {
+    "claude" => AI_DEFAULT_CLAUDE_MODEL,
+    _ => AI_DEFAULT_MODEL,
+  };
+  let model = model
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .unwrap_or(default_model);
+
+  match provider {
+    "codex" => match model {
+      "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.3-codex-spark" => Ok(model.to_string()),
+      _ => Err(format!("Unsupported Codex model: {model}")),
+    },
+    "claude" => match model {
+      "claude-sonnet-4-6" | "claude-opus-4-8" | "claude-opus-4-7" | "claude-opus-4-6"
+      | "claude-haiku-4-5" => Ok(model.to_string()),
+      _ => Err(format!("Unsupported Claude model: {model}")),
+    },
+    _ => Err(format!("Unsupported AI provider: {provider}")),
+  }
+}
+
+fn normalize_ai_reasoning_effort(
+  provider: &str,
+  reasoning_effort: Option<&str>,
+) -> Result<String, String> {
+  let default_reasoning_effort = match provider {
+    "claude" => AI_DEFAULT_CLAUDE_REASONING_EFFORT,
+    _ => AI_DEFAULT_REASONING_EFFORT,
+  };
   let reasoning_effort = reasoning_effort
     .map(str::trim)
     .filter(|value| !value.is_empty())
-    .unwrap_or(AI_DEFAULT_REASONING_EFFORT);
+    .unwrap_or(default_reasoning_effort);
 
-  match reasoning_effort {
-    "low" | "medium" | "high" | "xhigh" => Ok(reasoning_effort.to_string()),
-    _ => Err(format!(
-      "Unsupported Codex reasoning effort: {reasoning_effort}"
-    )),
+  match provider {
+    "codex" => match reasoning_effort {
+      "low" | "medium" | "high" | "xhigh" => Ok(reasoning_effort.to_string()),
+      _ => Err(format!(
+        "Unsupported Codex reasoning effort: {reasoning_effort}"
+      )),
+    },
+    "claude" => match reasoning_effort {
+      "low" | "medium" | "high" | "xhigh" | "max" => Ok(reasoning_effort.to_string()),
+      _ => Err(format!(
+        "Unsupported Claude reasoning effort: {reasoning_effort}"
+      )),
+    },
+    _ => Err(format!("Unsupported AI provider: {provider}")),
   }
 }
 
 fn create_ai_chat_thread(
   environment_id: Option<String>,
+  provider: Option<&str>,
   model: Option<&str>,
   reasoning_effort: Option<&str>,
+  provider_thread_id: Option<String>,
 ) -> Result<AiChatThread, String> {
   let now = now_rfc3339()?;
+  let provider = normalize_ai_provider(provider)?;
+  let model = normalize_ai_model(&provider, model)?;
+  let reasoning_effort = normalize_ai_reasoning_effort(&provider, reasoning_effort)?;
 
   Ok(AiChatThread {
     id: format!("ai-thread-{}", Uuid::new_v4()),
     environment_id,
-    codex_thread_id: None,
-    model: normalize_ai_model(model)?,
-    reasoning_effort: normalize_ai_reasoning_effort(reasoning_effort)?,
+    provider_thread_id: provider_thread_id.clone(),
+    codex_thread_id: if provider == "codex" {
+      provider_thread_id
+    } else {
+      None
+    },
+    provider,
+    model,
+    reasoning_effort,
     title: "Dataverse Chat".to_string(),
     created_at: now.clone(),
     updated_at: now,
@@ -1406,6 +1464,49 @@ fn user_safe_codex_error(error: String) -> String {
   }
 
   redacted
+}
+
+fn user_safe_claude_error(error: String) -> String {
+  let redacted = redact_sensitive_error(&error);
+  let lower = redacted.to_lowercase();
+
+  if lower.contains("authentication")
+    || lower.contains("not logged in")
+    || lower.contains("api key")
+    || lower.contains("anthropic")
+    || lower.contains("claude auth login")
+  {
+    return "Claude could not read your local Claude credentials. Run `claude auth login` once and restart OpenDataverse.".to_string();
+  }
+
+  redacted
+}
+
+fn user_safe_ai_provider_error(provider: &str, error: String) -> String {
+  match provider {
+    "codex" => user_safe_codex_error(error),
+    "claude" => user_safe_claude_error(error),
+    _ => user_safe_ai_error(error),
+  }
+}
+
+fn ai_provider_display_name(provider: &str) -> &'static str {
+  match provider {
+    "claude" => "Claude",
+    _ => "Codex",
+  }
+}
+
+fn update_ai_thread_provider_thread_id(
+  thread: &mut AiChatThread,
+  provider_thread_id: Option<String>,
+) {
+  if let Some(provider_thread_id) = provider_thread_id {
+    thread.provider_thread_id = Some(provider_thread_id.clone());
+    if thread.provider == "codex" {
+      thread.codex_thread_id = Some(provider_thread_id);
+    }
+  }
 }
 
 fn is_sensitive_json_key(key: &str) -> bool {
@@ -1707,20 +1808,26 @@ fn ai_tool_argument(arguments: &Value, name: &str) -> Option<String> {
     .map(ToString::to_string)
 }
 
-fn run_codex_turn(
+fn run_ai_provider_turn(
   app: &AppHandle,
   state: &State<'_, AiChatState>,
   thread: &AiChatThread,
   environment: &DataverseEnvironment,
   message: &str,
   tool_results: Vec<Value>,
-) -> Result<AiCodexTurnResult, String> {
+) -> Result<AiProviderTurnResult, String> {
+  let provider_thread_id = thread
+    .provider_thread_id
+    .clone()
+    .or(thread.codex_thread_id.clone());
   let result = run_ai_sidecar_stream_request(
     app,
     state,
     "run_turn_stream",
     serde_json::json!({
       "threadId": thread.id,
+      "provider": thread.provider,
+      "providerThreadId": provider_thread_id,
       "codexThreadId": thread.codex_thread_id,
       "environmentId": environment.id,
       "message": message,
@@ -1730,16 +1837,21 @@ fn run_codex_turn(
     }),
     |_event| {},
   )
-  .map_err(user_safe_codex_error)?;
+  .map_err(|error| user_safe_ai_provider_error(&thread.provider, error))?;
 
-  serde_json::from_value(result).map_err(|error| format!("Parse Codex sidecar response: {error}"))
+  serde_json::from_value(result).map_err(|error| {
+    format!(
+      "Parse {} sidecar response: {error}",
+      ai_provider_display_name(&thread.provider)
+    )
+  })
 }
 
-async fn execute_codex_tool_request(
+async fn execute_ai_tool_request(
   app: &AppHandle,
   thread_id: &str,
   environment: &DataverseEnvironment,
-  request: &AiCodexToolRequest,
+  request: &AiProviderToolRequest,
 ) -> Result<(AiChatMessage, Value), String> {
   let arguments = if request.arguments.is_object() {
     request.arguments.clone()
@@ -1810,7 +1922,7 @@ async fn execute_codex_tool_request(
     }
     _ => (
       request.name.clone(),
-      Err("Unknown Dataverse AI tool requested by Codex.".to_string()),
+      Err("Unknown Dataverse AI tool requested by the AI provider.".to_string()),
     ),
   };
 
@@ -1849,7 +1961,7 @@ async fn execute_codex_tool_request(
   }
 }
 
-async fn build_codex_ai_chat_response(
+async fn build_ai_chat_response(
   app: &AppHandle,
   state: &State<'_, AiChatState>,
   thread: &mut AiChatThread,
@@ -1857,39 +1969,40 @@ async fn build_codex_ai_chat_response(
   message: &str,
 ) -> Result<Vec<AiChatMessage>, String> {
   let mut messages = Vec::new();
-  let codex_turn_message = create_ai_tool_message(
-    "codex",
+  let provider_tool_name = thread.provider.clone();
+  let provider_display_name = ai_provider_display_name(&thread.provider);
+  let provider_turn_message = create_ai_tool_message(
+    &provider_tool_name,
     "run_turn",
     "streaming",
     Some(serde_json::json!({
+      "provider": thread.provider,
       "model": thread.model,
       "reasoningEffort": thread.reasoning_effort,
     })),
   )?;
-  emit_ai_chat_message(app, &thread.id, &codex_turn_message);
-  let first_turn = run_codex_turn(app, state, thread, environment, message, Vec::new())?;
-  thread.codex_thread_id = first_turn
-    .codex_thread_id
-    .clone()
-    .or(thread.codex_thread_id.clone());
-  let mut codex_turn_message = mark_ai_message_status(&codex_turn_message, "complete");
-  codex_turn_message.metadata = Some(serde_json::json!({
-    "codexThreadId": thread.codex_thread_id,
+  emit_ai_chat_message(app, &thread.id, &provider_turn_message);
+  let first_turn = run_ai_provider_turn(app, state, thread, environment, message, Vec::new())?;
+  update_ai_thread_provider_thread_id(thread, first_turn.provider_thread_id.clone());
+  let mut provider_turn_message = mark_ai_message_status(&provider_turn_message, "complete");
+  provider_turn_message.metadata = Some(serde_json::json!({
+    "provider": thread.provider,
+    "providerThreadId": thread.provider_thread_id,
     "toolRequestCount": first_turn.tool_requests.len(),
     "model": thread.model,
     "reasoningEffort": thread.reasoning_effort,
   }));
-  emit_ai_chat_message(app, &thread.id, &codex_turn_message);
-  messages.push(codex_turn_message);
+  emit_ai_chat_message(app, &thread.id, &provider_turn_message);
+  messages.push(provider_turn_message);
 
   if first_turn.tool_requests.is_empty() {
     let response = first_turn.response.trim();
     let assistant_message = create_ai_message(
       "assistant",
       if response.is_empty() {
-        "Codex completed the turn without a response."
+        format!("{provider_display_name} completed the turn without a response.")
       } else {
-        response
+        response.to_string()
       },
       "complete",
     )?;
@@ -1901,7 +2014,7 @@ async fn build_codex_ai_chat_response(
   let mut tool_results = Vec::new();
   for request in first_turn.tool_requests.iter().take(4) {
     let (tool_message, tool_result) =
-      execute_codex_tool_request(app, &thread.id, environment, request).await?;
+      execute_ai_tool_request(app, &thread.id, environment, request).await?;
     messages.push(tool_message);
     tool_results.push(tool_result);
   }
@@ -1915,18 +2028,19 @@ async fn build_codex_ai_chat_response(
     }));
   }
 
-  let codex_summary_message = create_ai_tool_message(
-    "codex",
+  let provider_summary_message = create_ai_tool_message(
+    &provider_tool_name,
     "run_turn_with_tool_results",
     "streaming",
     Some(serde_json::json!({
+      "provider": thread.provider,
       "model": thread.model,
       "reasoningEffort": thread.reasoning_effort,
       "toolResultCount": tool_results.len(),
     })),
   )?;
-  emit_ai_chat_message(app, &thread.id, &codex_summary_message);
-  let final_turn = run_codex_turn(
+  emit_ai_chat_message(app, &thread.id, &provider_summary_message);
+  let final_turn = run_ai_provider_turn(
     app,
     state,
     thread,
@@ -1934,27 +2048,27 @@ async fn build_codex_ai_chat_response(
     message,
     tool_results.clone(),
   )?;
-  thread.codex_thread_id = final_turn
-    .codex_thread_id
-    .clone()
-    .or(thread.codex_thread_id.clone());
-  let mut codex_summary_message = mark_ai_message_status(&codex_summary_message, "complete");
-  codex_summary_message.metadata = Some(serde_json::json!({
-    "codexThreadId": thread.codex_thread_id,
+  update_ai_thread_provider_thread_id(thread, final_turn.provider_thread_id.clone());
+  let mut provider_summary_message = mark_ai_message_status(&provider_summary_message, "complete");
+  provider_summary_message.metadata = Some(serde_json::json!({
+    "provider": thread.provider,
+    "providerThreadId": thread.provider_thread_id,
     "toolResultCount": tool_results.len(),
     "model": thread.model,
     "reasoningEffort": thread.reasoning_effort,
   }));
-  emit_ai_chat_message(app, &thread.id, &codex_summary_message);
-  messages.push(codex_summary_message);
+  emit_ai_chat_message(app, &thread.id, &provider_summary_message);
+  messages.push(provider_summary_message);
 
   let response = final_turn.response.trim();
   let assistant_message = create_ai_message(
     "assistant",
     if response.is_empty() {
-      "Codex received the Dataverse tool results but did not return a summary."
+      format!(
+        "{provider_display_name} received the Dataverse tool results but did not return a summary."
+      )
     } else {
-      response
+      response.to_string()
     },
     "complete",
   )?;
@@ -2342,13 +2456,17 @@ async fn publish_web_resource(
 fn start_ai_chat_thread(
   state: State<'_, AiChatState>,
   environment_id: Option<String>,
+  provider: Option<String>,
   model: Option<String>,
   reasoning_effort: Option<String>,
+  provider_thread_id: Option<String>,
 ) -> Result<AiChatThread, String> {
   let thread = create_ai_chat_thread(
     environment_id,
+    provider.as_deref(),
     model.as_deref(),
     reasoning_effort.as_deref(),
+    provider_thread_id,
   )?;
 
   state
@@ -2367,8 +2485,11 @@ async fn send_ai_chat_message(
   thread_id: String,
   environment_id: Option<String>,
   message: String,
+  provider: Option<String>,
   model: Option<String>,
   reasoning_effort: Option<String>,
+  provider_thread_id: Option<String>,
+  codex_thread_id: Option<String>,
 ) -> Result<Vec<AiChatMessage>, String> {
   let trimmed = message.trim();
   if trimmed.is_empty() {
@@ -2376,24 +2497,51 @@ async fn send_ai_chat_message(
   }
 
   let environment = environment_by_id(&app, environment_id.as_deref())?;
-  let model = normalize_ai_model(model.as_deref())?;
-  let reasoning_effort = normalize_ai_reasoning_effort(reasoning_effort.as_deref())?;
+  let requested_provider = normalize_ai_provider(provider.as_deref())?;
+  let provider_thread_id = provider_thread_id.or(codex_thread_id);
   let mut thread = {
     let mut threads = state.threads.lock().map_err(|error| error.to_string())?;
     if let Some(thread) = threads.remove(&thread_id) {
       thread
     } else {
+      let model = normalize_ai_model(&requested_provider, model.as_deref())?;
+      let reasoning_effort =
+        normalize_ai_reasoning_effort(&requested_provider, reasoning_effort.as_deref())?;
       let mut thread = create_ai_chat_thread(
         Some(environment.id.clone()),
+        Some(&requested_provider),
         Some(&model),
         Some(&reasoning_effort),
+        provider_thread_id.clone(),
       )?;
       thread.id = thread_id.clone();
       thread
     }
   };
 
+  if !thread.messages.is_empty() && thread.provider != requested_provider {
+    let existing = ai_provider_display_name(&thread.provider);
+    let requested = ai_provider_display_name(&requested_provider);
+    state
+      .threads
+      .lock()
+      .map_err(|error| error.to_string())?
+      .insert(thread.id.clone(), thread);
+    return Err(format!(
+      "This AI chat is locked to {existing}. Clear the chat before starting a {requested} conversation."
+    ));
+  }
+
+  let model = normalize_ai_model(&requested_provider, model.as_deref())?;
+  let reasoning_effort =
+    normalize_ai_reasoning_effort(&requested_provider, reasoning_effort.as_deref())?;
   thread.environment_id = Some(environment.id.clone());
+  if thread.messages.is_empty() && thread.provider != requested_provider {
+    thread.provider_thread_id = None;
+    thread.codex_thread_id = None;
+  }
+  thread.provider = requested_provider;
+  update_ai_thread_provider_thread_id(&mut thread, provider_thread_id);
   thread.model = model;
   thread.reasoning_effort = reasoning_effort;
   thread
@@ -2401,13 +2549,17 @@ async fn send_ai_chat_message(
     .push(create_ai_message("user", trimmed, "complete")?);
 
   let response_messages =
-    match build_codex_ai_chat_response(&app, &state, &mut thread, &environment, trimmed).await {
+    match build_ai_chat_response(&app, &state, &mut thread, &environment, trimmed).await {
       Ok(messages) => messages,
       Err(error) => vec![
-        create_ai_tool_message("codex", "run_turn", "error", None)?,
+        create_ai_tool_message(&thread.provider, "run_turn", "error", None)?,
         create_ai_message(
           "assistant",
-          format!("Codex request failed: {}", user_safe_ai_error(error)),
+          format!(
+            "{} request failed: {}",
+            ai_provider_display_name(&thread.provider),
+            user_safe_ai_provider_error(&thread.provider, error)
+          ),
           "error",
         )?,
       ],
@@ -2584,9 +2736,8 @@ async fn get_fetchxml_entity_metadata(
       .filter_map(|value| many_to_many_relationship_from_value(&logical_name, value)),
   );
   let advanced_find_entities = advanced_find_entity_logical_names(&app, &environment).await?;
-  relationships.retain(|relationship| {
-    is_valid_designer_relationship(relationship, &advanced_find_entities)
-  });
+  relationships
+    .retain(|relationship| is_valid_designer_relationship(relationship, &advanced_find_entities));
   sort_fetchxml_relationships(&mut relationships);
 
   Ok(FetchXmlEntityMetadata {

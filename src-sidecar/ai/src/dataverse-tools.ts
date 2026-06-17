@@ -17,7 +17,7 @@ export type DataverseToolResult = {
   error?: string
 }
 
-export type CodexStructuredTurn = {
+export type AiStructuredTurn = {
   response: string
   toolRequests: DataverseToolRequest[]
 }
@@ -32,9 +32,9 @@ Never create, update, delete, publish, import, or execute Dataverse actions.
 For greetings or other non-Dataverse messages, answer briefly and return no tool requests.
 If tool results are already available for this turn, answer from those results and return no tool requests unless a small additional read is truly required.
 Format the response field as concise GitHub-flavored Markdown when structure helps. Do not use raw HTML.
-Return JSON that matches the provided schema.`
+Return structured output that matches the provided schema.`
 
-export const CODEX_TURN_OUTPUT_SCHEMA = {
+export const AI_TURN_OUTPUT_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
@@ -89,7 +89,9 @@ export const CODEX_TURN_OUTPUT_SCHEMA = {
   required: ["response", "toolRequests"],
 } as const
 
-export function buildCodexPrompt(input: {
+export const CODEX_TURN_OUTPUT_SCHEMA = AI_TURN_OUTPUT_SCHEMA
+
+export function buildDataverseTurnPrompt(input: {
   environmentId?: string
   userMessage: string
   toolResults?: DataverseToolResult[]
@@ -120,8 +122,21 @@ User message:
 ${input.userMessage}`
 }
 
-export function parseCodexStructuredTurn(value: string): CodexStructuredTurn {
-  const parsed = JSON.parse(value) as Partial<CodexStructuredTurn>
+export function buildCodexPrompt(input: {
+  environmentId?: string
+  userMessage: string
+  toolResults?: DataverseToolResult[]
+}) {
+  return buildDataverseTurnPrompt(input)
+}
+
+export function parseAiStructuredTurn(value: unknown): AiStructuredTurn {
+  const parsed =
+    typeof value === "string"
+      ? (JSON.parse(value) as Partial<AiStructuredTurn>)
+      : value && typeof value === "object" && !Array.isArray(value)
+        ? (value as Partial<AiStructuredTurn>)
+        : {}
 
   return {
     response: typeof parsed.response === "string" ? parsed.response : "",
@@ -129,6 +144,10 @@ export function parseCodexStructuredTurn(value: string): CodexStructuredTurn {
       ? parsed.toolRequests.filter(isDataverseToolRequest)
       : [],
   }
+}
+
+export function parseCodexStructuredTurn(value: string): AiStructuredTurn {
+  return parseAiStructuredTurn(value)
 }
 
 function isDataverseToolRequest(value: unknown): value is DataverseToolRequest {

@@ -15,6 +15,8 @@ export type AiChatMessage = {
 export type AiChatThread = {
   id: string
   environmentId?: string
+  provider: AiChatProvider
+  providerThreadId?: string
   codexThreadId?: string
   model?: AiChatModel
   reasoningEffort?: AiReasoningEffort
@@ -24,16 +26,23 @@ export type AiChatThread = {
   messages: AiChatMessage[]
 }
 
+export type AiChatProvider = "codex" | "claude"
+
 export type AiChatModel =
   | "gpt-5.5"
   | "gpt-5.4"
   | "gpt-5.4-mini"
   | "gpt-5.3-codex-spark"
+  | "claude-sonnet-4-6"
+  | "claude-opus-4-8"
+  | "claude-opus-4-7"
+  | "claude-opus-4-6"
 
-export type AiReasoningEffort = "low" | "medium" | "high" | "xhigh"
+export type AiReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max"
 
 export type AiChatWindowState = {
   thread?: AiChatThread
+  provider: AiChatProvider
   model: AiChatModel
   reasoningEffort: AiReasoningEffort
   composerValue: string
@@ -49,14 +58,20 @@ export type AiChatStreamEvent = {
 
 export type AiChatThreadInput = {
   environmentId?: string
+  provider: AiChatProvider
   model: AiChatModel
   reasoningEffort: AiReasoningEffort
+  providerThreadId?: string
+  codexThreadId?: string
 }
 
 export type AiChatMessageInput = {
   threadId: string
   environmentId?: string
   message: string
+  provider: AiChatProvider
   model: AiChatModel
   reasoningEffort: AiReasoningEffort
+  providerThreadId?: string
+  codexThreadId?: string
 }

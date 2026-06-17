@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils"
 import type {
   AiChatMessage,
   AiChatModel,
+  AiChatProvider,
   AiChatThread,
   AiChatWindowState,
   AiReasoningEffort,
@@ -52,19 +53,56 @@ const starterPrompts = [
   "Get the first 5 accounts with name and accountid.",
 ]
 
-const modelOptions: Array<{ value: AiChatModel; label: string }> = [
-  { value: "gpt-5.5", label: "GPT-5.5" },
-  { value: "gpt-5.4", label: "GPT-5.4" },
-  { value: "gpt-5.4-mini", label: "GPT-5.4-Mini" },
-  { value: "gpt-5.3-codex-spark", label: "GPT-5.3-Codex-Spark" },
+const providerOptions: Array<{ value: AiChatProvider; label: string }> = [
+  { value: "codex", label: "Codex" },
+  { value: "claude", label: "Claude" },
 ]
 
-const reasoningOptions: Array<{ value: AiReasoningEffort; label: string }> = [
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "xhigh", label: "Extra High" },
-]
+const defaultModelByProvider: Record<AiChatProvider, AiChatModel> = {
+  codex: "gpt-5.4-mini",
+  claude: "claude-sonnet-4-6",
+}
+
+const defaultReasoningByProvider: Record<AiChatProvider, AiReasoningEffort> = {
+  codex: "medium",
+  claude: "medium",
+}
+
+const modelOptionsByProvider: Record<
+  AiChatProvider,
+  Array<{ value: AiChatModel; label: string }>
+> = {
+  codex: [
+    { value: "gpt-5.5", label: "GPT-5.5" },
+    { value: "gpt-5.4", label: "GPT-5.4" },
+    { value: "gpt-5.4-mini", label: "GPT-5.4-Mini" },
+    { value: "gpt-5.3-codex-spark", label: "GPT-5.3-Codex-Spark" },
+  ],
+  claude: [
+    { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+    { value: "claude-opus-4-8", label: "Claude Opus 4.8" },
+    { value: "claude-opus-4-7", label: "Claude Opus 4.7" },
+    { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
+  ],
+}
+
+const reasoningOptionsByProvider: Record<
+  AiChatProvider,
+  Array<{ value: AiReasoningEffort; label: string }>
+> = {
+  codex: [
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+    { value: "xhigh", label: "Extra High" },
+  ],
+  claude: [
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+    { value: "max", label: "Max" },
+  ],
+}
 
 const markdownAllowedElements = [
   "a",
@@ -218,41 +256,84 @@ const markdownComponents: Components = {
 }
 
 const defaultAiChatState: AiChatWindowState = {
-  model: "gpt-5.4-mini",
-  reasoningEffort: "medium",
+  provider: "codex",
+  model: defaultModelByProvider.codex,
+  reasoningEffort: defaultReasoningByProvider.codex,
   composerValue: "",
   running: false,
-  settingsVersion: 3,
+  settingsVersion: 4,
 }
 
-function isAiChatModel(value: unknown): value is AiChatModel {
-  return modelOptions.some((option) => option.value === value)
+function isAiChatProvider(value: unknown): value is AiChatProvider {
+  return providerOptions.some((option) => option.value === value)
 }
 
-function isAiReasoningEffort(value: unknown): value is AiReasoningEffort {
-  return reasoningOptions.some((option) => option.value === value)
+function isAiChatModel(
+  provider: AiChatProvider,
+  value: unknown,
+): value is AiChatModel {
+  return modelOptionsByProvider[provider].some((option) => option.value === value)
+}
+
+function isAiReasoningEffort(
+  provider: AiChatProvider,
+  value: unknown,
+): value is AiReasoningEffort {
+  return reasoningOptionsByProvider[provider].some(
+    (option) => option.value === value,
+  )
 }
 
 function getAiChatWindowState(window: ToolWindow): AiChatWindowState {
   const candidate = window.state?.aiChat as Partial<AiChatWindowState> | undefined
+  const threadProvider = isAiChatProvider(candidate?.thread?.provider)
+    ? candidate.thread.provider
+    : undefined
+  const provider =
+    candidate?.thread?.messages?.length && threadProvider
+      ? threadProvider
+      : isAiChatProvider(candidate?.provider)
+        ? candidate.provider
+        : threadProvider ?? defaultAiChatState.provider
   const legacyDefaultModel =
     candidate?.settingsVersion === undefined && candidate?.model === "gpt-5.5"
   const model =
-    isAiChatModel(candidate?.model) && !legacyDefaultModel
+    isAiChatModel(provider, candidate?.model) && !legacyDefaultModel
       ? candidate.model
-    : defaultAiChatState.model
+      : candidate?.thread?.model &&
+          isAiChatModel(provider, candidate.thread.model)
+        ? candidate.thread.model
+        : defaultModelByProvider[provider]
   const legacyDefaultReasoning =
     candidate?.settingsVersion === undefined &&
     (candidate?.reasoningEffort === "xhigh" ||
       candidate?.reasoningEffort === "low")
   const reasoningEffort =
-    isAiReasoningEffort(candidate?.reasoningEffort) && !legacyDefaultReasoning
+    isAiReasoningEffort(provider, candidate?.reasoningEffort) &&
+    !legacyDefaultReasoning
       ? candidate.reasoningEffort
-    : defaultAiChatState.reasoningEffort
+      : candidate?.thread?.reasoningEffort &&
+          isAiReasoningEffort(provider, candidate.thread.reasoningEffort)
+        ? candidate.thread.reasoningEffort
+        : defaultReasoningByProvider[provider]
+  const thread = candidate?.thread
+    ? {
+        ...candidate.thread,
+        provider: isAiChatProvider(candidate.thread.provider)
+          ? candidate.thread.provider
+          : provider,
+        providerThreadId:
+          candidate.thread.providerThreadId ?? candidate.thread.codexThreadId,
+        model,
+        reasoningEffort,
+      }
+    : undefined
 
   return {
     ...defaultAiChatState,
     ...candidate,
+    thread,
+    provider,
     model,
     reasoningEffort,
     composerValue:
@@ -322,6 +403,25 @@ function formatMessageTime(value: string) {
 
 function getLastTool(messages: AiChatMessage[]) {
   return messages.findLast((message) => message.role === "tool")
+}
+
+function getProviderThreadIdFromMessages(messages: AiChatMessage[]) {
+  const message = messages.findLast((item) => {
+    const metadata = item.metadata
+    return (
+      item.role === "tool" &&
+      metadata &&
+      (typeof metadata.providerThreadId === "string" ||
+        typeof metadata.codexThreadId === "string")
+    )
+  })
+
+  const metadata = message?.metadata
+  return typeof metadata?.providerThreadId === "string"
+    ? metadata.providerThreadId
+    : typeof metadata?.codexThreadId === "string"
+      ? metadata.codexThreadId
+      : undefined
 }
 
 function MarkdownMessage({ content }: { content: string }) {
@@ -415,6 +515,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
   const messages = thread?.messages ?? []
   const lastTool = thread?.messages ? getLastTool(thread.messages) : undefined
   const canSend = Boolean(environment && composerValue.trim() && !running)
+  const providerLocked = messages.length > 0
 
   const persistAiState = useCallback(
     (changes: Partial<AiChatWindowState>) => {
@@ -428,44 +529,6 @@ export function AiChatModule({ window }: AiChatModuleProps) {
     },
     [updateWindowState, window.id],
   )
-
-  useEffect(() => {
-    let cancelled = false
-
-    async function createThread() {
-      const current = getStoredAiChatState(window.id)
-      if (current.thread) {
-        return
-      }
-
-      persistAiState({ error: undefined })
-      try {
-        const nextThread = await startAiChatThread({
-          environmentId: environment?.id,
-          model: current.model,
-          reasoningEffort: current.reasoningEffort,
-        })
-        if (!cancelled) {
-          persistAiState({ thread: nextThread })
-        }
-      } catch (error) {
-        if (cancelled) {
-          return
-        }
-
-        const message =
-          error instanceof Error ? error.message : "Could not start AI chat"
-        persistAiState({ error: message })
-        setLastMessage(message)
-      }
-    }
-
-    void createThread()
-
-    return () => {
-      cancelled = true
-    }
-  }, [environment?.id, persistAiState, setLastMessage, window.id])
 
   useEffect(() => {
     let unlisten: (() => void) | undefined
@@ -512,25 +575,12 @@ export function AiChatModule({ window }: AiChatModuleProps) {
       return
     }
 
-    persistAiState({ running: true, error: undefined })
-    try {
-      const nextThread = await startAiChatThread({
-        environmentId: environment?.id,
-        model: aiState.model,
-        reasoningEffort: aiState.reasoningEffort,
-      })
-      persistAiState({
-        thread: nextThread,
-        composerValue: "",
-        running: false,
-        error: undefined,
-      })
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Could not clear AI chat"
-      persistAiState({ running: false, error: message })
-      setLastMessage(message)
-    }
+    persistAiState({
+      thread: undefined,
+      composerValue: "",
+      running: false,
+      error: undefined,
+    })
   }
 
   async function submitMessage(event?: FormEvent<HTMLFormElement>, value?: string) {
@@ -547,6 +597,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
     if (!activeThread) {
       activeThread = await startAiChatThread({
         environmentId: environment.id,
+        provider: current.provider,
         model: current.model,
         reasoningEffort: current.reasoningEffort,
       })
@@ -569,12 +620,13 @@ export function AiChatModule({ window }: AiChatModuleProps) {
       running: true,
       error: undefined,
       thread: {
-      ...activeThread,
-      environmentId: environment.id,
+        ...activeThread,
+        environmentId: environment.id,
+        provider: current.provider,
         model: current.model,
         reasoningEffort: current.reasoningEffort,
-      updatedAt: now,
-      messages: pendingMessages,
+        updatedAt: now,
+        messages: pendingMessages,
       },
     })
 
@@ -583,20 +635,34 @@ export function AiChatModule({ window }: AiChatModuleProps) {
         threadId: activeThread.id,
         environmentId: environment.id,
         message,
+        provider: current.provider,
         model: current.model,
         reasoningEffort: current.reasoningEffort,
+        providerThreadId:
+          activeThread.providerThreadId ?? activeThread.codexThreadId,
+        codexThreadId: activeThread.codexThreadId,
       })
+      const providerThreadId = getProviderThreadIdFromMessages(responseMessages)
 
       persistAiState({
         running: false,
         error: undefined,
         thread: {
-        ...activeThread,
-        environmentId: environment.id,
+          ...activeThread,
+          environmentId: environment.id,
+          provider: current.provider,
+          providerThreadId:
+            providerThreadId ??
+            activeThread.providerThreadId ??
+            activeThread.codexThreadId,
+          codexThreadId:
+            current.provider === "codex"
+              ? providerThreadId ?? activeThread.codexThreadId
+              : activeThread.codexThreadId,
           model: current.model,
           reasoningEffort: current.reasoningEffort,
-        updatedAt: new Date().toISOString(),
-        messages: responseMessages,
+          updatedAt: new Date().toISOString(),
+          messages: responseMessages,
         },
       })
     } catch (error) {
@@ -607,38 +673,55 @@ export function AiChatModule({ window }: AiChatModuleProps) {
         running: false,
         error: messageText,
         thread: {
-        ...activeThread,
-        environmentId: environment.id,
+          ...activeThread,
+          environmentId: environment.id,
+          provider: current.provider,
           model: current.model,
           reasoningEffort: current.reasoningEffort,
-        updatedAt: new Date().toISOString(),
-        messages: [
-          ...activeThread.messages,
-          {
-            id: createId("ai-message"),
-            role: "user",
-            content: message,
-            createdAt: now,
-            status: "complete",
-          },
-          {
-            id: createId("ai-message"),
-            role: "assistant",
-            content: messageText,
-            createdAt: new Date().toISOString(),
-            status: "error",
-          },
-        ],
+          updatedAt: new Date().toISOString(),
+          messages: [
+            ...activeThread.messages,
+            {
+              id: createId("ai-message"),
+              role: "user",
+              content: message,
+              createdAt: now,
+              status: "complete",
+            },
+            {
+              id: createId("ai-message"),
+              role: "assistant",
+              content: messageText,
+              createdAt: new Date().toISOString(),
+              status: "error",
+            },
+          ],
         },
       })
     }
+  }
+
+  function updateProvider(provider: AiChatProvider) {
+    if (running || providerLocked || provider === aiState.provider) {
+      return
+    }
+
+    persistAiState({
+      provider,
+      model: defaultModelByProvider[provider],
+      reasoningEffort: defaultReasoningByProvider[provider],
+      thread: undefined,
+      error: undefined,
+    })
   }
 
   function updateModel(model: AiChatModel) {
     const current = getStoredAiChatState(window.id)
     persistAiState({
       model,
-      thread: current.thread ? { ...current.thread, model } : undefined,
+      thread: current.thread
+        ? { ...current.thread, provider: current.provider, model }
+        : undefined,
     })
   }
 
@@ -647,7 +730,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
     persistAiState({
       reasoningEffort,
       thread: current.thread
-        ? { ...current.thread, reasoningEffort }
+        ? { ...current.thread, provider: current.provider, reasoningEffort }
         : undefined,
     })
   }
@@ -700,16 +783,33 @@ export function AiChatModule({ window }: AiChatModuleProps) {
         )}
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <Select
+            value={aiState.provider}
+            onValueChange={(value) => updateProvider(value as AiChatProvider)}
+            disabled={running || providerLocked}
+          >
+            <SelectTrigger className="w-32 bg-background" size="sm">
+              <BotMessageSquare className="size-3.5" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {providerOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
             value={aiState.model}
             onValueChange={(value) => updateModel(value as AiChatModel)}
             disabled={running}
           >
-            <SelectTrigger className="w-44 bg-background" size="sm">
+            <SelectTrigger className="w-48 bg-background" size="sm">
               <Cpu className="size-3.5" />
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {modelOptions.map((option) => (
+              {modelOptionsByProvider[aiState.provider].map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
                 </SelectItem>
@@ -728,7 +828,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {reasoningOptions.map((option) => (
+              {reasoningOptionsByProvider[aiState.provider].map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
                 </SelectItem>

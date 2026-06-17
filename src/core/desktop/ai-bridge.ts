@@ -19,6 +19,9 @@ function createBrowserThread(input: AiChatThreadInput): AiChatThread {
   return {
     id: createId("ai-thread"),
     environmentId: input.environmentId,
+    provider: input.provider,
+    providerThreadId: input.providerThreadId,
+    codexThreadId: input.codexThreadId,
     model: input.model,
     reasoningEffort: input.reasoningEffort,
     title: "Dataverse Chat",
@@ -65,8 +68,10 @@ export async function startAiChatThread(input: AiChatThreadInput) {
   if (isTauriRuntime()) {
     return invoke<AiChatThread>("start_ai_chat_thread", {
       environmentId: input.environmentId,
+      provider: input.provider,
       model: input.model,
       reasoningEffort: input.reasoningEffort,
+      providerThreadId: input.providerThreadId,
     })
   }
 
@@ -92,6 +97,9 @@ export async function sendAiChatMessage(input: AiChatMessageInput) {
   const updated = {
     ...thread,
     environmentId: input.environmentId,
+    provider: input.provider,
+    providerThreadId: input.providerThreadId ?? thread.providerThreadId,
+    codexThreadId: input.codexThreadId ?? thread.codexThreadId,
     model: input.model,
     reasoningEffort: input.reasoningEffort,
     updatedAt: new Date().toISOString(),

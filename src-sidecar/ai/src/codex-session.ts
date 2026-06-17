@@ -23,6 +23,7 @@ type LocalSession = {
 
 export type RunCodexTurnInput = {
   threadId: string
+  providerThreadId?: string
   codexThreadId?: string
   environmentId?: string
   message: string
@@ -33,6 +34,7 @@ export type RunCodexTurnInput = {
 
 export type RunCodexTurnResult = {
   threadId: string
+  providerThreadId?: string
   codexThreadId?: string
   response: string
   toolRequests: DataverseToolRequest[]
@@ -45,12 +47,13 @@ export class CodexSessionManager {
 
   startThread(input: {
     threadId: string
+    providerThreadId?: string
     codexThreadId?: string
     model?: string
     reasoningEffort?: ModelReasoningEffort
   }) {
     const session = this.createSession({
-      codexThreadId: input.codexThreadId,
+      codexThreadId: input.providerThreadId ?? input.codexThreadId,
       model: input.model,
       reasoningEffort: input.reasoningEffort,
     })
@@ -58,6 +61,7 @@ export class CodexSessionManager {
 
     return {
       threadId: input.threadId,
+      providerThreadId: session.codexThreadId,
       codexThreadId: session.codexThreadId,
     }
   }
@@ -88,6 +92,7 @@ export class CodexSessionManager {
 
     return {
       threadId: input.threadId,
+      providerThreadId: session.codexThreadId,
       codexThreadId: session.codexThreadId,
       response: structured.response,
       toolRequests: structured.toolRequests,
@@ -149,6 +154,7 @@ export class CodexSessionManager {
 
     return {
       threadId: input.threadId,
+      providerThreadId: session.codexThreadId,
       codexThreadId: session.codexThreadId,
       response: structured.response,
       toolRequests: structured.toolRequests,
@@ -166,7 +172,8 @@ export class CodexSessionManager {
       return existing
     }
 
-    const codexThreadId = input.codexThreadId ?? existing?.codexThreadId
+    const codexThreadId =
+      input.providerThreadId ?? input.codexThreadId ?? existing?.codexThreadId
     const session = this.createSession({
       codexThreadId,
       model: input.model,

@@ -1,5 +1,54 @@
 # Architecture Decisions
 
+## ADR-0002: AI Chat Provider Selection Is Session-Scoped
+
+Date: 2026-06-17
+
+Status: Accepted
+
+### Context
+
+OpenDataverse AI Chat started as a Codex-backed module. The module now needs to
+support Claude as an additional local AI provider while preserving the existing
+security boundary: the renderer never receives Dataverse tokens, and AI
+providers only request app-owned, read-only Dataverse tool calls.
+
+Codex and Claude maintain separate hidden provider session state, authentication
+state, model capabilities, reasoning settings, transcript persistence, and
+resume identifiers. Switching providers inside a single conversation would
+create ambiguous ownership of the provider transcript and could make a later
+turn appear to have context that only exists in a different provider's session.
+
+### Decision
+
+AI Chat provider selection is session-scoped and immutable.
+
+The user may choose the provider before the first message in a chat thread. Once
+the thread is created, the provider is locked for that thread. Changing from
+Codex to Claude, or from Claude to Codex, requires clearing the current chat or
+starting a new AI Chat thread.
+
+The app stores provider identity alongside the provider-specific resume id. The
+UI must not silently migrate an active conversation between providers. The Rust
+backend must route every turn through the provider stored on the thread rather
+than accepting a later provider override for an existing thread.
+
+Model and reasoning controls remain scoped to the selected provider. A provider
+may expose a different model list or reasoning levels, but those options do not
+change the provider that owns the thread.
+
+### Consequences
+
+The AI module can support multiple local AI providers without blending
+transcripts or auth models.
+
+The UX is simpler and safer: provider choice is explicit at the beginning of the
+conversation, and switching providers is a deliberate new-session action.
+
+Future providers should implement the same structured turn contract used by the
+current Dataverse tool loop instead of introducing provider-specific Dataverse
+execution paths.
+
 ## ADR-0001: FetchXML Builder Authoring and Execution Model
 
 Date: 2026-06-12

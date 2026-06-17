@@ -1,9 +1,12 @@
 import process from "node:process"
 import { createInterface } from "node:readline"
 
+import { ClaudeSessionManager, type ClaudeReasoningEffort } from "./claude-session.js"
 import { CodexSessionManager } from "./codex-session.js"
 import type { DataverseToolResult } from "./dataverse-tools.js"
 import type { ModelReasoningEffort, ThreadEvent } from "@openai/codex-sdk"
+
+type AiProvider = "codex" | "claude"
 
 type SidecarRequest =
   | {
@@ -11,9 +14,11 @@ type SidecarRequest =
       method: "start_thread"
       params: {
         threadId: string
+        provider?: AiProvider
+        providerThreadId?: string
         codexThreadId?: string
         model?: string
-        reasoningEffort?: ModelReasoningEffort
+        reasoningEffort?: ModelReasoningEffort | ClaudeReasoningEffort
       }
     }
   | {
@@ -21,11 +26,13 @@ type SidecarRequest =
       method: "run_turn" | "run_turn_stream"
       params: {
         threadId: string
+        provider?: AiProvider
+        providerThreadId?: string
         codexThreadId?: string
         environmentId?: string
         message: string
         model?: string
-        reasoningEffort?: ModelReasoningEffort
+        reasoningEffort?: ModelReasoningEffort | ClaudeReasoningEffort
         toolResults?: DataverseToolResult[]
       }
     }
@@ -47,7 +54,8 @@ type SidecarResponse =
       event: ThreadEvent
     }
 
-const manager = new CodexSessionManager()
+const codexManager = new CodexSessionManager()
+const claudeManager = new ClaudeSessionManager()
 const lines = createInterface({
   input: process.stdin,
   crlfDelay: Infinity,
@@ -58,15 +66,56 @@ function writeResponse(response: SidecarResponse) {
 }
 
 async function handleRequest(request: SidecarRequest) {
+  const provider = request.params.provider ?? "codex"
+
   switch (request.method) {
     case "start_thread":
-      return manager.startThread(request.params)
-    case "run_turn":
-      return manager.runTurn(request.params)
-    case "run_turn_stream":
-      return manager.runTurnStreamed(request.params, (event) => {
-        writeResponse({ id: request.id, ok: true, event })
+      if (provider === "claude") {
+        return claudeManager.startThread({
+          ...request.params,
+          reasoningEffort: request.params
+            .reasoningEffort as ClaudeReasoningEffort | undefined,
+        })
+      }
+
+      return codexManager.startThread({
+        ...request.params,
+        reasoningEffort: request.params
+          .reasoningEffort as ModelReasoningEffort | undefined,
       })
+    case "run_turn":
+      if (provider === "claude") {
+        return claudeManager.runTurn({
+          ...request.params,
+          reasoningEffort: request.params
+            .reasoningEffort as ClaudeReasoningEffort | undefined,
+        })
+      }
+
+      return codexManager.runTurn({
+        ...request.params,
+        reasoningEffort: request.params
+          .reasoningEffort as ModelReasoningEffort | undefined,
+      })
+    case "run_turn_stream":
+      if (provider === "claude") {
+        return claudeManager.runTurnStreamed({
+          ...request.params,
+          reasoningEffort: request.params
+            .reasoningEffort as ClaudeReasoningEffort | undefined,
+        })
+      }
+
+      return codexManager.runTurnStreamed(
+        {
+          ...request.params,
+          reasoningEffort: request.params
+            .reasoningEffort as ModelReasoningEffort | undefined,
+        },
+        (event) => {
+          writeResponse({ id: request.id, ok: true, event })
+        },
+      )
   }
 }
 
