@@ -6,8 +6,8 @@ import type { ToolDefinition } from "@/modules/types"
 export const toolRegistry: ToolDefinition[] = [
   {
     id: "autopublisher",
-    title: "Autopublisher",
-    description: "Web resources, bindings, and publish runs",
+    title: "Webresource Management",
+    description: "Web resource editing, bindings, and publish runs",
     icon: FileCode2,
     status: "ready",
   },

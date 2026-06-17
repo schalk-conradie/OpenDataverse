@@ -141,7 +141,7 @@ export async function listWebResources(
   }
 
   const { mockWebResources } = await import(
-    "@/modules/autopublisher/mock-data"
+    "@/modules/webresource-management/mock-data"
   )
   return mockWebResources.filter(
     (resource) => includeManaged || !resource.isManaged,
@@ -160,7 +160,7 @@ export async function getWebResourceContent(
   }
 
   const { mockWebResources } = await import(
-    "@/modules/autopublisher/mock-data"
+    "@/modules/webresource-management/mock-data"
   )
   const resource = mockWebResources.find((item) => item.id === webResourceId)
   return {
@@ -194,5 +194,29 @@ export async function publishWebResource(
     webResourceId: binding.webResourceId,
     webResourceName: binding.webResourceName,
     message: `Browser preview cannot publish ${binding.webResourceName}`,
+  } satisfies PublishResult
+}
+
+export async function saveWebResourceContent(
+  environment: DataverseEnvironment,
+  content: WebResourceContent,
+  publish: boolean,
+) {
+  if (isTauriRuntime()) {
+    return invoke<PublishResult>("save_web_resource_content", {
+      environment,
+      webResourceId: content.id,
+      webResourceName: content.name,
+      content: content.content,
+      publish,
+    })
+  }
+
+  return {
+    webResourceId: content.id,
+    webResourceName: content.name,
+    message: publish
+      ? `Browser preview cannot publish ${content.name}`
+      : `Browser preview saved ${content.name}`,
   } satisfies PublishResult
 }

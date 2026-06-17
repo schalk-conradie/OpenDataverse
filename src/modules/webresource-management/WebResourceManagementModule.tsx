@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { dirname, normalize } from "@tauri-apps/api/path"
 import { watch, type UnwatchFn, type WatchEvent } from "@tauri-apps/plugin-fs"
 import { openUrl } from "@tauri-apps/plugin-opener"
@@ -17,8 +17,12 @@ import {
   Loader2,
   Play,
   RefreshCw,
+  RotateCcw,
+  Save,
   Search,
   Unlink,
+  Upload,
+  X,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -50,6 +54,7 @@ import {
   listWebResources,
   startBrowserAuth,
   publishWebResource,
+  saveWebResourceContent,
 } from "@/core/desktop/bridge"
 import { chooseLocalFile } from "@/core/desktop/file-dialog"
 import {
@@ -65,10 +70,22 @@ import {
 import { isTauriRuntime } from "@/core/desktop/bridge"
 import { cn } from "@/lib/utils"
 import { useWorkspaceStore } from "@/store/workspace-store"
-import { publisherEvents } from "./activity-events"
+import { webResourceEvents } from "./activity-events"
 
-type AutopublisherModuleProps = {
+type WebResourceManagementModuleProps = {
   window: ToolWindow
+}
+
+type ResourceContentSaveAction = "save" | "publish"
+
+type ResourceDraftState = {
+  resourceId: string
+  content: string
+}
+
+type ResourceActionError = {
+  resourceId: string
+  message: string
 }
 
 type AuthDialogState = {
@@ -85,6 +102,12 @@ type ResourceViewerDialogProps = {
   content?: WebResourceContent
   error: unknown
   loading: boolean
+  savingAction?: ResourceContentSaveAction
+  onSave: (
+    content: WebResourceContent,
+    draftContent: string,
+    publish: boolean,
+  ) => Promise<void>
 }
 
 type ResourceTreeFolder = {
@@ -406,20 +429,90 @@ function ResourceViewerDialog({
   content,
   error,
   loading,
+  savingAction,
+  onSave,
 }: ResourceViewerDialogProps) {
+  const [editResourceId, setEditResourceId] = useState<string>()
+  const [draftState, setDraftState] = useState<ResourceDraftState>()
+  const [actionError, setActionError] = useState<ResourceActionError>()
+  const resourceId = content?.id
+  const savedContent = content?.content ?? ""
+  const draftContent =
+    draftState && draftState.resourceId === resourceId
+      ? draftState.content
+      : savedContent
+  const dirty = draftContent !== savedContent
+  const isSaving = Boolean(savingAction)
+  const canEdit = Boolean(content && !loading && !error && !resource?.isManaged)
+  const editMode = editResourceId === resourceId && canEdit
+  const actionErrorMessage =
+    actionError && actionError.resourceId === resourceId
+      ? actionError.message
+      : undefined
+
   async function copyContent() {
-    if (!content?.content) {
+    if (!draftContent) {
       return
     }
 
-    await navigator.clipboard.writeText(content.content)
+    await navigator.clipboard.writeText(draftContent)
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (isSaving && !nextOpen) {
+      return
+    }
+
+    if (!nextOpen) {
+      setDraftState(undefined)
+      setEditResourceId(undefined)
+      setActionError(undefined)
+    }
+
+    onOpenChange(nextOpen)
+  }
+
+  function handleEditModeChange(enabled: boolean) {
+    if (!canEdit) {
+      return
+    }
+
+    setEditResourceId(enabled ? resourceId : undefined)
+  }
+
+  function revertDraft() {
+    setDraftState(undefined)
+    setActionError(undefined)
+  }
+
+  async function saveDraft(publish: boolean) {
+    if (!content || !canEdit) {
+      return
+    }
+
+    setActionError(undefined)
+
+    try {
+      await onSave(content, draftContent, publish)
+      setDraftState(undefined)
+    } catch (error) {
+      setActionError(
+        {
+          resourceId: content.id,
+          message:
+            error instanceof Error
+              ? error.message
+              : String(error ?? "Could not save web resource"),
+        },
+      )
+    }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="grid h-[min(900px,calc(100vh-3rem))] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:w-[calc(100vw-4rem)] sm:max-w-[calc(100vw-4rem)] 2xl:w-[1480px] 2xl:max-w-[1480px]">
         <DialogHeader className="border-b px-4 py-3 pr-12">
-          <div className="flex min-w-0 items-start justify-between gap-4">
+          <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
               <DialogTitle className="truncate font-mono text-sm">
                 {resource?.name ?? "Web Resource"}
@@ -439,34 +532,106 @@ function ResourceViewerDialog({
                     {content.language}
                   </span>
                 )}
+                {dirty && (
+                  <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700">
+                    Unsaved
+                  </Badge>
+                )}
               </div>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
               {loading && (
                 <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
                   <Loader2 className="size-3.5 animate-spin" />
                   Loading
                 </span>
               )}
+              <Label
+                htmlFor="resource-editor-edit-mode"
+                className={cn(
+                  "flex h-7 items-center gap-2 border px-2 text-xs text-muted-foreground",
+                  canEdit && "text-foreground",
+                )}
+              >
+                Edit
+                <Switch
+                  id="resource-editor-edit-mode"
+                  size="sm"
+                  checked={editMode && canEdit}
+                  onCheckedChange={handleEditModeChange}
+                  disabled={!canEdit || isSaving}
+                />
+              </Label>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => void copyContent()}
-                disabled={!content?.content}
+                disabled={!draftContent}
               >
                 <Copy />
                 Copy
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={revertDraft}
+                disabled={!dirty || isSaving}
+              >
+                <RotateCcw />
+                Revert
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleOpenChange(false)}
+                disabled={isSaving}
+              >
+                <X />
+                Close
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void saveDraft(false)}
+                disabled={!canEdit || !dirty || isSaving}
+              >
+                {savingAction === "save" ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <Save />
+                )}
+                Save
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => void saveDraft(true)}
+                disabled={!canEdit || isSaving}
+              >
+                {savingAction === "publish" ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <Upload />
+                )}
+                Save & Publish
               </Button>
             </div>
           </div>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1">
+        <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)]">
+          <div>
           {Boolean(error) && (
             <div className="m-4 border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
               {error instanceof Error ? error.message : String(error)}
             </div>
           )}
+
+          {actionErrorMessage && (
+            <div className="m-4 border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+              {actionErrorMessage}
+            </div>
+          )}
+          </div>
 
           {!error && loading && !content && (
             <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -476,10 +641,16 @@ function ResourceViewerDialog({
           )}
 
           {!error && (!loading || content) && (
+            <div className="min-h-0">
             <Editor
               height="100%"
               language={content?.language ?? "plaintext"}
-              value={content?.content ?? ""}
+              value={draftContent}
+              onChange={(value) => {
+                if (resourceId) {
+                  setDraftState({ resourceId, content: value ?? "" })
+                }
+              }}
               loading={
                 <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" />
@@ -487,7 +658,7 @@ function ResourceViewerDialog({
                 </div>
               }
               options={{
-                readOnly: true,
+                readOnly: !editMode || !canEdit || isSaving,
                 minimap: { enabled: true },
                 fontSize: 13,
                 lineNumbersMinChars: 3,
@@ -498,6 +669,7 @@ function ResourceViewerDialog({
               }}
               theme="vs"
             />
+            </div>
           )}
         </div>
       </DialogContent>
@@ -505,11 +677,15 @@ function ResourceViewerDialog({
   )
 }
 
-export function AutopublisherModule({ window }: AutopublisherModuleProps) {
+export function WebResourceManagementModule({
+  window,
+}: WebResourceManagementModuleProps) {
   const [query, setQuery] = useState("")
   const [includeManaged, setIncludeManaged] = useState(false)
   const [selectedResourceId, setSelectedResourceId] = useState<string>()
   const [resourceViewerOpen, setResourceViewerOpen] = useState(false)
+  const [savingResourceAction, setSavingResourceAction] =
+    useState<ResourceContentSaveAction>()
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
     () => new Set(),
   )
@@ -527,6 +703,7 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
     (state) => state.setEnvironmentAuthState,
   )
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
+  const queryClient = useQueryClient()
   const environment =
     getEnvironmentById(config, window.environmentId) ??
     getEnvironmentById(config, config.currentEnvironmentId)
@@ -761,6 +938,43 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
     }
   }
 
+  async function saveResourceContent(
+    content: WebResourceContent,
+    draftContent: string,
+    publish: boolean,
+  ) {
+    if (!environment) {
+      return
+    }
+
+    setSavingResourceAction(publish ? "publish" : "save")
+
+    try {
+      const updatedContent = { ...content, content: draftContent }
+      const result = await saveWebResourceContent(
+        environment,
+        updatedContent,
+        publish,
+      )
+
+      queryClient.setQueryData(
+        ["webResourceContent", environment.id, content.id],
+        updatedContent,
+      )
+      setLastMessage(result.message)
+      await refetchResources()
+    } catch (error) {
+      setLastMessage(
+        error instanceof Error
+          ? error.message
+          : String(error ?? "Could not save web resource"),
+      )
+      throw error
+    } finally {
+      setSavingResourceAction(undefined)
+    }
+  }
+
   useEffect(() => {
     const autoPublishTimers = autoPublishTimersRef.current
 
@@ -892,12 +1106,16 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
         content={resourceContentQuery.data}
         error={resourceContentQuery.error}
         loading={resourceContentQuery.isFetching}
+        savingAction={savingResourceAction}
+        onSave={saveResourceContent}
       />
 
       <header className="flex min-h-16 items-center justify-between gap-4 border-b px-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h2 className="truncate text-base font-medium">Autopublisher</h2>
+            <h2 className="truncate text-base font-medium">
+              Webresource Management
+            </h2>
             <Badge variant="outline">{environment.name}</Badge>
             <Badge
               className={cn(
@@ -1305,7 +1523,7 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
 
         <TabsContent value="activity" className="min-h-0 flex-1 overflow-auto p-4">
           <div className="max-w-3xl border">
-            {publisherEvents.map((event, index) => (
+            {webResourceEvents.map((event, index) => (
               <div key={event.id}>
                 <div className="grid grid-cols-[72px_1fr] gap-4 p-3 text-sm">
                   <span className="font-mono text-xs text-muted-foreground">
@@ -1318,7 +1536,7 @@ export function AutopublisherModule({ window }: AutopublisherModuleProps) {
                     </div>
                   </div>
                 </div>
-                {index < publisherEvents.length - 1 && <Separator />}
+                {index < webResourceEvents.length - 1 && <Separator />}
               </div>
             ))}
           </div>

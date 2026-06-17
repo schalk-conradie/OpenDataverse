@@ -2560,6 +2560,75 @@ async fn get_web_resource_content(
   })
 }
 
+async fn patch_web_resource_content(
+  app: &AppHandle,
+  environment: &DataverseEnvironment,
+  web_resource_id: &str,
+  bytes: &[u8],
+) -> Result<(), String> {
+  let content = BASE64.encode(bytes);
+
+  dataverse_json_request(
+    app,
+    environment,
+    reqwest::Method::PATCH,
+    &format!("/webresourceset({web_resource_id})"),
+    &serde_json::json!({ "content": content }),
+  )
+  .await?;
+
+  Ok(())
+}
+
+async fn publish_web_resource_by_id(
+  app: &AppHandle,
+  environment: &DataverseEnvironment,
+  web_resource_id: &str,
+) -> Result<(), String> {
+  let parameter_xml = format!(
+    "<importexportxml><webresources><webresource>{web_resource_id}</webresource></webresources></importexportxml>"
+  );
+
+  dataverse_json_request(
+    app,
+    environment,
+    reqwest::Method::POST,
+    "/PublishXml",
+    &serde_json::json!({ "ParameterXml": parameter_xml }),
+  )
+  .await?;
+
+  Ok(())
+}
+
+#[tauri::command]
+async fn save_web_resource_content(
+  app: AppHandle,
+  environment: DataverseEnvironment,
+  web_resource_id: String,
+  web_resource_name: String,
+  content: String,
+  publish: bool,
+) -> Result<PublishResult, String> {
+  patch_web_resource_content(&app, &environment, &web_resource_id, content.as_bytes()).await?;
+
+  if publish {
+    publish_web_resource_by_id(&app, &environment, &web_resource_id).await?;
+  }
+
+  let message = if publish {
+    format!("Saved and published {web_resource_name}")
+  } else {
+    format!("Saved {web_resource_name}")
+  };
+
+  Ok(PublishResult {
+    web_resource_id,
+    web_resource_name,
+    message,
+  })
+}
+
 #[tauri::command]
 async fn publish_web_resource(
   app: AppHandle,
@@ -2572,30 +2641,8 @@ async fn publish_web_resource(
       binding.local_path, error
     )
   })?;
-  let content = BASE64.encode(bytes);
-
-  dataverse_json_request(
-    &app,
-    &environment,
-    reqwest::Method::PATCH,
-    &format!("/webresourceset({})", binding.web_resource_id),
-    &serde_json::json!({ "content": content }),
-  )
-  .await?;
-
-  let parameter_xml = format!(
-    "<importexportxml><webresources><webresource>{}</webresource></webresources></importexportxml>",
-    binding.web_resource_id
-  );
-
-  dataverse_json_request(
-    &app,
-    &environment,
-    reqwest::Method::POST,
-    "/PublishXml",
-    &serde_json::json!({ "ParameterXml": parameter_xml }),
-  )
-  .await?;
+  patch_web_resource_content(&app, &environment, &binding.web_resource_id, &bytes).await?;
+  publish_web_resource_by_id(&app, &environment, &binding.web_resource_id).await?;
 
   Ok(PublishResult {
     web_resource_id: binding.web_resource_id,
@@ -3121,6 +3168,7 @@ pub fn run() {
       check_dataverse_connection,
       list_web_resources,
       get_web_resource_content,
+      save_web_resource_content,
       publish_web_resource,
       list_ai_chat_threads,
       load_ai_chat_thread,

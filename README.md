@@ -5,12 +5,12 @@ workflows that are awkward to do from a browser tab.
 
 ## Current Features
 
-### Autopublisher
+### Webresource Management
 
-Autopublisher connects to a Dataverse environment, lists web resources, shows
-resource content, and lets you bind a local file to a Dataverse web resource.
-Bound files can be published manually or watched for local changes and
-auto-published.
+Webresource Management connects to a Dataverse environment, lists web resources,
+shows and edits resource content, and lets you bind a local file to a Dataverse
+web resource. Bound files can be published manually or watched for local changes
+and auto-published.
 
 Publishing uses the Dataverse Web API from the Tauri backend:
 

@@ -1,4 +1,4 @@
-export const publisherEvents = [
+export const webResourceEvents = [
   {
     id: "event-1",
     time: "14:22",
