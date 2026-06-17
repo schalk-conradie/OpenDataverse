@@ -174,6 +174,26 @@ export const mockWebResourceCandidates: SolutionWebResourceCandidate[] = [
     inSolution: false,
     modifiedOn: "2026-06-13T10:05:00Z",
   },
+  {
+    id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    name: "msdyn_/scripts/platform.js",
+    displayName: "Platform script",
+    type: "js",
+    typeCode: 3,
+    isManaged: false,
+    inSolution: false,
+    modifiedOn: "2026-06-11T10:05:00Z",
+  },
+  {
+    id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    name: "new_/scripts/managed.js",
+    displayName: "Managed script",
+    type: "js",
+    typeCode: 3,
+    isManaged: true,
+    inSolution: false,
+    modifiedOn: "2026-06-10T10:05:00Z",
+  },
 ]
 
 export const mockDependencyReport: SolutionDependencyReport = {

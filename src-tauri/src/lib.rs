@@ -16,6 +16,8 @@ use std::{
   sync::{Arc, Mutex},
   time::{Duration, SystemTime, UNIX_EPOCH},
 };
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use tauri::{AppHandle, Emitter, Manager, State};
 use url::{Url, form_urlencoded};
 use uuid::Uuid;
@@ -38,6 +40,8 @@ const AI_DEFAULT_MODEL: &str = "gpt-5.4-mini";
 const AI_DEFAULT_REASONING_EFFORT: &str = "medium";
 const AI_DEFAULT_CLAUDE_MODEL: &str = "claude-sonnet-4-6";
 const AI_DEFAULT_CLAUDE_REASONING_EFFORT: &str = "medium";
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -235,7 +239,8 @@ struct SolutionSummary {
   created_on: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
   modified_on: Option<String>,
-  component_count: usize,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  component_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1554,6 +1559,21 @@ fn resource_type_code(value: &str) -> Result<i32, String> {
   }
 }
 
+fn is_microsoft_web_resource_name(name: &str) -> bool {
+  let lower_name = name.trim().to_lowercase();
+
+  [
+    "msdyn",
+    "microsoft",
+    "mscrm",
+    "mspp",
+    "adx_",
+    "cc_",
+  ]
+  .iter()
+  .any(|prefix| lower_name.starts_with(prefix))
+}
+
 fn map_resource_language(resource_type: Option<i32>, name: &str) -> String {
   let lower_name = name.to_lowercase();
   match resource_type {
@@ -1578,7 +1598,7 @@ fn map_resource_language(resource_type: Option<i32>, name: &str) -> String {
   .to_string()
 }
 
-fn solution_from_value(value: &Value, component_count: usize) -> SolutionSummary {
+fn solution_from_value(value: &Value, component_count: Option<usize>) -> SolutionSummary {
   let id = json_string(value, "solutionid").unwrap_or_default();
   let publisher = value.get("publisherid").unwrap_or(&Value::Null);
 
@@ -1602,23 +1622,13 @@ fn solution_from_value(value: &Value, component_count: usize) -> SolutionSummary
   }
 }
 
-async fn solution_component_count(
-  app: &AppHandle,
-  environment: &DataverseEnvironment,
-  solution_id: &str,
-) -> Result<usize, String> {
-  let body = dataverse_get(
-    app,
-    environment,
-    "/solutioncomponents/$count",
-    &[("$filter", &format!("_solutionid_value eq {solution_id}"))],
-  )
-  .await?;
-
-  body
-    .trim()
-    .parse::<usize>()
-    .map_err(|error| format!("Parse solution component count: {error}"))
+fn solution_managed_filter(value: Option<&str>) -> Result<&'static str, String> {
+  match value.unwrap_or("unmanaged") {
+    "all" => Ok("isvisible eq true"),
+    "managed" => Ok("isvisible eq true and ismanaged eq true"),
+    "unmanaged" => Ok("isvisible eq true and ismanaged eq false"),
+    other => Err(format!("Unsupported solution filter: {other}")),
+  }
 }
 
 async fn solution_component_values(
@@ -2232,6 +2242,9 @@ fn spawn_ai_sidecar(app: &AppHandle) -> Result<AiSidecarProcess, String> {
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
     .stderr(Stdio::null());
+
+  #[cfg(target_os = "windows")]
+  command.creation_flags(CREATE_NO_WINDOW);
 
   let mut child = command.spawn().map_err(|error| {
     format!(
@@ -3445,7 +3458,9 @@ async fn publish_web_resource(
 async fn list_solutions(
   app: AppHandle,
   environment: DataverseEnvironment,
+  managed_filter: Option<String>,
 ) -> Result<Vec<SolutionSummary>, String> {
+  let filter = solution_managed_filter(managed_filter.as_deref())?;
   let values = dataverse_get_collection_values(
     &app,
     &environment,
@@ -3455,27 +3470,19 @@ async fn list_solutions(
         "$select".to_string(),
         "solutionid,uniquename,friendlyname,version,ismanaged,isvisible,createdon,modifiedon,_publisherid_value".to_string(),
       ),
-      ("$filter".to_string(), "isvisible eq true".to_string()),
+      ("$filter".to_string(), filter.to_string()),
       ("$expand".to_string(), "publisherid($select=publisherid,uniquename,friendlyname,customizationprefix)".to_string()),
-      ("$orderby".to_string(), "friendlyname asc".to_string()),
+      ("$orderby".to_string(), "createdon desc".to_string()),
     ],
   )
   .await?;
 
-  let mut solutions = Vec::new();
-  for value in values {
-    let solution_id = json_string(&value, "solutionid").unwrap_or_default();
-    let component_count = if solution_id.is_empty() {
-      0
-    } else {
-      solution_component_count(&app, &environment, &solution_id)
-        .await
-        .unwrap_or(0)
-    };
-    solutions.push(solution_from_value(&value, component_count));
-  }
-
-  Ok(solutions)
+  Ok(
+    values
+      .iter()
+      .map(|value| solution_from_value(value, None))
+      .collect(),
+  )
 }
 
 #[tauri::command]
@@ -3603,7 +3610,7 @@ async fn list_solution_web_resource_candidates(
       ),
       (
         "$filter".to_string(),
-        "(webresourcetype eq 1 or webresourcetype eq 2 or webresourcetype eq 3 or webresourcetype eq 4 or webresourcetype eq 11 or webresourcetype eq 12)".to_string(),
+        "ismanaged eq false and (webresourcetype eq 1 or webresourcetype eq 2 or webresourcetype eq 3 or webresourcetype eq 4 or webresourcetype eq 11 or webresourcetype eq 12)".to_string(),
       ),
       ("$orderby".to_string(), "name asc".to_string()),
     ],
@@ -3617,14 +3624,19 @@ async fn list_solution_web_resource_candidates(
         let id = json_string(value, "webresourceid")?;
         let type_code = json_i32(value, "webresourcetype").unwrap_or(4);
 
+        let name = json_string(value, "name").unwrap_or_default();
+        if is_microsoft_web_resource_name(&name) {
+          return None;
+        }
+
         Some(SolutionWebResourceCandidate {
           in_solution: solution_web_resource_ids.contains(&id),
           id,
-          name: json_string(value, "name").unwrap_or_default(),
+          name,
           display_name: json_string(value, "displayname"),
           resource_type: map_resource_type(Some(type_code)),
           type_code,
-          is_managed: json_bool(value, "ismanaged").unwrap_or(false),
+          is_managed: false,
           modified_on: json_string(value, "modifiedon"),
         })
       })
@@ -3640,6 +3652,22 @@ async fn add_existing_web_resource_to_solution(
   web_resource_id: String,
 ) -> Result<SolutionWriteResult, String> {
   let solution_unique_name = validate_logical_name(&solution_unique_name)?;
+  let resource = dataverse_get_json_value(
+    &app,
+    &environment,
+    &format!("/webresourceset({web_resource_id})"),
+    &[("$select", "webresourceid,name,ismanaged")],
+  )
+  .await?;
+  let resource_name = json_string(&resource, "name").unwrap_or_default();
+
+  if json_bool(&resource, "ismanaged").unwrap_or(false) {
+    return Err("Managed web resources cannot be added from Solution Explorer.".to_string());
+  }
+
+  if is_microsoft_web_resource_name(&resource_name) {
+    return Err("Microsoft web resources cannot be added from Solution Explorer.".to_string());
+  }
 
   dataverse_json_request(
     &app,

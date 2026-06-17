@@ -140,7 +140,7 @@ export type SolutionSummary = {
   publisherPrefix?: string
   createdOn?: string
   modifiedOn?: string
-  componentCount: number
+  componentCount?: number
 }
 
 export type SolutionComponentSummary = {

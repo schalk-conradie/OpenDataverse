@@ -22,6 +22,7 @@ import {
   listSolutionComponents,
   listSolutions,
   listSolutionWebResourceCandidates,
+  type SolutionManagedFilter,
 } from "@/core/desktop/bridge"
 import {
   getEnvironmentById,
@@ -66,7 +67,7 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
-type ManagedFilter = "all" | "unmanaged" | "managed"
+type ManagedFilter = SolutionManagedFilter
 
 type CreateWebResourceForm = {
   name: string
@@ -582,7 +583,7 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
   const config = useWorkspaceStore((state) => state.config)
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
   const [solutionSearch, setSolutionSearch] = useState("")
-  const [managedFilter, setManagedFilter] = useState<ManagedFilter>("all")
+  const [managedFilter, setManagedFilter] = useState<ManagedFilter>("unmanaged")
   const [componentSearch, setComponentSearch] = useState("")
   const [selectedSolutionId, setSelectedSolutionId] = useState("")
   const [selectedComponentId, setSelectedComponentId] = useState("")
@@ -594,9 +595,10 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
     getEnvironmentById(config, config.currentEnvironmentId)
 
   const solutionsQuery = useQuery({
-    queryKey: ["solutions", environment?.id],
+    queryKey: ["solutions", environment?.id, managedFilter],
     enabled: Boolean(environment),
-    queryFn: () => listSolutions(environment as DataverseEnvironment),
+    queryFn: () =>
+      listSolutions(environment as DataverseEnvironment, managedFilter),
   })
 
   const solutions = useMemo(
@@ -798,7 +800,13 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
                   </div>
                   <div className="mt-2 flex items-center justify-between text-[11px] text-muted-foreground">
                     <span>{solution.publisherName ?? "Unknown publisher"}</span>
-                    <span>{solution.componentCount} components</span>
+                    <span>
+                      {solution.id === selectedSolution?.id && componentsQuery.data
+                        ? `${componentsQuery.data.length} components`
+                        : solution.componentCount === undefined
+                          ? "Open to count"
+                          : `${solution.componentCount} components`}
+                    </span>
                   </div>
                 </button>
               ))}

@@ -31,6 +31,14 @@ declare global {
 const storageKey = "opendataverse.config"
 const userSettingsStorageKey = "opendataverse.user-settings"
 
+function isMicrosoftWebResourceName(name: string) {
+  const lowerName = name.trim().toLowerCase()
+
+  return ["msdyn", "microsoft", "mscrm", "mspp", "adx_", "cc_"].some(
+    (prefix) => lowerName.startsWith(prefix),
+  )
+}
+
 export function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 }
@@ -227,15 +235,37 @@ export async function saveWebResourceContent(
   } satisfies PublishResult
 }
 
-export async function listSolutions(environment: DataverseEnvironment) {
+export type SolutionManagedFilter = "all" | "unmanaged" | "managed"
+
+export async function listSolutions(
+  environment: DataverseEnvironment,
+  managedFilter: SolutionManagedFilter,
+) {
   if (isTauriRuntime()) {
-    return invoke<SolutionSummary[]>("list_solutions", { environment })
+    return invoke<SolutionSummary[]>("list_solutions", {
+      environment,
+      managedFilter,
+    })
   }
 
   const { mockSolutions } = await import(
     "@/modules/solution-explorer/mock-data"
   )
   return mockSolutions
+    .filter((solution) => {
+      if (managedFilter === "managed") {
+        return solution.isManaged
+      }
+
+      if (managedFilter === "unmanaged") {
+        return !solution.isManaged
+      }
+
+      return true
+    })
+    .sort((left, right) =>
+      (right.createdOn ?? "").localeCompare(left.createdOn ?? ""),
+    )
 }
 
 export async function listSolutionComponents(
@@ -313,7 +343,10 @@ export async function listSolutionWebResourceCandidates(
   const { mockWebResourceCandidates } = await import(
     "@/modules/solution-explorer/mock-data"
   )
-  return mockWebResourceCandidates
+  return mockWebResourceCandidates.filter(
+    (candidate) =>
+      !candidate.isManaged && !isMicrosoftWebResourceName(candidate.name),
+  )
 }
 
 export async function addExistingWebResourceToSolution(

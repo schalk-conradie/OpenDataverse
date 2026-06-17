@@ -11,6 +11,23 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.23",
+    date: "2026-06-17",
+    title: "Solution Explorer load defaults",
+    changes: [
+      "Loaded unmanaged solutions first in newest-created order and removed startup component-count fan-out.",
+      "Limited existing web resource add candidates to unmanaged developer resources and excluded Microsoft-prefixed resources.",
+    ],
+  },
+  {
+    version: "0.1.22",
+    date: "2026-06-17",
+    title: "Hidden Windows AI sidecar",
+    changes: [
+      "Started the AI sidecar without opening a blank console window on Windows.",
+    ],
+  },
+  {
     version: "0.1.21",
     date: "2026-06-17",
     title: "AI sidecar provider isolation",
