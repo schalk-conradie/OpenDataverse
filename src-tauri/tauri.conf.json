@@ -30,6 +30,7 @@
     "targets": "all",
     "resources": {
       "../src-sidecar/ai/dist/": "src-sidecar/ai/dist/",
+      "../src-sidecar/ai/node_modules/@anthropic-ai/": "src-sidecar/ai/node_modules/@anthropic-ai/",
       "../src-sidecar/ai/node_modules/@openai/": "src-sidecar/ai/node_modules/@openai/"
     },
     "createUpdaterArtifacts": true,

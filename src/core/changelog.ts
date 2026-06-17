@@ -11,6 +11,33 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.21",
+    date: "2026-06-17",
+    title: "AI sidecar provider isolation",
+    changes: [
+      "Loaded AI provider runtimes only when their provider is used so Claude setup cannot break Codex chat startup.",
+      "Included Claude sidecar runtime files in packaged desktop builds.",
+    ],
+  },
+  {
+    version: "0.1.20",
+    date: "2026-06-17",
+    title: "Full Xrm IntelliSense",
+    changes: [
+      "Expanded web resource JavaScript IntelliSense to use maintained Xrm client API type declarations.",
+      "Added completions and diagnostics coverage for global context user settings, Xrm namespaces, and XrmEnum values.",
+    ],
+  },
+  {
+    version: "0.1.19",
+    date: "2026-06-17",
+    title: "Solution Explorer",
+    changes: [
+      "Added the Solution Explorer workspace for browsing Dataverse solutions and grouped solution components.",
+      "Added component details, dependency inspection, solution layers, and solution-scoped web resource add/create actions.",
+    ],
+  },
+  {
     version: "0.1.18",
     date: "2026-06-17",
     title: "Script editing IntelliSense and save flow",

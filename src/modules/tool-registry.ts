@@ -30,7 +30,7 @@ export const toolRegistry: ToolDefinition[] = [
     title: "Solution Explorer",
     description: "Solutions and components",
     icon: Boxes,
-    status: "planned",
+    status: "ready",
   },
 ]
 

@@ -127,6 +127,91 @@ export type FetchXmlQueryResult = {
   webApiUrl: string
 }
 
+export type SolutionSummary = {
+  id: string
+  uniqueName: string
+  friendlyName: string
+  version: string
+  isManaged: boolean
+  isVisible: boolean
+  publisherId?: string
+  publisherName?: string
+  publisherUniqueName?: string
+  publisherPrefix?: string
+  createdOn?: string
+  modifiedOn?: string
+  componentCount: number
+}
+
+export type SolutionComponentSummary = {
+  id: string
+  solutionId: string
+  objectId: string
+  componentType: number
+  componentTypeLabel: string
+  group: string
+  displayName: string
+  logicalName?: string
+  schemaName?: string
+  isManaged?: boolean
+  createdOn?: string
+  modifiedOn?: string
+  rootComponentBehavior?: number
+  rootComponentBehaviorLabel?: string
+  rootSolutionComponentId?: string
+  version?: string
+  relatedEntityLogicalName?: string
+  relatedRecordUrl?: string
+  layerName?: string
+}
+
+export type SolutionDependencyItem = {
+  id: string
+  dependencyType: number
+  dependencyTypeLabel: string
+  dependentComponentType: number
+  dependentComponentTypeLabel: string
+  dependentComponentObjectId: string
+  dependentComponentParentId?: string
+  requiredComponentType: number
+  requiredComponentTypeLabel: string
+  requiredComponentObjectId: string
+  requiredComponentParentId?: string
+}
+
+export type SolutionDependencyReport = {
+  required: SolutionDependencyItem[]
+  dependents: SolutionDependencyItem[]
+  deleteBlockers: SolutionDependencyItem[]
+}
+
+export type SolutionLayer = {
+  id: string
+  name: string
+  componentName?: string
+  solutionName?: string
+  publisherName?: string
+  order?: number
+  overwriteTime?: string
+  changes?: string
+}
+
+export type SolutionWebResourceCandidate = {
+  id: string
+  name: string
+  displayName?: string
+  type: WebResource["type"]
+  typeCode: number
+  isManaged: boolean
+  inSolution: boolean
+  modifiedOn?: string
+}
+
+export type SolutionWriteResult = {
+  webResourceId?: string
+  message: string
+}
+
 export type BrowserAuthStart = {
   sessionId: string
   authUrl: string

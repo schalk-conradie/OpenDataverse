@@ -43,6 +43,14 @@ FetchXML is the canonical artifact. Designer-generated XML uses the visible row
 limit. Manual XML runs as written. Query results are shown in-app, and the tool
 can copy both the FetchXML and the Dataverse Web API `fetchXml` URL.
 
+### Solution Explorer
+
+Solution Explorer lists visible Dataverse solutions for the selected
+environment, opens a grouped component table, and shows component details,
+dependencies, delete blockers, and solution layers. Its write actions are scoped
+to developer web resources: existing web resources can be added to an unmanaged
+solution, and new text web resources can be created directly in that solution.
+
 ## Local Setup
 
 Install the managed toolchain first. This repo uses `mise.toml` for Rust, and

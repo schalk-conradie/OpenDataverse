@@ -60,9 +60,10 @@ import {
 } from "@/core/dataverse/schemas"
 import { cn } from "@/lib/utils"
 import { AiChatModule } from "@/modules/ai-chat/AiChatModule"
-import { WebResourceManagementModule } from "@/modules/webresource-management/WebResourceManagementModule"
 import { FetchXmlBuilderModule } from "@/modules/fetchxml-builder/FetchXmlBuilderModule"
+import { SolutionExplorerModule } from "@/modules/solution-explorer/SolutionExplorerModule"
 import { getToolDefinition, toolRegistry } from "@/modules/tool-registry"
+import { WebResourceManagementModule } from "@/modules/webresource-management/WebResourceManagementModule"
 import { useWorkspaceStore } from "@/store/workspace-store"
 
 function EnvironmentDialog() {
@@ -201,6 +202,10 @@ function renderToolWindow(window: ToolWindow) {
 
   if (window.toolId === "fetchxml-builder") {
     return <FetchXmlBuilderModule window={window} />
+  }
+
+  if (window.toolId === "solution-explorer") {
+    return <SolutionExplorerModule window={window} />
   }
 
   const tool = getToolDefinition(window.toolId)

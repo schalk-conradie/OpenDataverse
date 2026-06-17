@@ -7,6 +7,12 @@ import {
   type AppConfig,
   type DataverseEnvironment,
   type PublishResult,
+  type SolutionComponentSummary,
+  type SolutionDependencyReport,
+  type SolutionLayer,
+  type SolutionSummary,
+  type SolutionWebResourceCandidate,
+  type SolutionWriteResult,
   type WebResource,
   type WebResourceBinding,
   type WebResourceContent,
@@ -219,4 +225,136 @@ export async function saveWebResourceContent(
       ? `Browser preview cannot publish ${content.name}`
       : `Browser preview saved ${content.name}`,
   } satisfies PublishResult
+}
+
+export async function listSolutions(environment: DataverseEnvironment) {
+  if (isTauriRuntime()) {
+    return invoke<SolutionSummary[]>("list_solutions", { environment })
+  }
+
+  const { mockSolutions } = await import(
+    "@/modules/solution-explorer/mock-data"
+  )
+  return mockSolutions
+}
+
+export async function listSolutionComponents(
+  environment: DataverseEnvironment,
+  solutionId: string,
+) {
+  if (isTauriRuntime()) {
+    return invoke<SolutionComponentSummary[]>("list_solution_components", {
+      environment,
+      solutionId,
+    })
+  }
+
+  const { mockSolutionComponents } = await import(
+    "@/modules/solution-explorer/mock-data"
+  )
+  return mockSolutionComponents.filter(
+    (component) => component.solutionId === solutionId,
+  )
+}
+
+export async function getSolutionComponentDependencies(
+  environment: DataverseEnvironment,
+  component: SolutionComponentSummary,
+) {
+  if (isTauriRuntime()) {
+    return invoke<SolutionDependencyReport>(
+      "get_solution_component_dependencies",
+      {
+        environment,
+        objectId: component.objectId,
+        componentType: component.componentType,
+      },
+    )
+  }
+
+  const { mockDependencyReport } = await import(
+    "@/modules/solution-explorer/mock-data"
+  )
+  return mockDependencyReport
+}
+
+export async function getSolutionComponentLayers(
+  environment: DataverseEnvironment,
+  component: SolutionComponentSummary,
+) {
+  if (isTauriRuntime()) {
+    return invoke<SolutionLayer[]>("get_solution_component_layers", {
+      environment,
+      objectId: component.objectId,
+      componentName: component.layerName ?? component.logicalName ?? component.displayName,
+    })
+  }
+
+  const { mockSolutionLayers } = await import(
+    "@/modules/solution-explorer/mock-data"
+  )
+  return mockSolutionLayers
+}
+
+export async function listSolutionWebResourceCandidates(
+  environment: DataverseEnvironment,
+  solutionId: string,
+) {
+  if (isTauriRuntime()) {
+    return invoke<SolutionWebResourceCandidate[]>(
+      "list_solution_web_resource_candidates",
+      {
+        environment,
+        solutionId,
+      },
+    )
+  }
+
+  const { mockWebResourceCandidates } = await import(
+    "@/modules/solution-explorer/mock-data"
+  )
+  return mockWebResourceCandidates
+}
+
+export async function addExistingWebResourceToSolution(
+  environment: DataverseEnvironment,
+  solutionUniqueName: string,
+  webResourceId: string,
+) {
+  if (isTauriRuntime()) {
+    return invoke<SolutionWriteResult>("add_existing_web_resource_to_solution", {
+      environment,
+      solutionUniqueName,
+      webResourceId,
+    })
+  }
+
+  return {
+    webResourceId,
+    message: "Browser preview added the web resource to the solution.",
+  } satisfies SolutionWriteResult
+}
+
+export async function createWebResourceInSolution(
+  environment: DataverseEnvironment,
+  input: {
+    solutionUniqueName: string
+    name: string
+    displayName: string
+    description: string
+    type: WebResource["type"]
+    content: string
+  },
+) {
+  if (isTauriRuntime()) {
+    return invoke<SolutionWriteResult>("create_web_resource_in_solution", {
+      environment,
+      input,
+    })
+  }
+
+  return {
+    webResourceId: `browser-${Date.now().toString(36)}`,
+    message: `Browser preview created ${input.name} in ${input.solutionUniqueName}.`,
+  } satisfies SolutionWriteResult
 }

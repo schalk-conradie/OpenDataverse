@@ -1,359 +1,15 @@
 import type { Monaco } from "@monaco-editor/react"
+import xrmClientApiTypes from "../../../node_modules/@types/xrm/index.d.ts?raw"
 
 import type { WebResourceContent } from "@/core/dataverse/schemas"
 
-const DATAVERSE_CLIENT_API_DTS_PATH =
-  "file:///opendataverse/types/dataverse-client-api.d.ts"
+const XRM_CLIENT_API_DTS_PATH =
+  "file:///opendataverse/types/definitelytyped-xrm.d.ts"
+const WEBRESOURCE_GLOBALS_DTS_PATH =
+  "file:///opendataverse/types/webresource-globals.d.ts"
 
-const DATAVERSE_CLIENT_API_DTS = `
-type XrmCollectionPredicate<TItem> = (item: TItem, index: number) => void;
-
-declare namespace Xrm {
-  type NotificationLevel = "ERROR" | "WARNING" | "INFO";
-  type RequiredLevel = "none" | "required" | "recommended";
-  type SubmitMode = "always" | "never" | "dirty";
-
-  interface Collection<TItem> {
-    get(): TItem[];
-    get(name: string): TItem | null;
-    get(index: number): TItem | null;
-    getLength(): number;
-    forEach(callback: XrmCollectionPredicate<TItem>): void;
-  }
-
-  interface ExecutionContext<TEventSource = unknown> {
-    getContext(): GlobalContext;
-    getDepth(): number;
-    getEventArgs(): unknown;
-    getEventSource(): TEventSource;
-    getFormContext(): FormContext;
-    getSharedVariable<TValue = unknown>(key: string): TValue;
-    setSharedVariable(key: string, value: unknown): void;
-  }
-
-  interface GlobalContext {
-    client: ClientContext;
-    getClientUrl(): string;
-    getCurrentAppName(): Promise<string>;
-    getCurrentAppProperties(): Promise<Record<string, unknown>>;
-    getOrgLcid(): number;
-    getOrgUniqueName(): string;
-    getQueryStringParameters(): Record<string, string>;
-    getUserId(): string;
-    getUserLcid(): number;
-    getUserName(): string;
-    getUserRoles(): string[];
-    getVersion(): string;
-  }
-
-  interface ClientContext {
-    getClient(): "Web" | "Outlook" | "Mobile";
-    getClientState(): "Online" | "Offline";
-    getFormFactor(): number;
-    isOffline(): boolean;
-  }
-
-  interface FormContext {
-    data: FormData;
-    ui: Ui;
-    getAttribute<TAttribute extends Attribute = Attribute>(
-      name: string,
-    ): TAttribute | null;
-    getControl<TControl extends Control = Control>(name: string): TControl | null;
-  }
-
-  interface FormData {
-    attributes: Collection<Attribute>;
-    entity: Entity;
-    process: ProcessFlow;
-    refresh(save?: boolean): Promise<void>;
-    save(options?: SaveOptions): Promise<SaveResult>;
-  }
-
-  interface Entity {
-    addOnSave(handler: (executionContext: ExecutionContext<Entity>) => void): void;
-    getDataXml(): string;
-    getEntityName(): string;
-    getId(): string;
-    getIsDirty(): boolean;
-    getPrimaryAttributeValue(): string;
-    removeOnSave(handler: (executionContext: ExecutionContext<Entity>) => void): void;
-    save(saveMode?: "saveandclose" | "saveandnew"): void;
-  }
-
-  interface SaveOptions {
-    saveMode?: number;
-    useSchedulingEngine?: boolean;
-  }
-
-  interface SaveResult {
-    savedEntityReference?: LookupValue[];
-  }
-
-  interface Attribute<TValue = unknown> {
-    addOnChange(
-      handler: (executionContext: ExecutionContext<Attribute<TValue>>) => void,
-    ): void;
-    controls: Collection<Control>;
-    fireOnChange(): void;
-    getAttributeType(): string;
-    getFormat(): string | null;
-    getInitialValue(): TValue | null;
-    getIsDirty(): boolean;
-    getName(): string;
-    getParent(): FormContext;
-    getRequiredLevel(): RequiredLevel;
-    getSubmitMode(): SubmitMode;
-    getUserPrivilege(): AttributePrivilege;
-    getValue(): TValue | null;
-    isValid(): boolean;
-    removeOnChange(
-      handler: (executionContext: ExecutionContext<Attribute<TValue>>) => void,
-    ): void;
-    setRequiredLevel(requirementLevel: RequiredLevel): void;
-    setSubmitMode(mode: SubmitMode): void;
-    setValue(value: TValue | null): void;
-  }
-
-  interface AttributePrivilege {
-    canCreate: boolean;
-    canRead: boolean;
-    canUpdate: boolean;
-  }
-
-  interface StringAttribute extends Attribute<string> {
-    getMaxLength(): number;
-  }
-
-  interface NumberAttribute extends Attribute<number> {
-    getMax(): number;
-    getMin(): number;
-    getPrecision(): number;
-  }
-
-  interface BooleanAttribute extends Attribute<boolean> {}
-  interface DateAttribute extends Attribute<Date> {}
-  interface LookupAttribute extends Attribute<LookupValue[]> {}
-
-  interface OptionSetAttribute<TValue extends number = number>
-    extends Attribute<TValue> {
-    getOption(value: TValue): OptionSetValue<TValue> | null;
-    getOptions(): OptionSetValue<TValue>[];
-    getSelectedOption(): OptionSetValue<TValue> | null;
-    getText(): string | null;
-  }
-
-  interface OptionSetValue<TValue extends number = number> {
-    text: string;
-    value: TValue;
-  }
-
-  interface LookupValue {
-    entityType: string;
-    id: string;
-    name?: string;
-  }
-
-  interface Control {
-    addNotification(notification: ControlNotification): void;
-    clearNotification(uniqueId?: string): boolean;
-    getControlType(): string;
-    getDisabled(): boolean;
-    getLabel(): string;
-    getName(): string;
-    getParent(): Section | null;
-    getVisible(): boolean;
-    setDisabled(disabled: boolean): void;
-    setFocus(): void;
-    setLabel(label: string): void;
-    setNotification(message: string, uniqueId?: string): boolean;
-    setVisible(visible: boolean): void;
-  }
-
-  interface StandardControl<TAttribute extends Attribute = Attribute>
-    extends Control {
-    getAttribute(): TAttribute;
-  }
-
-  interface ControlNotification {
-    actions?: ControlNotificationAction[];
-    messages: string[];
-    notificationLevel: "RECOMMENDATION" | "ERROR";
-    uniqueId: string;
-  }
-
-  interface ControlNotificationAction {
-    actions: Array<() => void>;
-    message: string;
-  }
-
-  interface Ui {
-    controls: Collection<Control>;
-    formSelector: FormSelector;
-    navigation: NavigationItems;
-    tabs: Collection<Tab>;
-    clearFormNotification(uniqueId: string): boolean;
-    close(): void;
-    getFormType(): number;
-    getViewPortHeight(): number;
-    getViewPortWidth(): number;
-    refreshRibbon(refreshAll?: boolean): void;
-    setFormNotification(
-      message: string,
-      level: NotificationLevel,
-      uniqueId: string,
-    ): boolean;
-  }
-
-  interface FormSelector {
-    getCurrentItem(): FormSelectorItem | null;
-    items: Collection<FormSelectorItem>;
-  }
-
-  interface FormSelectorItem {
-    getId(): string;
-    getLabel(): string;
-    navigate(): void;
-  }
-
-  interface NavigationItems {
-    items: Collection<NavigationItem>;
-  }
-
-  interface NavigationItem {
-    getId(): string;
-    getLabel(): string;
-    getVisible(): boolean;
-    setFocus(): void;
-    setLabel(label: string): void;
-    setVisible(visible: boolean): void;
-  }
-
-  interface Tab {
-    sections: Collection<Section>;
-    getDisplayState(): "expanded" | "collapsed";
-    getLabel(): string;
-    getName(): string;
-    getParent(): Ui;
-    getVisible(): boolean;
-    setDisplayState(displayState: "expanded" | "collapsed"): void;
-    setFocus(): void;
-    setLabel(label: string): void;
-    setVisible(visible: boolean): void;
-  }
-
-  interface Section {
-    controls: Collection<Control>;
-    getLabel(): string;
-    getName(): string;
-    getParent(): Tab;
-    getVisible(): boolean;
-    setLabel(label: string): void;
-    setVisible(visible: boolean): void;
-  }
-
-  interface ProcessFlow {
-    addOnStageChange(handler: (executionContext: ExecutionContext) => void): void;
-    getActiveProcess(): unknown;
-    getActiveStage(): unknown;
-    getEnabledProcesses(callback: (processes: Record<string, string>) => void): void;
-    removeOnStageChange(handler: (executionContext: ExecutionContext) => void): void;
-  }
-
-  namespace WebApi {
-    interface RetrieveMultipleResponse<TRecord = Record<string, unknown>> {
-      entities: TRecord[];
-      nextLink?: string;
-    }
-
-    interface DeleteResponse {
-      entityType: string;
-      id: string;
-      name?: string;
-    }
-
-    function createRecord<TRecord extends Record<string, unknown>>(
-      entityLogicalName: string,
-      data: TRecord,
-    ): Promise<LookupValue>;
-    function deleteRecord(
-      entityLogicalName: string,
-      id: string,
-    ): Promise<DeleteResponse>;
-    function execute(request: unknown): Promise<Response>;
-    function executeMultiple(requests: unknown[]): Promise<Response[]>;
-    function retrieveMultipleRecords<TRecord = Record<string, unknown>>(
-      entityLogicalName: string,
-      options?: string,
-      maxPageSize?: number,
-    ): Promise<RetrieveMultipleResponse<TRecord>>;
-    function retrieveRecord<TRecord = Record<string, unknown>>(
-      entityLogicalName: string,
-      id: string,
-      options?: string,
-    ): Promise<TRecord>;
-    function updateRecord<TRecord extends Record<string, unknown>>(
-      entityLogicalName: string,
-      id: string,
-      data: Partial<TRecord>,
-    ): Promise<LookupValue>;
-  }
-
-  namespace Navigation {
-    interface AlertStrings {
-      confirmButtonLabel?: string;
-      text: string;
-      title?: string;
-    }
-
-    interface ConfirmStrings extends AlertStrings {
-      cancelButtonLabel?: string;
-    }
-
-    interface DialogOptions {
-      height?: number;
-      width?: number;
-    }
-
-    function openAlertDialog(
-      alertStrings: AlertStrings,
-      alertOptions?: DialogOptions,
-    ): Promise<void>;
-    function openConfirmDialog(
-      confirmStrings: ConfirmStrings,
-      confirmOptions?: DialogOptions,
-    ): Promise<{ confirmed: boolean }>;
-    function openErrorDialog(errorOptions: {
-      details?: string;
-      errorCode?: number;
-      message?: string;
-    }): Promise<void>;
-    function openForm(options: Record<string, unknown>): Promise<LookupValue[]>;
-    function openUrl(url: string, openUrlOptions?: DialogOptions): void;
-  }
-
-  namespace Utility {
-    function closeProgressIndicator(): void;
-    function getEntityMetadata(
-      entityName: string,
-      attributes?: string[],
-    ): Promise<Record<string, unknown>>;
-    function getGlobalContext(): GlobalContext;
-    function lookupObjects(
-      lookupOptions: Record<string, unknown>,
-    ): Promise<LookupValue[]>;
-    function showProgressIndicator(message: string): void;
-  }
-}
-
-declare const Xrm: {
-  Navigation: typeof Xrm.Navigation;
-  Page: Xrm.FormContext;
-  Utility: typeof Xrm.Utility;
-  WebApi: typeof Xrm.WebApi;
-};
-
-declare const executionContext: Xrm.ExecutionContext;
+const WEBRESOURCE_GLOBALS_DTS = `
+declare const executionContext: Xrm.Events.EventContext;
 declare const formContext: Xrm.FormContext;
 `
 
@@ -362,21 +18,20 @@ type CompletionSpec = {
   insertText: string
   detail: string
   documentation?: string
-  kind?: number
 }
 
 let configured = false
 
 const executionContextCompletions: CompletionSpec[] = [
-  method("getFormContext()", "getFormContext()", "Xrm.ExecutionContext"),
-  method("getEventArgs()", "getEventArgs()", "Xrm.ExecutionContext"),
-  method("getEventSource()", "getEventSource()", "Xrm.ExecutionContext"),
-  method("getDepth()", "getDepth()", "Xrm.ExecutionContext"),
-  method("getSharedVariable()", "getSharedVariable(${1:key})", "Xrm.ExecutionContext"),
+  method("getFormContext()", "getFormContext()", "Xrm.Events.EventContext"),
+  method("getEventArgs()", "getEventArgs()", "Xrm.Events.EventContext"),
+  method("getEventSource()", "getEventSource()", "Xrm.Events.EventContext"),
+  method("getDepth()", "getDepth()", "Xrm.Events.EventContext"),
+  method("getSharedVariable()", "getSharedVariable(${1:key})", "Xrm.Events.EventContext"),
   method(
     "setSharedVariable()",
     "setSharedVariable(${1:key}, ${2:value})",
-    "Xrm.ExecutionContext",
+    "Xrm.Events.EventContext",
   ),
 ]
 
@@ -395,8 +50,8 @@ const formDataCompletions: CompletionSpec[] = [
   property("entity", "Current row API"),
   property("attributes", "Form attributes collection"),
   property("process", "Business process flow API"),
-  method("save()", "save()", "Xrm.FormData"),
-  method("refresh()", "refresh(${1:false})", "Xrm.FormData"),
+  method("save()", "save()", "Xrm.Data"),
+  method("refresh()", "refresh(${1:false})", "Xrm.Data"),
 ]
 
 const formUiCompletions: CompletionSpec[] = [
@@ -412,7 +67,11 @@ const formUiCompletions: CompletionSpec[] = [
 ]
 
 const xrmCompletions: CompletionSpec[] = [
+  property("App", "App-level API"),
+  property("Device", "Mobile device capability API"),
+  property("Encoding", "String encoding API"),
   property("Navigation", "Dialog, form, and URL navigation API"),
+  property("Panel", "Side pane API"),
   property("Utility", "Global context and utility API"),
   property("WebApi", "Dataverse Web API helpers"),
   property("Page", "Legacy form context"),
@@ -445,6 +104,7 @@ const webApiCompletions: CompletionSpec[] = [
     "Xrm.WebApi",
   ),
   method("execute()", "execute(${1:request})", "Xrm.WebApi"),
+  method("executeMultiple()", "executeMultiple(${1:requests})", "Xrm.WebApi"),
 ]
 
 const navigationCompletions: CompletionSpec[] = [
@@ -458,8 +118,11 @@ const navigationCompletions: CompletionSpec[] = [
     'openConfirmDialog({ text: "${1:message}" })',
     "Xrm.Navigation",
   ),
+  method("openErrorDialog()", "openErrorDialog(${1:errorOptions})", "Xrm.Navigation"),
+  method("openFile()", "openFile(${1:file}, ${2:options})", "Xrm.Navigation"),
   method("openForm()", "openForm(${1:options})", "Xrm.Navigation"),
   method("openUrl()", 'openUrl("${1:url}")', "Xrm.Navigation"),
+  method("navigateTo()", "navigateTo(${1:pageInput}, ${2:navigationOptions})", "Xrm.Navigation"),
 ]
 
 const utilityCompletions: CompletionSpec[] = [
@@ -469,12 +132,14 @@ const utilityCompletions: CompletionSpec[] = [
     'getEntityMetadata("${1:entityLogicalName}")',
     "Xrm.Utility",
   ),
+  method("getResourceString()", 'getResourceString("${1:webResourceName}", "${2:key}")', "Xrm.Utility"),
   method(
     "showProgressIndicator()",
     'showProgressIndicator("${1:message}")',
     "Xrm.Utility",
   ),
   method("closeProgressIndicator()", "closeProgressIndicator()", "Xrm.Utility"),
+  method("lookupObjects()", "lookupObjects(${1:lookupOptions})", "Xrm.Utility"),
 ]
 
 const snippetCompletions: CompletionSpec[] = [
@@ -482,7 +147,7 @@ const snippetCompletions: CompletionSpec[] = [
     "onLoad handler",
     [
       "/**",
-      " * @param {Xrm.ExecutionContext} executionContext",
+      " * @param {Xrm.Events.EventContext} executionContext",
       " */",
       "function onLoad(executionContext) {",
       "  const formContext = executionContext.getFormContext();",
@@ -495,7 +160,7 @@ const snippetCompletions: CompletionSpec[] = [
     "onSave handler",
     [
       "/**",
-      " * @param {Xrm.ExecutionContext} executionContext",
+      " * @param {Xrm.Events.EventContext} executionContext",
       " */",
       "function onSave(executionContext) {",
       "  const formContext = executionContext.getFormContext();",
@@ -512,9 +177,7 @@ const snippetCompletions: CompletionSpec[] = [
   ),
   snippet(
     "retrieve record",
-    [
-      'const ${1:record} = await Xrm.WebApi.retrieveRecord("${2:entityLogicalName}", "${3:id}", "${4:query}");',
-    ].join("\n"),
+    'const ${1:record} = await Xrm.WebApi.retrieveRecord("${2:entityLogicalName}", "${3:id}", "${4:query}");',
     "Retrieve one Dataverse row",
   ),
 ]
@@ -580,10 +243,8 @@ function configureTypeScriptDefaults(monaco: Monaco) {
       noSemanticValidation: false,
       noSyntaxValidation: false,
     })
-    defaults.addExtraLib(
-      DATAVERSE_CLIENT_API_DTS,
-      DATAVERSE_CLIENT_API_DTS_PATH,
-    )
+    defaults.addExtraLib(xrmClientApiTypes, XRM_CLIENT_API_DTS_PATH)
+    defaults.addExtraLib(WEBRESOURCE_GLOBALS_DTS, WEBRESOURCE_GLOBALS_DTS_PATH)
   }
 }
 
@@ -599,10 +260,20 @@ function registerDataverseCompletionProvider(monaco: Monaco) {
         endColumn: position.column,
       })
       const memberCompletions = completionsForMemberExpression(linePrefix)
-      const completions = memberCompletions ?? snippetCompletions
+      if (memberCompletions) {
+        return {
+          suggestions: memberCompletions.map((completion) =>
+            toMonacoCompletion(monaco, completion, range),
+          ),
+        }
+      }
+
+      if (isMemberExpression(linePrefix)) {
+        return { suggestions: [] }
+      }
 
       return {
-        suggestions: completions.map((completion) =>
+        suggestions: snippetCompletions.map((completion) =>
           toMonacoCompletion(monaco, completion, range),
         ),
       }
@@ -611,13 +282,7 @@ function registerDataverseCompletionProvider(monaco: Monaco) {
 }
 
 function completionsForMemberExpression(linePrefix: string) {
-  const expression = linePrefix.match(
-    /([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.$/,
-  )?.[1]
-
-  if (!expression) {
-    return undefined
-  }
+  const expression = memberExpression(linePrefix)
 
   if (expression === "executionContext") {
     return executionContextCompletions
@@ -654,6 +319,16 @@ function completionsForMemberExpression(linePrefix: string) {
   return undefined
 }
 
+function isMemberExpression(linePrefix: string) {
+  return Boolean(memberExpression(linePrefix))
+}
+
+function memberExpression(linePrefix: string) {
+  return linePrefix.match(
+    /([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\.$/,
+  )?.[1]
+}
+
 function getCurrentWordRange(
   monaco: Monaco,
   model: Parameters<
@@ -680,7 +355,7 @@ function toMonacoCompletion(
 ) {
   return {
     label: completion.label,
-    kind: completion.kind ?? monaco.languages.CompletionItemKind.Method,
+    kind: monaco.languages.CompletionItemKind.Method,
     insertText: completion.insertText,
     insertTextRules:
       monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
