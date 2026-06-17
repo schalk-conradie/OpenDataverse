@@ -71,6 +71,11 @@ import { isTauriRuntime } from "@/core/desktop/bridge"
 import { cn } from "@/lib/utils"
 import { useWorkspaceStore } from "@/store/workspace-store"
 import { webResourceEvents } from "./activity-events"
+import {
+  configureWebResourceIntellisense,
+  editorLanguageForWebResource,
+  editorPathForWebResource,
+} from "./intellisense"
 
 type WebResourceManagementModuleProps = {
   window: ToolWindow
@@ -449,6 +454,8 @@ function ResourceViewerDialog({
     actionError && actionError.resourceId === resourceId
       ? actionError.message
       : undefined
+  const editorLanguage = editorLanguageForWebResource(content)
+  const editorPath = editorPathForWebResource(content)
 
   async function copyContent() {
     if (!draftContent) {
@@ -533,7 +540,10 @@ function ResourceViewerDialog({
                   </span>
                 )}
                 {dirty && (
-                  <Badge variant="outline" className="border-amber-300 bg-amber-50 text-amber-700">
+                  <Badge
+                    variant="outline"
+                    className="border-amber-300 bg-amber-50 text-amber-700"
+                  >
                     Unsaved
                   </Badge>
                 )}
@@ -620,17 +630,17 @@ function ResourceViewerDialog({
 
         <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)]">
           <div>
-          {Boolean(error) && (
-            <div className="m-4 border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-              {error instanceof Error ? error.message : String(error)}
-            </div>
-          )}
+            {Boolean(error) && (
+              <div className="m-4 border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+                {error instanceof Error ? error.message : String(error)}
+              </div>
+            )}
 
-          {actionErrorMessage && (
-            <div className="m-4 border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
-              {actionErrorMessage}
-            </div>
-          )}
+            {actionErrorMessage && (
+              <div className="m-4 border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+                {actionErrorMessage}
+              </div>
+            )}
           </div>
 
           {!error && loading && !content && (
@@ -642,33 +652,44 @@ function ResourceViewerDialog({
 
           {!error && (!loading || content) && (
             <div className="min-h-0">
-            <Editor
-              height="100%"
-              language={content?.language ?? "plaintext"}
-              value={draftContent}
-              onChange={(value) => {
-                if (resourceId) {
-                  setDraftState({ resourceId, content: value ?? "" })
+              <Editor
+                beforeMount={configureWebResourceIntellisense}
+                height="100%"
+                language={editorLanguage}
+                path={editorPath}
+                value={draftContent}
+                onChange={(value) => {
+                  if (resourceId) {
+                    setDraftState({ resourceId, content: value ?? "" })
+                  }
+                }}
+                loading={
+                  <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="size-4 animate-spin" />
+                    Loading content
+                  </div>
                 }
-              }}
-              loading={
-                <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" />
-                  Loading content
-                </div>
-              }
-              options={{
-                readOnly: !editMode || !canEdit || isSaving,
-                minimap: { enabled: true },
-                fontSize: 13,
-                lineNumbersMinChars: 3,
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                wordWrap: "on",
-                renderLineHighlight: "line",
-              }}
-              theme="vs"
-            />
+                options={{
+                  readOnly: !editMode || !canEdit || isSaving,
+                  minimap: { enabled: true },
+                  fontSize: 13,
+                  lineNumbersMinChars: 3,
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                  wordWrap: "on",
+                  renderLineHighlight: "line",
+                  quickSuggestions: {
+                    other: true,
+                    comments: false,
+                    strings: false,
+                  },
+                  suggestOnTriggerCharacters: true,
+                  tabCompletion: "on",
+                  parameterHints: { enabled: true, cycle: true },
+                  hover: { enabled: true },
+                }}
+                theme="vs"
+              />
             </div>
           )}
         </div>
