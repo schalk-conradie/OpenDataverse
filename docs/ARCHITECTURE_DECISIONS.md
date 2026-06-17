@@ -82,6 +82,13 @@ Filter entities and columns to Advanced Find-visible metadata where available,
 and group related table choices by relationship type in the same spirit as the
 Dynamics filter screen.
 
+The Designer should not show Microsoft internal tables whose logical name
+contains `msyn_` or `msdyn`. It should also hide relationships when the app
+cannot emit a concrete valid FetchXML `link-entity` from the metadata. In
+practice, a visual related-table option needs an Advanced Find-visible source
+and target table plus known `from` and `to` columns. Relationship shapes that
+require inference stay available through manual FetchXML.
+
 Operator and value controls should follow the current Dynamics filter screen,
 not a custom exhaustive FetchXML operator matrix. After the user selects a
 column, show the conditional operators and value picker/input style that

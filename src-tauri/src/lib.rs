@@ -816,9 +816,12 @@ fn localized_label(value: &Value, key: &str, fallback: &str) -> String {
 }
 
 fn is_advanced_find_entity(value: &Value) -> bool {
+  let logical_name = json_string(value, "LogicalName").unwrap_or_default();
+
   json_bool(value, "IsValidForAdvancedFind").unwrap_or(false)
     && !json_bool(value, "IsPrivate").unwrap_or(false)
     && !json_bool(value, "IsIntersect").unwrap_or(false)
+    && !is_microsoft_internal_table_name(&logical_name)
 }
 
 fn fetchxml_entity_summary_from_value(value: &Value) -> FetchXmlEntitySummary {
@@ -841,6 +844,24 @@ fn is_advanced_find_attribute(value: &Value) -> bool {
     .and_then(Value::as_bool)
     .unwrap_or(true)
     && json_bool(value, "IsValidForAdvancedFind").unwrap_or(true)
+}
+
+fn is_microsoft_internal_table_name(value: &str) -> bool {
+  let lower = value.to_lowercase();
+
+  lower.contains("msyn_") || lower.contains("msdyn")
+}
+
+fn is_valid_designer_relationship(
+  relationship: &FetchXmlRelationshipSummary,
+  advanced_find_entities: &HashSet<String>,
+) -> bool {
+  advanced_find_entities.contains(&relationship.from_entity)
+    && advanced_find_entities.contains(&relationship.to_entity)
+    && !is_microsoft_internal_table_name(&relationship.from_entity)
+    && !is_microsoft_internal_table_name(&relationship.to_entity)
+    && relationship.from_attribute.is_some()
+    && relationship.to_attribute.is_some()
 }
 
 fn fetchxml_attribute_from_value(value: &Value) -> Option<FetchXmlAttributeSummary> {
@@ -2563,7 +2584,9 @@ async fn get_fetchxml_entity_metadata(
       .filter_map(|value| many_to_many_relationship_from_value(&logical_name, value)),
   );
   let advanced_find_entities = advanced_find_entity_logical_names(&app, &environment).await?;
-  relationships.retain(|relationship| advanced_find_entities.contains(&relationship.from_entity));
+  relationships.retain(|relationship| {
+    is_valid_designer_relationship(relationship, &advanced_find_entities)
+  });
   sort_fetchxml_relationships(&mut relationships);
 
   Ok(FetchXmlEntityMetadata {
