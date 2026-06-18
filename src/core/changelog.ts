@@ -11,6 +11,15 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.34",
+    date: "2026-06-18",
+    title: "Mac AI sidecar launcher",
+    changes: [
+      "Fixed AI Chat on macOS when OpenDataverse is launched outside a shell by resolving Node from OPENDATAVERSE_AI_NODE, PATH, Mise, Homebrew, and other common user-tool locations.",
+      "Expanded the AI sidecar PATH on launch so provider tooling can find local command-line dependencies from the same mac desktop session.",
+    ],
+  },
+  {
     version: "0.1.33",
     date: "2026-06-18",
     title: "Tauri backend modules",

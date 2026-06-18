@@ -398,8 +398,115 @@ pub(super) fn ai_sidecar_script_path(app: &AppHandle) -> Result<PathBuf, String>
   )
 }
 
-pub(super) fn ai_node_command() -> String {
-    env::var("OPENDATAVERSE_AI_NODE").unwrap_or_else(|_| "node".to_string())
+fn non_empty_os_str(value: &std::ffi::OsStr) -> bool {
+    !value.to_string_lossy().trim().is_empty()
+}
+
+fn node_executable_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "node.exe"
+    } else {
+        "node"
+    }
+}
+
+fn path_node_candidate(directory: PathBuf) -> PathBuf {
+    directory.join(node_executable_name())
+}
+
+fn existing_file(path: PathBuf) -> Option<PathBuf> {
+    path.is_file().then_some(path)
+}
+
+fn node_from_path(path_env: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
+    let path_env = path_env.filter(|value| non_empty_os_str(value))?;
+
+    env::split_paths(path_env).find_map(|directory| existing_file(path_node_candidate(directory)))
+}
+
+fn nvm_node_candidates(home_dir: &Path) -> Vec<PathBuf> {
+    let versions_dir = home_dir.join(".nvm/versions/node");
+    let Ok(entries) = fs::read_dir(versions_dir) else {
+        return Vec::new();
+    };
+
+    let mut candidates = entries
+        .filter_map(Result::ok)
+        .map(|entry| path_node_candidate(entry.path().join("bin")))
+        .filter(|path| path.is_file())
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| right.cmp(left));
+    candidates
+}
+
+fn common_node_candidates(home_dir: &Path) -> Vec<PathBuf> {
+    let mut candidates = vec![
+        path_node_candidate(home_dir.join(".local/bin")),
+        path_node_candidate(home_dir.join(".local/share/mise/shims")),
+        path_node_candidate(home_dir.join(".local/share/mise/installs/node/latest/bin")),
+        path_node_candidate(home_dir.join(".local/share/mise/installs/node/lts/bin")),
+        path_node_candidate(home_dir.join(".mise/shims")),
+        path_node_candidate(home_dir.join(".asdf/shims")),
+        path_node_candidate(home_dir.join(".volta/bin")),
+        PathBuf::from("/opt/homebrew/bin/node"),
+        PathBuf::from("/usr/local/bin/node"),
+        PathBuf::from("/usr/bin/node"),
+    ];
+    candidates.extend(nvm_node_candidates(home_dir));
+    candidates
+}
+
+pub(super) fn ai_node_command_for(
+    home_dir: &Path,
+    path_env: Option<&std::ffi::OsStr>,
+    configured: Option<&std::ffi::OsStr>,
+) -> PathBuf {
+    if let Some(configured) = configured.filter(|value| non_empty_os_str(value)) {
+        return PathBuf::from(configured);
+    }
+
+    if let Some(path_node) = node_from_path(path_env) {
+        return path_node;
+    }
+
+    common_node_candidates(home_dir)
+        .into_iter()
+        .find_map(existing_file)
+        .unwrap_or_else(|| PathBuf::from(node_executable_name()))
+}
+
+pub(super) fn ai_node_command(home_dir: &Path) -> PathBuf {
+    ai_node_command_for(
+        home_dir,
+        env::var_os("PATH").as_deref(),
+        env::var_os("OPENDATAVERSE_AI_NODE").as_deref(),
+    )
+}
+
+fn ai_sidecar_path_env(home_dir: &Path) -> std::ffi::OsString {
+    let mut paths = vec![
+        home_dir.join(".local/bin"),
+        home_dir.join(".local/share/mise/shims"),
+        home_dir.join(".local/share/mise/installs/node/latest/bin"),
+        home_dir.join(".local/share/mise/installs/node/lts/bin"),
+        home_dir.join(".mise/shims"),
+        home_dir.join(".asdf/shims"),
+        home_dir.join(".volta/bin"),
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/usr/bin"),
+        PathBuf::from("/bin"),
+        PathBuf::from("/usr/sbin"),
+        PathBuf::from("/sbin"),
+    ];
+
+    if let Some(existing_path) = env::var_os("PATH").filter(|value| non_empty_os_str(value)) {
+        paths.extend(env::split_paths(&existing_path));
+    }
+
+    env::join_paths(paths).unwrap_or_else(|_| {
+        env::var_os("PATH").unwrap_or_else(|| std::ffi::OsString::from("/usr/bin:/bin"))
+    })
 }
 
 pub(super) fn spawn_ai_sidecar(app: &AppHandle) -> Result<AiSidecarProcess, String> {
@@ -408,11 +515,13 @@ pub(super) fn spawn_ai_sidecar(app: &AppHandle) -> Result<AiSidecarProcess, Stri
     let codex_home = env::var_os("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| home_dir.join(".codex"));
-    let mut command = Command::new(ai_node_command());
+    let node_command = ai_node_command(&home_dir);
+    let mut command = Command::new(&node_command);
     command
         .arg(&script_path)
         .env("HOME", &home_dir)
         .env("CODEX_HOME", &codex_home)
+        .env("PATH", ai_sidecar_path_env(&home_dir))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -422,8 +531,9 @@ pub(super) fn spawn_ai_sidecar(app: &AppHandle) -> Result<AiSidecarProcess, Stri
 
     let mut child = command.spawn().map_err(|error| {
         format!(
-      "Could not start AI sidecar with Node. Install Node or set OPENDATAVERSE_AI_NODE. {error}"
-    )
+            "Could not start AI sidecar with Node at {}. Install Node or set OPENDATAVERSE_AI_NODE. {error}",
+            node_command.display()
+        )
     })?;
     let stdin = child
         .stdin
@@ -1498,5 +1608,20 @@ mod tests {
         let long_title = ai_chat_title_from_message(&"a".repeat(120));
         assert!(long_title.ends_with("..."));
         assert!(long_title.len() <= 83);
+    }
+
+    #[test]
+    fn ai_node_command_finds_mise_shim_outside_shell_path() {
+        let home_dir = env::temp_dir().join(format!("opendataverse-node-test-{}", Uuid::new_v4()));
+        let shim_path = home_dir.join(".local/share/mise/shims/node");
+        fs::create_dir_all(shim_path.parent().expect("shim should have a parent"))
+            .expect("test shim directory should be created");
+        fs::write(&shim_path, "").expect("test shim should be created");
+
+        let command = ai_node_command_for(&home_dir, None, Some(std::ffi::OsStr::new("")));
+
+        assert_eq!(command, shim_path);
+
+        let _ = fs::remove_dir_all(home_dir);
     }
 }
