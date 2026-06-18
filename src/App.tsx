@@ -47,7 +47,7 @@ import {
 import { getRunningAppVersion } from "@/core/desktop/app-version"
 import {
   checkForAppUpdate,
-  installAvailableAppUpdate,
+  installLatestAppUpdate,
   type AvailableAppUpdate,
   type AppUpdateProgress,
 } from "@/core/desktop/updater"
@@ -353,14 +353,16 @@ function App() {
 
     setInstallingUpdate(true)
     setUpdateProgress(undefined)
-    setLastMessage(
-      availableUpdate
-        ? `Installing OpenDataverse ${availableUpdate.version}`
-        : "Checking for updates",
-    )
+    setLastMessage("Checking for the latest OpenDataverse update")
 
     try {
-      const installed = await installAvailableAppUpdate(setUpdateProgress)
+      const installed = await installLatestAppUpdate(
+        setUpdateProgress,
+        (update) => {
+          setAvailableUpdate(update)
+          setLastMessage(`Installing OpenDataverse ${update.version}`)
+        },
+      )
       if (!installed) {
         setAvailableUpdate(null)
         setLastMessage("OpenDataverse is up to date")

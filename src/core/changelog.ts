@@ -11,6 +11,14 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.37",
+    date: "2026-06-18",
+    title: "Latest update install",
+    changes: [
+      "Changed the sidebar Update button to re-check release metadata when clicked so it installs the latest available OpenDataverse build instead of a previously cached update.",
+    ],
+  },
+  {
     version: "0.1.36",
     date: "2026-06-18",
     title: "AI chat extended tool rounds",
