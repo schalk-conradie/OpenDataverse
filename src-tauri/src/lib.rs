@@ -35,6 +35,8 @@ const REDIRECT_URI: &str = "http://localhost:8400";
 const AI_DEFAULT_TOP: u32 = 25;
 const AI_MAX_TOP: u32 = 100;
 const AI_MAX_RESPONSE_BYTES: usize = 1_000_000;
+const AI_TOOL_REQUESTS_PER_ROUND: usize = 4;
+const AI_MAX_TOOL_ROUNDS: usize = 4;
 const AI_CHAT_EVENT: &str = "ai-chat-event";
 const AI_DEFAULT_PROVIDER: &str = "codex";
 const AI_DEFAULT_MODEL: &str = "gpt-5.3-codex-spark";
@@ -4294,111 +4296,124 @@ async fn build_ai_chat_response(
   let mut messages = Vec::new();
   let provider_tool_name = thread.provider.clone();
   let provider_display_name = ai_provider_display_name(&thread.provider);
-  let provider_turn_message = create_ai_tool_message(
-    &provider_tool_name,
-    "run_turn",
-    "streaming",
-    Some(serde_json::json!({
+  let mut tool_results = Vec::new();
+  let mut completed_tool_rounds = 0;
+
+  loop {
+    let provider_operation = if completed_tool_rounds == 0 {
+      "run_turn"
+    } else {
+      "run_turn_with_tool_results"
+    };
+    let mut provider_metadata = serde_json::json!({
       "provider": thread.provider,
       "model": thread.model,
       "reasoningEffort": thread.reasoning_effort,
-    })),
-  )?;
-  emit_ai_chat_message(app, &thread.id, &provider_turn_message);
-  let first_turn = run_ai_provider_turn(app, state, thread, environment, message, Vec::new())?;
-  update_ai_thread_provider_thread_id(thread, first_turn.provider_session_id());
-  let mut provider_turn_message = mark_ai_message_status(&provider_turn_message, "complete");
-  provider_turn_message.metadata = Some(serde_json::json!({
-    "provider": thread.provider,
-    "providerThreadId": thread.provider_thread_id,
-    "toolRequestCount": first_turn.tool_requests.len(),
-    "model": thread.model,
-    "reasoningEffort": thread.reasoning_effort,
-  }));
-  emit_ai_chat_message(app, &thread.id, &provider_turn_message);
-  messages.push(provider_turn_message);
+      "toolRound": completed_tool_rounds,
+    });
+    if completed_tool_rounds > 0 {
+      if let Some(metadata) = provider_metadata.as_object_mut() {
+        metadata.insert(
+          "toolResultCount".to_string(),
+          serde_json::json!(tool_results.len()),
+        );
+      }
+    }
 
-  if first_turn.tool_requests.is_empty() {
-    let response = first_turn.response.trim();
-    let assistant_message = create_ai_message(
-      "assistant",
-      if response.is_empty() {
+    let provider_turn_message = create_ai_tool_message(
+      &provider_tool_name,
+      provider_operation,
+      "streaming",
+      Some(provider_metadata),
+    )?;
+    emit_ai_chat_message(app, &thread.id, &provider_turn_message);
+    let turn = run_ai_provider_turn(
+      app,
+      state,
+      thread,
+      environment,
+      message,
+      tool_results.clone(),
+    )?;
+    update_ai_thread_provider_thread_id(thread, turn.provider_session_id());
+    let mut provider_turn_message = mark_ai_message_status(&provider_turn_message, "complete");
+    provider_turn_message.metadata = Some(serde_json::json!({
+      "provider": thread.provider,
+      "providerThreadId": thread.provider_thread_id,
+      "toolRequestCount": turn.tool_requests.len(),
+      "toolResultCount": tool_results.len(),
+      "toolRound": completed_tool_rounds,
+      "model": thread.model,
+      "reasoningEffort": thread.reasoning_effort,
+    }));
+    emit_ai_chat_message(app, &thread.id, &provider_turn_message);
+    messages.push(provider_turn_message);
+
+    if turn.tool_requests.is_empty() {
+      let response = turn.response.trim();
+      let fallback = if completed_tool_rounds == 0 {
         format!("{provider_display_name} completed the turn without a response.")
       } else {
-        response.to_string()
-      },
-      "complete",
-    )?;
-    emit_ai_chat_message(app, &thread.id, &assistant_message);
-    messages.push(assistant_message);
-    return Ok(messages);
+        format!(
+          "{provider_display_name} received the Dataverse tool results but did not return a summary."
+        )
+      };
+      let assistant_message = create_ai_message(
+        "assistant",
+        if response.is_empty() {
+          fallback
+        } else {
+          response.to_string()
+        },
+        "complete",
+      )?;
+      emit_ai_chat_message(app, &thread.id, &assistant_message);
+      messages.push(assistant_message);
+      return Ok(messages);
+    }
+
+    if completed_tool_rounds >= AI_MAX_TOOL_ROUNDS {
+      let response = turn.response.trim();
+      let limit_message = format!(
+        "{provider_display_name} still needs more Dataverse reads after {AI_MAX_TOOL_ROUNDS} tool rounds. Narrow the request and try again."
+      );
+      let content = if response.is_empty() {
+        limit_message
+      } else {
+        format!("{response}\n\n_{limit_message}_")
+      };
+      let assistant_message = create_ai_message("assistant", content, "complete")?;
+      emit_ai_chat_message(app, &thread.id, &assistant_message);
+      messages.push(assistant_message);
+      return Ok(messages);
+    }
+
+    let mut next_tool_results = Vec::new();
+    for request in turn
+      .tool_requests
+      .iter()
+      .take(AI_TOOL_REQUESTS_PER_ROUND)
+    {
+      let (tool_message, tool_result) =
+        execute_ai_tool_request(app, &thread.id, environment, request).await?;
+      messages.push(tool_message);
+      next_tool_results.push(tool_result);
+    }
+
+    if turn.tool_requests.len() > AI_TOOL_REQUESTS_PER_ROUND {
+      next_tool_results.push(serde_json::json!({
+        "name": "tool_limit",
+        "arguments": {},
+        "ok": false,
+        "error": format!(
+          "OpenDataverse executed only the first {AI_TOOL_REQUESTS_PER_ROUND} tool requests for this turn."
+        ),
+      }));
+    }
+
+    tool_results = next_tool_results;
+    completed_tool_rounds += 1;
   }
-
-  let mut tool_results = Vec::new();
-  for request in first_turn.tool_requests.iter().take(4) {
-    let (tool_message, tool_result) =
-      execute_ai_tool_request(app, &thread.id, environment, request).await?;
-    messages.push(tool_message);
-    tool_results.push(tool_result);
-  }
-
-  if first_turn.tool_requests.len() > 4 {
-    tool_results.push(serde_json::json!({
-      "name": "tool_limit",
-      "arguments": {},
-      "ok": false,
-      "error": "OpenDataverse executed only the first 4 tool requests for this turn.",
-    }));
-  }
-
-  let provider_summary_message = create_ai_tool_message(
-    &provider_tool_name,
-    "run_turn_with_tool_results",
-    "streaming",
-    Some(serde_json::json!({
-      "provider": thread.provider,
-      "model": thread.model,
-      "reasoningEffort": thread.reasoning_effort,
-      "toolResultCount": tool_results.len(),
-    })),
-  )?;
-  emit_ai_chat_message(app, &thread.id, &provider_summary_message);
-  let final_turn = run_ai_provider_turn(
-    app,
-    state,
-    thread,
-    environment,
-    message,
-    tool_results.clone(),
-  )?;
-  update_ai_thread_provider_thread_id(thread, final_turn.provider_session_id());
-  let mut provider_summary_message = mark_ai_message_status(&provider_summary_message, "complete");
-  provider_summary_message.metadata = Some(serde_json::json!({
-    "provider": thread.provider,
-    "providerThreadId": thread.provider_thread_id,
-    "toolResultCount": tool_results.len(),
-    "model": thread.model,
-    "reasoningEffort": thread.reasoning_effort,
-  }));
-  emit_ai_chat_message(app, &thread.id, &provider_summary_message);
-  messages.push(provider_summary_message);
-
-  let response = final_turn.response.trim();
-  let assistant_message = create_ai_message(
-    "assistant",
-    if response.is_empty() {
-      format!(
-        "{provider_display_name} received the Dataverse tool results but did not return a summary."
-      )
-    } else {
-      response.to_string()
-    },
-    "complete",
-  )?;
-  emit_ai_chat_message(app, &thread.id, &assistant_message);
-  messages.push(assistant_message);
-
-  Ok(messages)
 }
 
 #[tauri::command]

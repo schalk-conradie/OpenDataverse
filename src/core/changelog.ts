@@ -11,6 +11,15 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.32",
+    date: "2026-06-18",
+    title: "AI chat tool continuation",
+    changes: [
+      "Changed AI Chat to continue bounded Dataverse tool rounds until the provider has enough data to answer instead of stopping after the first tool-result summary.",
+      "Tightened the AI chat prompt so additional Dataverse reads are requested as tool calls rather than described as the next step.",
+    ],
+  },
+  {
     version: "0.1.31",
     date: "2026-06-18",
     title: "Plugin Registration error dialogs",
