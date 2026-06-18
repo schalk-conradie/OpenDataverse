@@ -11,6 +11,23 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.36",
+    date: "2026-06-18",
+    title: "AI chat extended tool rounds",
+    changes: [
+      "Raised the bounded AI Chat Dataverse continuation ceiling to 32 tool rounds for deeper solution and component analysis.",
+    ],
+  },
+  {
+    version: "0.1.35",
+    date: "2026-06-18",
+    title: "AI chat broad lookup budget",
+    changes: [
+      "Raised the bounded AI Chat Dataverse tool budget so broader solution and component questions can finish without stopping after four rounds.",
+      "Guided AI providers to group related Dataverse reads and summarize unresolved optional details instead of exhausting the tool loop.",
+    ],
+  },
+  {
     version: "0.1.34",
     date: "2026-06-18",
     title: "Mac AI sidecar launcher",

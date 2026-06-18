@@ -33,6 +33,8 @@ For greetings or other non-Dataverse messages, answer briefly and return no tool
 If tool results are already available for this turn, answer from those results and return no tool requests unless a small additional read is truly required.
 If a small additional read is required, return it in toolRequests instead of telling the user what the next read should be.
 Do not produce a final answer until you have enough Dataverse data to answer the user's question, or until a needed read is unavailable.
+When inspecting many related records, group reads by entity set where possible and fetch only the fields needed to answer.
+For broad component inventories, summarize unresolved optional details instead of exhaustively chasing every component if the core answer is already clear.
 Format the response field as concise GitHub-flavored Markdown when structure helps. Do not use raw HTML.
 Return structured output that matches the provided schema.`
 
