@@ -61,6 +61,7 @@ import {
 import { cn } from "@/lib/utils"
 import { AiChatModule } from "@/modules/ai-chat/AiChatModule"
 import { FetchXmlBuilderModule } from "@/modules/fetchxml-builder/FetchXmlBuilderModule"
+import { PluginRegistrationModule } from "@/modules/plugin-registration/PluginRegistrationModule"
 import { SolutionExplorerModule } from "@/modules/solution-explorer/SolutionExplorerModule"
 import { getToolDefinition, toolRegistry } from "@/modules/tool-registry"
 import { WebResourceManagementModule } from "@/modules/webresource-management/WebResourceManagementModule"
@@ -202,6 +203,10 @@ function renderToolWindow(window: ToolWindow) {
 
   if (window.toolId === "fetchxml-builder") {
     return <FetchXmlBuilderModule window={window} />
+  }
+
+  if (window.toolId === "plugin-registration") {
+    return <PluginRegistrationModule window={window} />
   }
 
   if (window.toolId === "solution-explorer") {

@@ -1,4 +1,10 @@
-import { Braces, Boxes, FileCode2, MessageSquareText } from "lucide-react"
+import {
+  Braces,
+  Boxes,
+  FileCode2,
+  MessageSquareText,
+  Puzzle,
+} from "lucide-react"
 
 import type { ToolId } from "@/core/dataverse/schemas"
 import type { ToolDefinition } from "@/modules/types"
@@ -23,6 +29,13 @@ export const toolRegistry: ToolDefinition[] = [
     title: "FetchXML Builder",
     description: "Query builder workspace",
     icon: Braces,
+    status: "ready",
+  },
+  {
+    id: "plugin-registration",
+    title: "Plugin Registration",
+    description: "Unmanaged assemblies, steps, images, and endpoints",
+    icon: Puzzle,
     status: "ready",
   },
   {

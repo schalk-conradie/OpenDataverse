@@ -6,7 +6,28 @@ import {
   type BrowserAuthStart,
   type AppConfig,
   type DataverseEnvironment,
+  type CreatePluginTypeInput,
   type PublishResult,
+  type PluginAssemblyInspection,
+  type PluginAssemblySummary,
+  type PluginDependencyReport,
+  type PluginExportInput,
+  type PluginMessageFilterSummary,
+  type PluginMessageSummary,
+  type PluginPackageSummary,
+  type PluginRegistrationSnapshot,
+  type PluginServiceEndpointSummary,
+  type PluginStepSummary,
+  type PluginStepImageSummary,
+  type PluginSystemUserSummary,
+  type PluginTypeSummary,
+  type PluginWriteResult,
+  type RegisterPluginAssemblyInput,
+  type RegisterPluginServiceEndpointInput,
+  type RegisterPluginStepInput,
+  type RegisterPluginStepImageInput,
+  type UpdatePluginAssemblyInput,
+  createPluginTypeInputSchema,
   type SolutionComponentSummary,
   type SolutionDependencyReport,
   type SolutionLayer,
@@ -18,6 +39,12 @@ import {
   type WebResourceContent,
   defaultAppConfig,
   defaultUserSettings,
+  pluginExportInputSchema,
+  registerPluginAssemblyInputSchema,
+  registerPluginServiceEndpointInputSchema,
+  registerPluginStepImageInputSchema,
+  registerPluginStepInputSchema,
+  updatePluginAssemblyInputSchema,
   userSettingsSchema,
   type UserSettings,
 } from "@/core/dataverse/schemas"
@@ -390,4 +417,475 @@ export async function createWebResourceInSolution(
     webResourceId: `browser-${Date.now().toString(36)}`,
     message: `Browser preview created ${input.name} in ${input.solutionUniqueName}.`,
   } satisfies SolutionWriteResult
+}
+
+export async function listPluginAssemblies(environment: DataverseEnvironment) {
+  if (isTauriRuntime()) {
+    return invoke<PluginAssemblySummary[]>("list_plugin_assemblies", {
+      environment,
+    })
+  }
+
+  const { mockUnmanagedPluginAssemblies } = await import(
+    "@/modules/plugin-registration/mock-data"
+  )
+  return mockUnmanagedPluginAssemblies
+}
+
+export async function listPluginPackages(environment: DataverseEnvironment) {
+  if (isTauriRuntime()) {
+    return invoke<PluginPackageSummary[]>("list_plugin_packages", {
+      environment,
+    })
+  }
+
+  const { mockUnmanagedPluginPackages } = await import(
+    "@/modules/plugin-registration/mock-data"
+  )
+  return mockUnmanagedPluginPackages
+}
+
+export async function listPluginTypes(
+  environment: DataverseEnvironment,
+  assemblyId?: string,
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginTypeSummary[]>("list_plugin_types", {
+      environment,
+      assemblyId,
+    })
+  }
+
+  const { mockUnmanagedPluginTypes } = await import(
+    "@/modules/plugin-registration/mock-data"
+  )
+  return assemblyId
+    ? mockUnmanagedPluginTypes.filter(
+        (pluginType) => pluginType.assemblyId === assemblyId,
+      )
+    : mockUnmanagedPluginTypes
+}
+
+export async function listPluginSteps(
+  environment: DataverseEnvironment,
+  filters: {
+    pluginTypeId?: string
+    serviceEndpointId?: string
+  } = {},
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginStepSummary[]>("list_plugin_steps", {
+      environment,
+      pluginTypeId: filters.pluginTypeId,
+      serviceEndpointId: filters.serviceEndpointId,
+    })
+  }
+
+  const { mockUnmanagedPluginSteps } = await import(
+    "@/modules/plugin-registration/mock-data"
+  )
+  return mockUnmanagedPluginSteps.filter((step) => {
+    if (filters.pluginTypeId) {
+      return step.pluginTypeId === filters.pluginTypeId
+    }
+    if (filters.serviceEndpointId) {
+      return step.serviceEndpointId === filters.serviceEndpointId
+    }
+    return true
+  })
+}
+
+export async function listPluginStepImages(
+  environment: DataverseEnvironment,
+  stepId?: string,
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginStepImageSummary[]>("list_plugin_step_images", {
+      environment,
+      stepId,
+    })
+  }
+
+  const { mockUnmanagedPluginStepImages } = await import(
+    "@/modules/plugin-registration/mock-data"
+  )
+  return stepId
+    ? mockUnmanagedPluginStepImages.filter((image) => image.stepId === stepId)
+    : mockUnmanagedPluginStepImages
+}
+
+export async function listPluginMessages(environment: DataverseEnvironment) {
+  if (isTauriRuntime()) {
+    return invoke<PluginMessageSummary[]>("list_plugin_messages", {
+      environment,
+    })
+  }
+
+  const { mockPluginMessages } = await import(
+    "@/modules/plugin-registration/mock-data"
+  )
+  return mockPluginMessages
+}
+
+export async function listPluginMessageFilters(
+  environment: DataverseEnvironment,
+  messageId: string,
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginMessageFilterSummary[]>("list_plugin_message_filters", {
+      environment,
+      messageId,
+    })
+  }
+
+  const { mockPluginMessageFilters } = await import(
+    "@/modules/plugin-registration/mock-data"
+  )
+  return mockPluginMessageFilters.filter((filter) => filter.messageId === messageId)
+}
+
+export async function listPluginServiceEndpoints(
+  environment: DataverseEnvironment,
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginServiceEndpointSummary[]>(
+      "list_plugin_service_endpoints",
+      { environment },
+    )
+  }
+
+  const { mockUnmanagedPluginServiceEndpoints } = await import(
+    "@/modules/plugin-registration/mock-data"
+  )
+  return mockUnmanagedPluginServiceEndpoints
+}
+
+export async function listPluginSystemUsers(environment: DataverseEnvironment) {
+  if (isTauriRuntime()) {
+    return invoke<PluginSystemUserSummary[]>("list_plugin_system_users", {
+      environment,
+    })
+  }
+
+  const { mockPluginUsers } = await import(
+    "@/modules/plugin-registration/mock-data"
+  )
+  return mockPluginUsers
+}
+
+export async function getPluginRegistrationSnapshot(
+  environment: DataverseEnvironment,
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginRegistrationSnapshot>(
+      "get_plugin_registration_snapshot",
+      { environment },
+    )
+  }
+
+  const { mockPluginRegistrationSnapshot } = await import(
+    "@/modules/plugin-registration/mock-data"
+  )
+  return mockPluginRegistrationSnapshot
+}
+
+export async function inspectPluginAssembly(localPath: string) {
+  if (isTauriRuntime()) {
+    return invoke<PluginAssemblyInspection>("inspect_plugin_assembly", {
+      localPath,
+    })
+  }
+
+  const { mockPluginAssemblyInspection } = await import(
+    "@/modules/plugin-registration/mock-data"
+  )
+  return {
+    ...mockPluginAssemblyInspection,
+    localPath,
+    fileName: localPath.split("/").at(-1) ?? mockPluginAssemblyInspection.fileName,
+  } satisfies PluginAssemblyInspection
+}
+
+export async function registerPluginAssembly(
+  environment: DataverseEnvironment,
+  input: RegisterPluginAssemblyInput,
+) {
+  const parsed = registerPluginAssemblyInputSchema.parse(input)
+
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("register_plugin_assembly", {
+      environment,
+      input: parsed,
+    })
+  }
+
+  return {
+    id: `browser-assembly-${Date.now().toString(36)}`,
+    message: `Browser preview registered ${parsed.name}.`,
+  } satisfies PluginWriteResult
+}
+
+export async function updatePluginAssembly(
+  environment: DataverseEnvironment,
+  input: UpdatePluginAssemblyInput,
+) {
+  const parsed = updatePluginAssemblyInputSchema.parse(input)
+
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("update_plugin_assembly", {
+      environment,
+      input: parsed,
+    })
+  }
+
+  return {
+    id: parsed.assemblyId,
+    message: `Browser preview updated ${parsed.name}.`,
+  } satisfies PluginWriteResult
+}
+
+export async function unregisterPluginAssembly(
+  environment: DataverseEnvironment,
+  assemblyId: string,
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("unregister_plugin_assembly", {
+      environment,
+      assemblyId,
+    })
+  }
+
+  return {
+    id: assemblyId,
+    message: "Browser preview unregistered the assembly.",
+  } satisfies PluginWriteResult
+}
+
+export async function createPluginType(
+  environment: DataverseEnvironment,
+  input: CreatePluginTypeInput,
+) {
+  const parsed = createPluginTypeInputSchema.parse(input)
+
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("create_plugin_type", {
+      environment,
+      input: parsed,
+    })
+  }
+
+  return {
+    id: `browser-type-${Date.now().toString(36)}`,
+    message: `Browser preview added ${parsed.typeName}.`,
+  } satisfies PluginWriteResult
+}
+
+export async function unregisterPluginType(
+  environment: DataverseEnvironment,
+  pluginTypeId: string,
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("unregister_plugin_type", {
+      environment,
+      pluginTypeId,
+    })
+  }
+
+  return {
+    id: pluginTypeId,
+    message: "Browser preview unregistered the plug-in type.",
+  } satisfies PluginWriteResult
+}
+
+export async function registerPluginStep(
+  environment: DataverseEnvironment,
+  input: RegisterPluginStepInput,
+) {
+  const parsed = registerPluginStepInputSchema.parse(input)
+
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("register_plugin_step", {
+      environment,
+      input: parsed,
+    })
+  }
+
+  return {
+    id: parsed.stepId ?? `browser-step-${Date.now().toString(36)}`,
+    message: parsed.stepId
+      ? `Browser preview updated ${parsed.name}.`
+      : `Browser preview registered ${parsed.name}.`,
+  } satisfies PluginWriteResult
+}
+
+export async function registerPluginStepImage(
+  environment: DataverseEnvironment,
+  input: RegisterPluginStepImageInput,
+) {
+  const parsed = registerPluginStepImageInputSchema.parse(input)
+
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("register_plugin_step_image", {
+      environment,
+      input: parsed,
+    })
+  }
+
+  return {
+    id: parsed.imageId ?? `browser-image-${Date.now().toString(36)}`,
+    message: parsed.imageId
+      ? `Browser preview updated ${parsed.name}.`
+      : `Browser preview registered ${parsed.name}.`,
+  } satisfies PluginWriteResult
+}
+
+export async function setPluginStepState(
+  environment: DataverseEnvironment,
+  stepId: string,
+  enabled: boolean,
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("set_plugin_step_state", {
+      environment,
+      stepId,
+      enabled,
+    })
+  }
+
+  return {
+    id: stepId,
+    message: `Browser preview ${enabled ? "enabled" : "disabled"} the step.`,
+  } satisfies PluginWriteResult
+}
+
+export async function setPluginComponentState(
+  environment: DataverseEnvironment,
+  component: {
+    componentKind: "step" | "assembly" | "type" | "endpoint"
+    id: string
+    enabled: boolean
+  },
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("set_plugin_component_state", {
+      environment,
+      component,
+    })
+  }
+
+  return {
+    id: component.id,
+    message: `Browser preview ${
+      component.enabled ? "enabled" : "disabled"
+    } the component.`,
+  } satisfies PluginWriteResult
+}
+
+export async function unregisterPluginStep(
+  environment: DataverseEnvironment,
+  stepId: string,
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("unregister_plugin_step", {
+      environment,
+      stepId,
+    })
+  }
+
+  return {
+    id: stepId,
+    message: "Browser preview unregistered the step.",
+  } satisfies PluginWriteResult
+}
+
+export async function unregisterPluginStepImage(
+  environment: DataverseEnvironment,
+  imageId: string,
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("unregister_plugin_step_image", {
+      environment,
+      imageId,
+    })
+  }
+
+  return {
+    id: imageId,
+    message: "Browser preview unregistered the image.",
+  } satisfies PluginWriteResult
+}
+
+export async function registerPluginServiceEndpoint(
+  environment: DataverseEnvironment,
+  input: RegisterPluginServiceEndpointInput,
+) {
+  const parsed = registerPluginServiceEndpointInputSchema.parse(input)
+
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("register_plugin_service_endpoint", {
+      environment,
+      input: parsed,
+    })
+  }
+
+  return {
+    id: parsed.endpointId ?? `browser-endpoint-${Date.now().toString(36)}`,
+    message: parsed.endpointId
+      ? `Browser preview updated ${parsed.name}.`
+      : `Browser preview registered ${parsed.name}.`,
+  } satisfies PluginWriteResult
+}
+
+export async function unregisterPluginServiceEndpoint(
+  environment: DataverseEnvironment,
+  endpointId: string,
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("unregister_plugin_service_endpoint", {
+      environment,
+      endpointId,
+    })
+  }
+
+  return {
+    id: endpointId,
+    message: "Browser preview unregistered the service endpoint.",
+  } satisfies PluginWriteResult
+}
+
+export async function getPluginComponentDependencies(
+  environment: DataverseEnvironment,
+  objectId: string,
+  componentType: number,
+) {
+  if (isTauriRuntime()) {
+    return invoke<PluginDependencyReport>("get_plugin_component_dependencies", {
+      environment,
+      objectId,
+      componentType,
+    })
+  }
+
+  const { mockPluginDependencyReport } = await import(
+    "@/modules/plugin-registration/mock-data"
+  )
+  return mockPluginDependencyReport
+}
+
+export async function exportPluginRegistration(
+  environment: DataverseEnvironment,
+  input: PluginExportInput,
+) {
+  const parsed = pluginExportInputSchema.parse(input)
+
+  if (isTauriRuntime()) {
+    return invoke<PluginWriteResult>("export_plugin_registration", {
+      environment,
+      input: parsed,
+    })
+  }
+
+  return {
+    message: `Browser preview exported registrations to ${parsed.localPath}.`,
+  } satisfies PluginWriteResult
 }

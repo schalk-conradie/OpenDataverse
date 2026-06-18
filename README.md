@@ -52,6 +52,25 @@ Its write actions are scoped to developer web resources: existing unmanaged,
 non-Microsoft web resources can be added to an unmanaged solution, and new text
 web resources can be created directly in that solution.
 
+### Plugin Registration
+
+Plugin Registration is a native Dataverse plug-in registration workspace for
+unmanaged assemblies, plug-in types, processing steps, step images, secure
+configuration, and service endpoints/webhooks. It can inspect a compiled
+plug-in DLL locally, register or update unmanaged registrations through the
+Dataverse Web API, add registration components to a solution, inspect
+dependencies, and export an unmanaged registration snapshot.
+
+The workspace uses a PRT-style expandable registration tree. Packages contain
+assemblies, assemblies contain plug-in types or workflow activities, those
+contain steps, and steps contain images. Service endpoints and webhooks are
+root nodes whose steps load underneath them when expanded.
+
+The tool is self-contained in OpenDataverse. It does not launch or require
+Windows PRT, XrmToolBox, PAC CLI, Visual Studio, or an installed .NET runtime.
+Dataverse tokens remain in the Tauri backend, and secure configuration values
+are written without being read back into the renderer after save.
+
 ## Local Setup
 
 Install the managed toolchain first. This repo uses `mise.toml` for Rust, and
