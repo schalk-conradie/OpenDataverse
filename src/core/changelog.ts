@@ -11,6 +11,15 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.33",
+    date: "2026-06-18",
+    title: "Tauri backend modules",
+    changes: [
+      "Split the Rust Tauri backend out of the large lib.rs file into feature-focused backend modules for auth, AI chat, FetchXML, plug-in registration, Solution Explorer, and web resources.",
+      "Kept Tauri command registration centralized while moving command implementations and related tests next to their feature code.",
+    ],
+  },
+  {
     version: "0.1.32",
     date: "2026-06-18",
     title: "AI chat tool continuation",
