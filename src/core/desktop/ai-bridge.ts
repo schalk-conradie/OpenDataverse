@@ -10,6 +10,7 @@ import type {
   AiChatThreadInput,
   AiChatThreadSummary,
 } from "@/modules/ai-chat/types"
+import { defaultModelByProvider } from "@/modules/ai-chat/options"
 
 const browserThreads = new Map<string, AiChatThread>()
 export const AI_CHAT_STREAM_EVENT = "ai-chat-event"
@@ -74,7 +75,7 @@ function summarizeThread(thread: AiChatThread): AiChatThreadSummary | undefined 
     id: thread.id,
     environmentId: thread.environmentId,
     provider: thread.provider,
-    model: thread.model ?? "gpt-5.4-mini",
+    model: thread.model ?? defaultModelByProvider[thread.provider],
     reasoningEffort: thread.reasoningEffort ?? "medium",
     title: thread.title,
     createdAt: thread.createdAt,

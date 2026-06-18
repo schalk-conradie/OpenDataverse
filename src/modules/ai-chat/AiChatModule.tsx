@@ -52,6 +52,16 @@ import type {
   AiChatWindowState,
   AiReasoningEffort,
 } from "@/modules/ai-chat/types"
+import {
+  defaultModelByProvider,
+  defaultReasoningByProvider,
+  isAiChatModel,
+  isAiChatProvider,
+  isAiReasoningEffort,
+  modelOptionsByProvider,
+  providerOptions,
+  reasoningOptionsByProvider,
+} from "@/modules/ai-chat/options"
 import { useWorkspaceStore } from "@/store/workspace-store"
 
 type AiChatModuleProps = {
@@ -64,61 +74,6 @@ const starterPrompts = [
   "Show account metadata for the primary name and created fields.",
   "Get the first 5 accounts with name and accountid.",
 ]
-
-const providerOptions: Array<{ value: AiChatProvider; label: string }> = [
-  { value: "codex", label: "Codex" },
-  { value: "claude", label: "Claude" },
-]
-
-const defaultModelByProvider: Record<AiChatProvider, AiChatModel> = {
-  codex: "gpt-5.4-mini",
-  claude: "claude-sonnet-4-6",
-}
-
-const defaultReasoningByProvider: Record<AiChatProvider, AiReasoningEffort> = {
-  codex: "medium",
-  claude: "medium",
-}
-
-const modelOptionsByProvider: Record<
-  AiChatProvider,
-  Array<{ value: AiChatModel; label: string }>
-> = {
-  codex: [
-    { value: "gpt-5.5", label: "GPT-5.5" },
-    { value: "gpt-5.4", label: "GPT-5.4" },
-    { value: "gpt-5.4-mini", label: "GPT-5.4-Mini" },
-    { value: "gpt-5.3-codex-spark", label: "GPT-5.3-Codex-Spark" },
-  ],
-  claude: [
-    { value: "claude-fable-5", label: "Claude Fable 5" },
-    { value: "claude-opus-4-8", label: "Claude Opus 4.8" },
-    { value: "claude-opus-4-7", label: "Claude Opus 4.7" },
-    { value: "claude-opus-4-6", label: "Claude Opus 4.6" },
-    { value: "claude-opus-4-5-20251101", label: "Claude Opus 4.5" },
-    { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-    { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
-    { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
-  ],
-}
-
-const reasoningOptionsByProvider: Record<
-  AiChatProvider,
-  Array<{ value: AiReasoningEffort; label: string }>
-> = {
-  codex: [
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High" },
-    { value: "xhigh", label: "Extra High" },
-  ],
-  claude: [
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High" },
-    { value: "max", label: "Max" },
-  ],
-}
 
 const markdownAllowedElements = [
   "a",
@@ -277,27 +232,7 @@ const defaultAiChatState: AiChatWindowState = {
   reasoningEffort: defaultReasoningByProvider.codex,
   composerValue: "",
   running: false,
-  settingsVersion: 4,
-}
-
-function isAiChatProvider(value: unknown): value is AiChatProvider {
-  return providerOptions.some((option) => option.value === value)
-}
-
-function isAiChatModel(
-  provider: AiChatProvider,
-  value: unknown,
-): value is AiChatModel {
-  return modelOptionsByProvider[provider].some((option) => option.value === value)
-}
-
-function isAiReasoningEffort(
-  provider: AiChatProvider,
-  value: unknown,
-): value is AiReasoningEffort {
-  return reasoningOptionsByProvider[provider].some(
-    (option) => option.value === value,
-  )
+  settingsVersion: 5,
 }
 
 function getAiChatWindowState(window: ToolWindow): AiChatWindowState {
@@ -312,7 +247,10 @@ function getAiChatWindowState(window: ToolWindow): AiChatWindowState {
         ? candidate.provider
         : threadProvider ?? defaultAiChatState.provider
   const legacyDefaultModel =
-    candidate?.settingsVersion === undefined && candidate?.model === "gpt-5.5"
+    (candidate?.settingsVersion === undefined && candidate?.model === "gpt-5.5") ||
+    (provider === "codex" &&
+      (candidate?.settingsVersion ?? 0) < 5 &&
+      candidate?.model === "gpt-5.4-mini")
   const model =
     isAiChatModel(provider, candidate?.model) && !legacyDefaultModel
       ? candidate.model

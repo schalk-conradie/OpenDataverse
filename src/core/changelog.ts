@@ -11,6 +11,85 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.32",
+    date: "2026-06-18",
+    title: "AI chat tool continuation",
+    changes: [
+      "Changed AI Chat to continue bounded Dataverse tool rounds until the provider has enough data to answer instead of stopping after the first tool-result summary.",
+      "Tightened the AI chat prompt so additional Dataverse reads are requested as tool calls rather than described as the next step.",
+    ],
+  },
+  {
+    version: "0.1.31",
+    date: "2026-06-18",
+    title: "Plugin Registration error dialogs",
+    changes: [
+      "Added modal error dialogs for Plugin Registration write, inspection, dependency, lazy-load, and read-only guard failures so important errors are not hidden in the status area.",
+    ],
+  },
+  {
+    version: "0.1.30",
+    date: "2026-06-18",
+    title: "Plugin Registration tree navigation",
+    changes: [
+      "Changed Plugin Registration from a flat grouped list into a PRT-style expandable tree for packages, assemblies, plug-in types, steps, images, service endpoints, and webhooks.",
+      "Changed startup loading to fetch only root registration nodes and form metadata; assembly, type, endpoint, and step descendants now load when their tree node is expanded.",
+    ],
+  },
+  {
+    version: "0.1.29",
+    date: "2026-06-18",
+    title: "Plugin Registration layout fix",
+    changes: [
+      "Changed the Plugin Registration workspace to stack the detail pane below the table on narrower desktop widths so registration text and actions no longer overlap.",
+      "Removed unsupported service endpoint state reads and toggles so endpoint loading no longer requests Dataverse state fields that are not exposed by service endpoints.",
+    ],
+  },
+  {
+    version: "0.1.28",
+    date: "2026-06-18",
+    title: "Plugin Registration unmanaged default",
+    changes: [
+      "Changed Plugin Registration to load unmanaged assemblies, packages, types, steps, images, and service endpoints by default.",
+      "Aligned browser-preview Plugin Registration data with the unmanaged working set used by native Dataverse reads.",
+    ],
+  },
+  {
+    version: "0.1.27",
+    date: "2026-06-18",
+    title: "Plugin Registration load resilience",
+    changes: [
+      "Changed Plugin Registration startup to load registration sections with bounded fallbacks so one slow Dataverse table does not block the whole tool.",
+      "Added visible Plugin Registration load warnings and disabled automatic retry loops for the initial registry snapshot.",
+    ],
+  },
+  {
+    version: "0.1.26",
+    date: "2026-06-18",
+    title: "Plugin Registration",
+    changes: [
+      "Added the Plugin Registration workspace for assemblies, plug-in types, steps, images, service endpoints, inspection, dependencies, and export workflows.",
+      "Added browser-preview mock data and validation contracts for native Dataverse plug-in registration.",
+    ],
+  },
+  {
+    version: "0.1.25",
+    date: "2026-06-18",
+    title: "ChatGPT 5.3 Spark default",
+    changes: [
+      "Changed the Codex AI chat default model from GPT 5.4 mini to ChatGPT 5.3 Spark.",
+    ],
+  },
+  {
+    version: "0.1.24",
+    date: "2026-06-17",
+    title: "Webresource AI assistant",
+    changes: [
+      "Added a compact AI chat panel to Webresource Management with Codex and Claude provider selectors.",
+      "Scoped webresource chat prompts to the selected resource or the current webresource view.",
+    ],
+  },
+  {
     version: "0.1.23",
     date: "2026-06-17",
     title: "Solution Explorer load defaults",

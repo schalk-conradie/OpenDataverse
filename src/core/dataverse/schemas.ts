@@ -212,6 +212,362 @@ export type SolutionWriteResult = {
   message: string
 }
 
+export type PluginOptionSummary = {
+  value: number
+  label: string
+}
+
+export type PluginEditableState = {
+  canEdit: boolean
+  canDelete: boolean
+  reasons: string[]
+}
+
+export type PluginAssemblySummary = {
+  id: string
+  name: string
+  version: string
+  culture?: string
+  publicKeyToken?: string
+  fileName?: string
+  fileHash?: string
+  sizeBytes?: number
+  isolationMode: number
+  isolationModeLabel: string
+  sourceType: number
+  sourceTypeLabel: string
+  isManaged: boolean
+  isCustomizable?: boolean
+  description?: string
+  createdOn?: string
+  modifiedOn?: string
+  packageId?: string
+  packageName?: string
+  editable: PluginEditableState
+}
+
+export type PluginPackageSummary = {
+  id: string
+  name: string
+  version?: string
+  fileName?: string
+  packageType?: number
+  packageTypeLabel?: string
+  isManaged: boolean
+  description?: string
+  createdOn?: string
+  modifiedOn?: string
+  editable: PluginEditableState
+}
+
+export type PluginTypeSummary = {
+  id: string
+  assemblyId: string
+  assemblyName: string
+  packageId?: string
+  packageName?: string
+  name: string
+  friendlyName: string
+  typeName: string
+  isWorkflowActivity: boolean
+  isManaged: boolean
+  isCustomizable?: boolean
+  description?: string
+  createdOn?: string
+  modifiedOn?: string
+  editable: PluginEditableState
+}
+
+export type PluginStepSummary = {
+  id: string
+  name: string
+  handlerType: "plugintype" | "serviceendpoint"
+  pluginTypeId?: string
+  pluginTypeName?: string
+  serviceEndpointId?: string
+  serviceEndpointName?: string
+  assemblyId?: string
+  assemblyName?: string
+  packageId?: string
+  packageName?: string
+  messageId: string
+  messageName: string
+  messageFilterId?: string
+  primaryEntity?: string
+  secondaryEntity?: string
+  stage: number
+  stageLabel: string
+  mode: number
+  modeLabel: string
+  rank: number
+  supportedDeployment: number
+  supportedDeploymentLabel: string
+  asyncAutoDelete?: boolean
+  filteringAttributes?: string
+  configuration?: string
+  secureConfigId?: string
+  hasSecureConfig: boolean
+  impersonatingUserId?: string
+  impersonatingUserName?: string
+  description?: string
+  isManaged: boolean
+  isCustomizable?: boolean
+  stateCode: number
+  statusCode: number
+  statusLabel: string
+  createdOn?: string
+  modifiedOn?: string
+  editable: PluginEditableState
+}
+
+export type PluginStepImageSummary = {
+  id: string
+  stepId: string
+  stepName: string
+  name: string
+  entityAlias: string
+  imageType: number
+  imageTypeLabel: string
+  messagePropertyName: string
+  attributes?: string
+  description?: string
+  isManaged: boolean
+  isCustomizable?: boolean
+  createdOn?: string
+  modifiedOn?: string
+  editable: PluginEditableState
+}
+
+export type PluginMessageSummary = {
+  id: string
+  name: string
+}
+
+export type PluginMessageFilterSummary = {
+  id: string
+  messageId: string
+  primaryEntity?: string
+  secondaryEntity?: string
+  isCustomProcessingStepAllowed: boolean
+}
+
+export type PluginServiceEndpointSummary = {
+  id: string
+  name: string
+  contract: number
+  contractLabel: string
+  authType: number
+  authTypeLabel: string
+  url?: string
+  path?: string
+  namespaceAddress?: string
+  messageFormat?: number
+  messageFormatLabel?: string
+  isAuthValueSet?: boolean
+  isManaged: boolean
+  description?: string
+  stateCode?: number
+  statusCode?: number
+  createdOn?: string
+  modifiedOn?: string
+  editable: PluginEditableState
+}
+
+export type PluginSystemUserSummary = {
+  id: string
+  fullName: string
+  domainName?: string
+  isDisabled: boolean
+}
+
+export type PluginRegistrationSnapshot = {
+  assemblies: PluginAssemblySummary[]
+  packages: PluginPackageSummary[]
+  types: PluginTypeSummary[]
+  steps: PluginStepSummary[]
+  images: PluginStepImageSummary[]
+  messages: PluginMessageSummary[]
+  endpoints: PluginServiceEndpointSummary[]
+  users: PluginSystemUserSummary[]
+  stageOptions: PluginOptionSummary[]
+  modeOptions: PluginOptionSummary[]
+  deploymentOptions: PluginOptionSummary[]
+  isolationModeOptions: PluginOptionSummary[]
+  sourceTypeOptions: PluginOptionSummary[]
+  imageTypeOptions: PluginOptionSummary[]
+  endpointContractOptions: PluginOptionSummary[]
+  endpointAuthTypeOptions: PluginOptionSummary[]
+  warnings: string[]
+}
+
+export type PluginDependencyItem = {
+  id: string
+  dependencyType: number
+  dependencyTypeLabel: string
+  dependentComponentType: number
+  dependentComponentTypeLabel: string
+  dependentComponentObjectId: string
+  dependentComponentParentId?: string
+  requiredComponentType: number
+  requiredComponentTypeLabel: string
+  requiredComponentObjectId: string
+  requiredComponentParentId?: string
+}
+
+export type PluginDependencyReport = {
+  required: PluginDependencyItem[]
+  dependents: PluginDependencyItem[]
+  deleteBlockers: PluginDependencyItem[]
+}
+
+export type PluginDiscoveredType = {
+  fullName: string
+  name: string
+  namespace?: string
+  kind: "plugin" | "workflow" | "unknown"
+  isAbstract: boolean
+  isPublic: boolean
+  implementsIPlugin: boolean
+  baseType?: string
+}
+
+export type PluginAssemblyInspection = {
+  localPath: string
+  fileName: string
+  sizeBytes: number
+  fileHash: string
+  assemblyName: string
+  version: string
+  culture: string
+  publicKeyToken: string
+  targetFramework?: string
+  strongNameSigned: boolean
+  clrMetadataVersion?: string
+  discoveredTypes: PluginDiscoveredType[]
+  warnings: string[]
+}
+
+export const registerPluginAssemblyInputSchema = z.object({
+  localPath: z
+    .string()
+    .trim()
+    .min(1, "Select a compiled plug-in assembly"),
+  name: z.string().trim().min(1, "Assembly name is required"),
+  version: z.string().trim().min(1, "Assembly version is required"),
+  culture: z.string().trim().default("neutral"),
+  publicKeyToken: z.string().trim().default("null"),
+  isolationMode: z.number().int().default(2),
+  sourceType: z.number().int().default(0),
+  description: z.string().trim().optional(),
+  typeNames: z.array(z.string().trim().min(1)).min(1, "Select at least one plug-in type"),
+  solutionUniqueName: z.string().trim().optional(),
+})
+
+export const updatePluginAssemblyInputSchema =
+  registerPluginAssemblyInputSchema.extend({
+    assemblyId: z.string().trim().min(1, "Assembly is required"),
+  })
+
+export type RegisterPluginAssemblyInput = z.infer<
+  typeof registerPluginAssemblyInputSchema
+>
+
+export type UpdatePluginAssemblyInput = z.infer<
+  typeof updatePluginAssemblyInputSchema
+>
+
+export const createPluginTypeInputSchema = z.object({
+  assemblyId: z.string().trim().min(1, "Assembly is required"),
+  typeName: z.string().trim().min(1, "Type name is required"),
+  friendlyName: z.string().trim().optional(),
+  description: z.string().trim().optional(),
+  isWorkflowActivity: z.boolean().default(false),
+  solutionUniqueName: z.string().trim().optional(),
+})
+
+export type CreatePluginTypeInput = z.infer<typeof createPluginTypeInputSchema>
+
+export const registerPluginStepInputSchema = z
+  .object({
+    stepId: z.string().trim().optional(),
+    handlerType: z.enum(["plugintype", "serviceendpoint"]).default("plugintype"),
+    pluginTypeId: z.string().trim().optional(),
+    serviceEndpointId: z.string().trim().optional(),
+    messageId: z.string().trim().min(1, "Message is required"),
+    messageFilterId: z.string().trim().optional(),
+    name: z.string().trim().min(1, "Step name is required"),
+    stage: z.number().int(),
+    mode: z.number().int(),
+    rank: z.number().int().min(1),
+    supportedDeployment: z.number().int(),
+    asyncAutoDelete: z.boolean().optional(),
+    filteringAttributes: z.string().trim().optional(),
+    configuration: z.string().optional(),
+    secureConfiguration: z.string().optional(),
+    description: z.string().trim().optional(),
+    impersonatingUserId: z.string().trim().optional(),
+    enabled: z.boolean(),
+    solutionUniqueName: z.string().trim().optional(),
+  })
+  .refine(
+    (input) =>
+      input.handlerType === "plugintype"
+        ? Boolean(input.pluginTypeId)
+        : Boolean(input.serviceEndpointId),
+    "Select a plug-in type or service endpoint handler",
+  )
+
+export type RegisterPluginStepInput = z.infer<
+  typeof registerPluginStepInputSchema
+>
+
+export const registerPluginStepImageInputSchema = z.object({
+  imageId: z.string().trim().optional(),
+  stepId: z.string().trim().min(1, "Step is required"),
+  name: z.string().trim().min(1, "Image name is required"),
+  entityAlias: z.string().trim().min(1, "Alias is required"),
+  imageType: z.number().int(),
+  messagePropertyName: z.string().trim().min(1, "Message property is required"),
+  attributes: z.string().trim().optional(),
+  description: z.string().trim().optional(),
+  solutionUniqueName: z.string().trim().optional(),
+})
+
+export type RegisterPluginStepImageInput = z.infer<
+  typeof registerPluginStepImageInputSchema
+>
+
+export const registerPluginServiceEndpointInputSchema = z.object({
+  endpointId: z.string().trim().optional(),
+  name: z.string().trim().min(1, "Endpoint name is required"),
+  contract: z.number().int(),
+  authType: z.number().int(),
+  url: z.string().trim().optional(),
+  path: z.string().trim().optional(),
+  namespaceAddress: z.string().trim().optional(),
+  messageFormat: z.number().int().optional(),
+  authValue: z.string().optional(),
+  description: z.string().trim().optional(),
+  solutionUniqueName: z.string().trim().optional(),
+})
+
+export type RegisterPluginServiceEndpointInput = z.infer<
+  typeof registerPluginServiceEndpointInputSchema
+>
+
+export const pluginExportInputSchema = z.object({
+  localPath: z.string().trim().min(1, "Export path is required"),
+  includeManaged: z.boolean().default(false),
+  componentIds: z.array(z.string().trim().min(1)).default([]),
+})
+
+export type PluginExportInput = z.infer<typeof pluginExportInputSchema>
+
+export type PluginWriteResult = {
+  id?: string
+  message: string
+}
+
 export type BrowserAuthStart = {
   sessionId: string
   authUrl: string
@@ -235,6 +591,7 @@ export type ToolId =
   | "autopublisher"
   | "ai-chat"
   | "fetchxml-builder"
+  | "plugin-registration"
   | "solution-explorer"
 
 export type ToolWindow = {
