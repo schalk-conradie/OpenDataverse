@@ -1,25 +1,39 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { dirname, normalize } from "@tauri-apps/api/path"
 import { watch, type UnwatchFn, type WatchEvent } from "@tauri-apps/plugin-fs"
 import { openUrl } from "@tauri-apps/plugin-opener"
 import Editor from "@monaco-editor/react"
 import {
+  BotMessageSquare,
+  Brain,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Code2,
   Copy,
+  Cpu,
   FileCode2,
   FileSymlink,
   Folder,
   FolderOpen,
   FolderSync,
   Loader2,
+  MessageSquarePlus,
   Play,
   RefreshCw,
   RotateCcw,
   Save,
   Search,
+  SendHorizontal,
+  Sparkles,
   Unlink,
   Upload,
   X,
@@ -37,6 +51,13 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -56,8 +77,14 @@ import {
   publishWebResource,
   saveWebResourceContent,
 } from "@/core/desktop/bridge"
+import {
+  listenToAiChatEvents,
+  sendAiChatMessage,
+  startAiChatThread,
+} from "@/core/desktop/ai-bridge"
 import { chooseLocalFile } from "@/core/desktop/file-dialog"
 import {
+  createId,
   getBindingsForEnvironment,
   getEnvironmentById,
   type BrowserAuthStart,
@@ -69,6 +96,25 @@ import {
 } from "@/core/dataverse/schemas"
 import { isTauriRuntime } from "@/core/desktop/bridge"
 import { cn } from "@/lib/utils"
+import {
+  defaultModelByProvider,
+  defaultReasoningByProvider,
+  isAiChatModel,
+  isAiChatProvider,
+  isAiReasoningEffort,
+  modelForProvider,
+  modelOptionsByProvider,
+  providerOptions,
+  reasoningOptionsByProvider,
+} from "@/modules/ai-chat/options"
+import type {
+  AiChatMessage,
+  AiChatModel,
+  AiChatProvider,
+  AiChatThread,
+  AiChatWindowState,
+  AiReasoningEffort,
+} from "@/modules/ai-chat/types"
 import { useWorkspaceStore } from "@/store/workspace-store"
 import { webResourceEvents } from "./activity-events"
 import {
@@ -427,6 +473,638 @@ function AuthDialog({
   )
 }
 
+const defaultWebResourceAiChatState: AiChatWindowState = {
+  provider: "codex",
+  model: defaultModelByProvider.codex,
+  reasoningEffort: defaultReasoningByProvider.codex,
+  composerValue: "",
+  running: false,
+  settingsVersion: 2,
+}
+
+function getWebResourceAiChatState(window: ToolWindow): AiChatWindowState {
+  const candidate = window.state?.webResourceAiChat as
+    | Partial<AiChatWindowState>
+    | undefined
+  const threadProvider = isAiChatProvider(candidate?.thread?.provider)
+    ? candidate.thread.provider
+    : undefined
+  const provider =
+    candidate?.thread?.messages?.length && threadProvider
+      ? threadProvider
+      : isAiChatProvider(candidate?.provider)
+        ? candidate.provider
+        : threadProvider ?? defaultWebResourceAiChatState.provider
+  const legacyDefaultModel =
+    provider === "codex" &&
+    (candidate?.settingsVersion ?? 0) < 2 &&
+    candidate?.model === "gpt-5.4-mini"
+  const model = modelForProvider(
+    provider,
+    legacyDefaultModel
+      ? candidate?.thread?.model
+      : candidate?.model ?? candidate?.thread?.model,
+  )
+  const reasoningEffort =
+    isAiReasoningEffort(provider, candidate?.reasoningEffort)
+      ? candidate.reasoningEffort
+      : isAiReasoningEffort(provider, candidate?.thread?.reasoningEffort)
+        ? candidate.thread.reasoningEffort
+        : defaultReasoningByProvider[provider]
+  const thread = candidate?.thread
+    ? {
+        ...candidate.thread,
+        provider: threadProvider ?? provider,
+        providerThreadId:
+          candidate.thread.providerThreadId ?? candidate.thread.codexThreadId,
+        model,
+        reasoningEffort,
+      }
+    : undefined
+
+  return {
+    ...defaultWebResourceAiChatState,
+    ...candidate,
+    thread,
+    provider,
+    model,
+    reasoningEffort,
+    composerValue:
+      typeof candidate?.composerValue === "string"
+        ? candidate.composerValue
+        : defaultWebResourceAiChatState.composerValue,
+    running: Boolean(candidate?.running),
+  }
+}
+
+function getStoredWebResourceAiChatState(windowId: string) {
+  const storedWindow = useWorkspaceStore
+    .getState()
+    .openWindows.find((item) => item.id === windowId)
+
+  return storedWindow
+    ? getWebResourceAiChatState(storedWindow)
+    : defaultWebResourceAiChatState
+}
+
+function upsertAiMessage(messages: AiChatMessage[], message: AiChatMessage) {
+  const index = messages.findIndex((item) => item.id === message.id)
+
+  if (index === -1) {
+    return [...messages, message]
+  }
+
+  return messages.map((item, itemIndex) =>
+    itemIndex === index ? message : item,
+  )
+}
+
+function getProviderThreadIdFromMessages(messages: AiChatMessage[]) {
+  const message = messages.findLast((item) => {
+    const metadata = item.metadata
+    return (
+      item.role === "tool" &&
+      metadata &&
+      (typeof metadata.providerThreadId === "string" ||
+        typeof metadata.codexThreadId === "string")
+    )
+  })
+
+  const metadata = message?.metadata
+  return typeof metadata?.providerThreadId === "string"
+    ? metadata.providerThreadId
+    : typeof metadata?.codexThreadId === "string"
+      ? metadata.codexThreadId
+      : undefined
+}
+
+function createChatTitle(message: string) {
+  const normalized = message.trim().replace(/\s+/g, " ")
+  if (!normalized) {
+    return "Webresource Chat"
+  }
+
+  return normalized.length > 80 ? `${normalized.slice(0, 80)}...` : normalized
+}
+
+function formatChatTime(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value))
+}
+
+function buildWebResourceAiContext(input: {
+  environment: DataverseEnvironment
+  resource?: WebResource
+  binding?: WebResourceBinding
+  resourceCount: number
+  bindingCount: number
+}) {
+  const lines = [
+    "You are answering inside OpenDataverse Webresource Management.",
+    `Environment: ${input.environment.name} (${input.environment.url})`,
+    `Loaded web resources in the current view: ${input.resourceCount}`,
+    `Local web resource bindings configured in this environment: ${input.bindingCount}`,
+  ]
+
+  if (input.resource) {
+    lines.push(
+      `Selected web resource: ${input.resource.name}`,
+      `Selected web resource type: ${typeBadge(input.resource)}`,
+      `Selected web resource version: ${input.resource.version || "unknown"}`,
+      `Selected web resource managed: ${input.resource.isManaged ? "yes" : "no"}`,
+      input.binding
+        ? `Selected web resource local binding: ${input.binding.localPath}`
+        : "Selected web resource local binding: none",
+    )
+  } else {
+    lines.push("No individual web resource is currently selected.")
+  }
+
+  lines.push(
+    "Use Dataverse read-only tools when live organization data is needed.",
+    "Do not imply that a save, bind, unbind, or publish action has happened unless the user explicitly performs it in the UI.",
+  )
+
+  return lines.join("\n")
+}
+
+function CompactChatMessage({ message }: { message: AiChatMessage }) {
+  if (message.role === "tool") {
+    const statusLabel =
+      message.status === "streaming"
+        ? "running"
+        : message.status === "error"
+          ? "failed"
+          : "used"
+
+    return (
+      <div className="flex justify-center">
+        <div className="max-w-full truncate border bg-muted/50 px-2 py-1 text-[11px] text-muted-foreground">
+          {message.status === "streaming" && (
+            <Loader2 className="mr-1 inline size-3 animate-spin" />
+          )}
+          <span className="font-medium text-foreground">
+            {message.toolName ?? "tool"}
+          </span>
+          <span className="mx-1">{statusLabel}</span>
+          <span className="font-mono tracking-normal">{message.content}</span>
+        </div>
+      </div>
+    )
+  }
+
+  const fromUser = message.role === "user"
+
+  return (
+    <div className={cn("flex", fromUser ? "justify-end" : "justify-start")}>
+      <div
+        className={cn(
+          "max-w-[88%] border px-2.5 py-2 text-xs leading-5",
+          fromUser
+            ? "bg-primary text-primary-foreground"
+            : "bg-background text-foreground",
+          message.status === "error" &&
+            "border-destructive/40 bg-destructive/10 text-destructive",
+        )}
+      >
+        <div className="whitespace-pre-wrap break-words">{message.content}</div>
+        <div
+          className={cn(
+            "mt-1 text-[10px]",
+            fromUser ? "text-primary-foreground/70" : "text-muted-foreground",
+          )}
+        >
+          {formatChatTime(message.createdAt)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function WebResourceAiChatPanel({
+  window,
+  environment,
+  resource,
+  binding,
+  resourceCount,
+  bindingCount,
+}: {
+  window: ToolWindow
+  environment: DataverseEnvironment
+  resource?: WebResource
+  binding?: WebResourceBinding
+  resourceCount: number
+  bindingCount: number
+}) {
+  const [collapsed, setCollapsed] = useState(false)
+  const updateWindowState = useWorkspaceStore((state) => state.updateWindowState)
+  const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
+  const aiState = getWebResourceAiChatState(window)
+  const thread = aiState.thread
+  const messages = thread?.messages ?? []
+  const running = aiState.running
+  const composerValue = aiState.composerValue
+  const error = aiState.error
+  const providerLocked = messages.length > 0
+  const canSend = Boolean(composerValue.trim() && !running)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const suggestedPrompts = resource
+    ? [
+        "What should I check before publishing this resource?",
+        "What can you tell me about this selected web resource?",
+      ]
+    : [
+        "Which web resources should I review first?",
+        "Find web resources that may need binding or publishing attention.",
+      ]
+
+  const persistAiState = useCallback(
+    (changes: Partial<AiChatWindowState>) => {
+      const current = getStoredWebResourceAiChatState(window.id)
+      updateWindowState(window.id, {
+        webResourceAiChat: {
+          ...current,
+          ...changes,
+        },
+      })
+    },
+    [updateWindowState, window.id],
+  )
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    let cancelled = false
+
+    void listenToAiChatEvents((event) => {
+      const current = getStoredWebResourceAiChatState(window.id)
+      if (current.thread?.id !== event.threadId) {
+        return
+      }
+
+      const nextThread: AiChatThread = {
+        ...current.thread,
+        messages: upsertAiMessage(current.thread.messages, event.message),
+        updatedAt: new Date().toISOString(),
+      }
+      updateWindowState(window.id, {
+        webResourceAiChat: {
+          ...current,
+          thread: nextThread,
+        },
+      })
+    }).then((dispose) => {
+      if (cancelled) {
+        dispose()
+        return
+      }
+
+      unlisten = dispose
+    })
+
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [updateWindowState, window.id])
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: "end" })
+  }, [messages.length, running, collapsed])
+
+  function clearChat() {
+    if (running) {
+      return
+    }
+
+    persistAiState({
+      thread: undefined,
+      composerValue: "",
+      running: false,
+      error: undefined,
+    })
+  }
+
+  async function submitMessage(
+    event?: FormEvent<HTMLFormElement>,
+    value?: string,
+  ) {
+    event?.preventDefault()
+
+    const message = (value ?? composerValue).trim()
+    if (!message || running) {
+      return
+    }
+
+    const current = getStoredWebResourceAiChatState(window.id)
+    let activeThread = current.thread
+
+    try {
+      if (!activeThread) {
+        activeThread = await startAiChatThread({
+          environmentId: environment.id,
+          provider: current.provider,
+          model: current.model,
+          reasoningEffort: current.reasoningEffort,
+        })
+      }
+
+      const now = new Date().toISOString()
+      const threadTitle =
+        activeThread.messages.length === 0
+          ? createChatTitle(message)
+          : activeThread.title
+      const pendingMessages: AiChatMessage[] = [
+        ...activeThread.messages,
+        {
+          id: createId("ai-message"),
+          role: "user",
+          content: message,
+          createdAt: now,
+          status: "complete",
+        },
+      ]
+
+      persistAiState({
+        composerValue: "",
+        running: true,
+        error: undefined,
+        thread: {
+          ...activeThread,
+          environmentId: environment.id,
+          provider: current.provider,
+          model: current.model,
+          reasoningEffort: current.reasoningEffort,
+          title: threadTitle,
+          updatedAt: now,
+          messages: pendingMessages,
+        },
+      })
+
+      const responseMessages = await sendAiChatMessage({
+        threadId: activeThread.id,
+        environmentId: environment.id,
+        message,
+        context: buildWebResourceAiContext({
+          environment,
+          resource,
+          binding,
+          resourceCount,
+          bindingCount,
+        }),
+        provider: current.provider,
+        model: current.model,
+        reasoningEffort: current.reasoningEffort,
+        providerThreadId:
+          activeThread.providerThreadId ?? activeThread.codexThreadId,
+        codexThreadId: activeThread.codexThreadId,
+      })
+      const providerThreadId = getProviderThreadIdFromMessages(responseMessages)
+
+      persistAiState({
+        running: false,
+        error: undefined,
+        thread: {
+          ...activeThread,
+          environmentId: environment.id,
+          provider: current.provider,
+          providerThreadId:
+            providerThreadId ??
+            activeThread.providerThreadId ??
+            activeThread.codexThreadId,
+          codexThreadId:
+            current.provider === "codex"
+              ? providerThreadId ?? activeThread.codexThreadId
+              : activeThread.codexThreadId,
+          model: current.model,
+          reasoningEffort: current.reasoningEffort,
+          title: threadTitle,
+          updatedAt: new Date().toISOString(),
+          messages: responseMessages,
+        },
+      })
+    } catch (error) {
+      const messageText =
+        error instanceof Error ? error.message : "AI chat turn failed"
+      setLastMessage(messageText)
+      persistAiState({
+        running: false,
+        error: messageText,
+      })
+    }
+  }
+
+  function updateProvider(provider: AiChatProvider) {
+    if (running || providerLocked || provider === aiState.provider) {
+      return
+    }
+
+    persistAiState({
+      provider,
+      model: defaultModelByProvider[provider],
+      reasoningEffort: defaultReasoningByProvider[provider],
+      thread: undefined,
+      error: undefined,
+    })
+  }
+
+  function updateModel(model: AiChatModel) {
+    if (!isAiChatModel(aiState.provider, model)) {
+      return
+    }
+
+    const current = getStoredWebResourceAiChatState(window.id)
+    persistAiState({
+      model,
+      thread: current.thread
+        ? { ...current.thread, provider: current.provider, model }
+        : undefined,
+    })
+  }
+
+  function updateReasoningEffort(reasoningEffort: AiReasoningEffort) {
+    if (!isAiReasoningEffort(aiState.provider, reasoningEffort)) {
+      return
+    }
+
+    const current = getStoredWebResourceAiChatState(window.id)
+    persistAiState({
+      reasoningEffort,
+      thread: current.thread
+        ? { ...current.thread, provider: current.provider, reasoningEffort }
+        : undefined,
+    })
+  }
+
+  return (
+    <div className="border-t bg-background px-4 py-3">
+      <div className="mx-auto max-w-6xl border bg-background">
+        <div className="flex min-h-10 items-center justify-between gap-3 px-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Sparkles className="size-4 shrink-0 text-primary" />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium">
+                {resource ? "Ask about this resource" : "Ask about web resources"}
+              </div>
+              <div className="truncate text-[11px] text-muted-foreground">
+                {resource?.name ?? environment.name}
+              </div>
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {running && (
+              <Badge variant="outline">
+                <Loader2 className="animate-spin" />
+                Running
+              </Badge>
+            )}
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={collapsed ? "Expand AI chat" : "Collapse AI chat"}
+              onClick={() => setCollapsed((value) => !value)}
+            >
+              {collapsed ? <ChevronUp /> : <ChevronDown />}
+            </Button>
+          </div>
+        </div>
+
+        {!collapsed && (
+          <div className="hidden border-t md:block">
+            <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+              <Select
+                value={aiState.provider}
+                onValueChange={(value) => updateProvider(value as AiChatProvider)}
+                disabled={running || providerLocked}
+              >
+                <SelectTrigger className="w-28 bg-background" size="sm">
+                  <BotMessageSquare className="size-3.5" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {providerOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={aiState.model}
+                onValueChange={(value) => updateModel(value as AiChatModel)}
+                disabled={running}
+              >
+                <SelectTrigger className="w-56 bg-background" size="sm">
+                  <Cpu className="size-3.5" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {modelOptionsByProvider[aiState.provider].map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={aiState.reasoningEffort}
+                onValueChange={(value) =>
+                  updateReasoningEffort(value as AiReasoningEffort)
+                }
+                disabled={running}
+              >
+                <SelectTrigger className="w-32 bg-background" size="sm">
+                  <Brain className="size-3.5" />
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {reasoningOptionsByProvider[aiState.provider].map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                className="ml-auto"
+                variant="outline"
+                size="icon-sm"
+                aria-label="New webresource AI chat"
+                onClick={clearChat}
+                disabled={messages.length === 0 || running}
+              >
+                <MessageSquarePlus />
+              </Button>
+            </div>
+
+            <div className="max-h-52 min-h-24 overflow-y-auto px-3 py-3">
+              <div className="flex flex-col gap-2">
+                {messages.length === 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {suggestedPrompts.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        className="min-h-8 border bg-muted/30 px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+                        onClick={() => void submitMessage(undefined, prompt)}
+                        disabled={running}
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {messages.map((message) => (
+                  <CompactChatMessage key={message.id} message={message} />
+                ))}
+
+                {error && (
+                  <div className="border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
+                    {error}
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            </div>
+
+            <form className="border-t p-2" onSubmit={submitMessage}>
+              <div className="flex items-center gap-2">
+                <Input
+                  className="h-8 flex-1"
+                  value={composerValue}
+                  onChange={(event) =>
+                    persistAiState({ composerValue: event.target.value })
+                  }
+                  placeholder={
+                    resource
+                      ? "Ask about this resource..."
+                      : "Ask about web resources..."
+                  }
+                  disabled={running}
+                />
+                <Button
+                  type="submit"
+                  size="icon-sm"
+                  aria-label="Send webresource AI message"
+                  disabled={!canSend}
+                >
+                  {running ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <SendHorizontal />
+                  )}
+                </Button>
+              </div>
+            </form>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ResourceViewerDialog({
   open,
   onOpenChange,
@@ -752,6 +1430,13 @@ export function WebResourceManagementModule({
         (resource) => resource.id === selectedResourceId,
       ),
     [resourceQuery.data, selectedResourceId],
+  )
+  const selectedResourceBinding = useMemo(
+    () =>
+      selectedResource
+        ? bindings.find((item) => item.webResourceId === selectedResource.id)
+        : undefined,
+    [bindings, selectedResource],
   )
 
   const resourceContentQuery = useQuery({
@@ -1563,6 +2248,14 @@ export function WebResourceManagementModule({
           </div>
         </TabsContent>
       </Tabs>
+      <WebResourceAiChatPanel
+        window={window}
+        environment={environment}
+        resource={selectedResource}
+        binding={selectedResourceBinding}
+        resourceCount={resources.length}
+        bindingCount={bindings.length}
+      />
     </section>
   )
 }

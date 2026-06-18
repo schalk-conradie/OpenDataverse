@@ -85,6 +85,7 @@ export type AiChatMessageInput = {
   threadId: string
   environmentId?: string
   message: string
+  context?: string
   provider: AiChatProvider
   model: AiChatModel
   reasoningEffort: AiReasoningEffort

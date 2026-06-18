@@ -11,6 +11,23 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.25",
+    date: "2026-06-18",
+    title: "ChatGPT 5.3 Spark default",
+    changes: [
+      "Changed the Codex AI chat default model from GPT 5.4 mini to ChatGPT 5.3 Spark.",
+    ],
+  },
+  {
+    version: "0.1.24",
+    date: "2026-06-17",
+    title: "Webresource AI assistant",
+    changes: [
+      "Added a compact AI chat panel to Webresource Management with Codex and Claude provider selectors.",
+      "Scoped webresource chat prompts to the selected resource or the current webresource view.",
+    ],
+  },
+  {
     version: "0.1.23",
     date: "2026-06-17",
     title: "Solution Explorer load defaults",

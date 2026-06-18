@@ -36,7 +36,7 @@ const AI_MAX_TOP: u32 = 100;
 const AI_MAX_RESPONSE_BYTES: usize = 1_000_000;
 const AI_CHAT_EVENT: &str = "ai-chat-event";
 const AI_DEFAULT_PROVIDER: &str = "codex";
-const AI_DEFAULT_MODEL: &str = "gpt-5.4-mini";
+const AI_DEFAULT_MODEL: &str = "gpt-5.3-codex-spark";
 const AI_DEFAULT_REASONING_EFFORT: &str = "medium";
 const AI_DEFAULT_CLAUDE_MODEL: &str = "claude-sonnet-4-6";
 const AI_DEFAULT_CLAUDE_REASONING_EFFORT: &str = "medium";
@@ -3837,6 +3837,7 @@ async fn send_ai_chat_message(
   thread_id: String,
   environment_id: Option<String>,
   message: String,
+  context: Option<String>,
   provider: Option<String>,
   model: Option<String>,
   reasoning_effort: Option<String>,
@@ -3904,9 +3905,15 @@ async fn send_ai_chat_message(
   thread
     .messages
     .push(create_ai_message("user", trimmed, "complete")?);
+  let provider_message = context
+    .as_deref()
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .map(|context| format!("{context}\n\nUser question: {trimmed}"))
+    .unwrap_or_else(|| trimmed.to_string());
 
   let response_messages =
-    match build_ai_chat_response(&app, &state, &mut thread, &environment, trimmed).await {
+    match build_ai_chat_response(&app, &state, &mut thread, &environment, &provider_message).await {
       Ok(messages) => messages,
       Err(error) => vec![
         create_ai_tool_message(&thread.provider, "run_turn", "error", None)?,
