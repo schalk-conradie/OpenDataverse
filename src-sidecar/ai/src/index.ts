@@ -34,6 +34,7 @@ type SidecarRequest =
         model?: string
         reasoningEffort?: ModelReasoningEffort | ClaudeReasoningEffort
         toolResults?: DataverseToolResult[]
+        imagePaths?: string[]
       }
     }
 

@@ -6,12 +6,14 @@ import {
   ExternalLink,
   FileCode2,
   FilePlus2,
+  FolderOpen,
   Layers,
   Loader2,
   Network,
   Plus,
   RefreshCw,
   Search,
+  Upload,
 } from "lucide-react"
 
 import {
@@ -19,6 +21,7 @@ import {
   createWebResourceInSolution,
   getSolutionComponentDependencies,
   getSolutionComponentLayers,
+  importWebResourcesInSolution,
   listSolutionComponents,
   listSolutions,
   listSolutionWebResourceCandidates,
@@ -66,6 +69,10 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  chooseWebResourceImportFiles,
+  chooseWebResourceImportFolder,
+} from "@/core/desktop/file-dialog"
 
 type ManagedFilter = SolutionManagedFilter
 
@@ -75,6 +82,12 @@ type CreateWebResourceForm = {
   description: string
   type: WebResource["type"]
   content: string
+}
+
+type ImportWebResourcesForm = {
+  sourcePaths: string[]
+  targetRoot: string
+  description: string
 }
 
 const groupOrder = [
@@ -122,6 +135,24 @@ function formatDate(value?: string) {
 
 function includesSearch(value: string | undefined, search: string) {
   return value?.toLowerCase().includes(search.toLowerCase()) ?? false
+}
+
+function defaultWebResourceRoot(solution?: SolutionSummary) {
+  const prefix = solution?.publisherPrefix?.trim() || "new"
+
+  return `${prefix}_/CustomWebresource`
+}
+
+function formatSelectedSource(paths: string[]) {
+  if (paths.length === 0) {
+    return "No source selected"
+  }
+
+  if (paths.length === 1) {
+    return paths[0]
+  }
+
+  return `${paths.length} files selected`
 }
 
 function solutionMatchesFilter(solution: SolutionSummary, filter: ManagedFilter) {
@@ -579,6 +610,187 @@ function CreateWebResourceDialog({
   )
 }
 
+function ImportWebResourcesDialog({
+  open,
+  onOpenChange,
+  environment,
+  solution,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  environment?: DataverseEnvironment
+  solution?: SolutionSummary
+}) {
+  const queryClient = useQueryClient()
+  const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
+  const [form, setForm] = useState<ImportWebResourcesForm>({
+    sourcePaths: [],
+    targetRoot: defaultWebResourceRoot(solution),
+    description: "",
+  })
+
+  const mutation = useMutation({
+    mutationFn: (input: ImportWebResourcesForm) =>
+      importWebResourcesInSolution(environment as DataverseEnvironment, {
+        solutionUniqueName: solution?.uniqueName ?? "",
+        ...input,
+      }),
+    onSuccess: async (result) => {
+      setLastMessage(result.message)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["solutions", environment?.id] }),
+        queryClient.invalidateQueries({
+          queryKey: ["solution-components", environment?.id, solution?.id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["solution-web-resource-candidates", environment?.id, solution?.id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["webResources", environment?.id],
+        }),
+      ])
+      onOpenChange(false)
+    },
+    onError: (error) => {
+      setLastMessage(error instanceof Error ? error.message : "Import failed")
+    },
+  })
+
+  function resetForm() {
+    setForm({
+      sourcePaths: [],
+      targetRoot: defaultWebResourceRoot(solution),
+      description: "",
+    })
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      resetForm()
+      mutation.reset()
+    }
+
+    onOpenChange(nextOpen)
+  }
+
+  function updateField<Key extends keyof ImportWebResourcesForm>(
+    key: Key,
+    value: ImportWebResourcesForm[Key],
+  ) {
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  async function selectFiles() {
+    const sourcePaths = await chooseWebResourceImportFiles()
+    if (sourcePaths.length === 0) {
+      return
+    }
+
+    updateField("sourcePaths", sourcePaths)
+  }
+
+  async function selectFolder() {
+    const sourcePath = await chooseWebResourceImportFolder()
+    if (!sourcePath) {
+      return
+    }
+
+    updateField("sourcePaths", [sourcePath])
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Import Web Resources</DialogTitle>
+          <DialogDescription>
+            {solution?.friendlyName ?? "Selected solution"}
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            mutation.mutate(form)
+          }}
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void selectFiles()}
+            >
+              <Upload className="size-4" />
+              Files
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void selectFolder()}
+            >
+              <FolderOpen className="size-4" />
+              Folder
+            </Button>
+          </div>
+
+          <div className="space-y-1">
+            <Label>Source</Label>
+            <div className="truncate border bg-muted px-3 py-2 font-mono text-xs text-muted-foreground">
+              {formatSelectedSource(form.sourcePaths)}
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="web-resource-import-root">Web Resource Root</Label>
+            <Input
+              id="web-resource-import-root"
+              placeholder="AG_/CustomWebresource"
+              value={form.targetRoot}
+              onChange={(event) => updateField("targetRoot", event.target.value)}
+              required
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="web-resource-import-description">Description</Label>
+            <Input
+              id="web-resource-import-description"
+              value={form.description}
+              onChange={(event) => updateField("description", event.target.value)}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleOpenChange(false)}
+            >
+              Close
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                mutation.isPending ||
+                form.sourcePaths.length === 0 ||
+                !form.targetRoot.trim()
+              }
+            >
+              {mutation.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Upload className="size-4" />
+              )}
+              Import
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
   const config = useWorkspaceStore((state) => state.config)
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
@@ -589,6 +801,7 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
   const [selectedComponentId, setSelectedComponentId] = useState("")
   const [addExistingOpen, setAddExistingOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
 
   const environment =
     getEnvironmentById(config, window.environmentId) ??
@@ -837,6 +1050,16 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
             </div>
 
             <div className="flex shrink-0 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!canWriteWebResources}
+                onClick={() => setImportOpen(true)}
+              >
+                <Upload className="size-4" />
+                Import
+              </Button>
               <Button
                 type="button"
                 variant="outline"
@@ -1093,6 +1316,13 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
       <CreateWebResourceDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
+        environment={environment}
+        solution={selectedSolution}
+      />
+      <ImportWebResourcesDialog
+        key={selectedSolution?.id ?? "no-solution"}
+        open={importOpen}
+        onOpenChange={setImportOpen}
         environment={environment}
         solution={selectedSolution}
       />

@@ -34,6 +34,7 @@ import {
   type SolutionSummary,
   type SolutionWebResourceCandidate,
   type SolutionWriteResult,
+  type WebResourceImportResult,
   type WebResource,
   type WebResourceBinding,
   type WebResourceContent,
@@ -417,6 +418,45 @@ export async function createWebResourceInSolution(
     webResourceId: `browser-${Date.now().toString(36)}`,
     message: `Browser preview created ${input.name} in ${input.solutionUniqueName}.`,
   } satisfies SolutionWriteResult
+}
+
+export async function importWebResourcesInSolution(
+  environment: DataverseEnvironment,
+  input: {
+    solutionUniqueName: string
+    sourcePaths: string[]
+    targetRoot: string
+    description: string
+  },
+) {
+  if (isTauriRuntime()) {
+    return invoke<WebResourceImportResult>("import_web_resources_in_solution", {
+      environment,
+      input,
+    })
+  }
+
+  const targetRoot = input.targetRoot.replace(/^\/+|\/+$/g, "")
+  const imported = input.sourcePaths.map((sourcePath, index) => {
+    const fileName = sourcePath.split(/[\\/]/).filter(Boolean).at(-1) ?? `file-${index}`
+
+    return {
+      sourcePath,
+      name: targetRoot ? `${targetRoot}/${fileName}` : fileName,
+      type: fileName.endsWith(".css")
+        ? "css"
+        : fileName.endsWith(".html") || fileName.endsWith(".htm")
+          ? "html"
+          : "js",
+      webResourceId: `browser-import-${index}`,
+    } satisfies WebResourceImportResult["imported"][number]
+  })
+
+  return {
+    imported,
+    skipped: [],
+    message: `Browser preview imported ${imported.length} web resources.`,
+  } satisfies WebResourceImportResult
 }
 
 export async function listPluginAssemblies(environment: DataverseEnvironment) {

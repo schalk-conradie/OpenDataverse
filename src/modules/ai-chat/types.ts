@@ -12,6 +12,41 @@ export type AiChatMessage = {
   metadata?: Record<string, unknown>
 }
 
+export type AiChatAttachmentKind = "image" | "file" | "folder"
+
+export type AiChatAttachmentStatus = "included" | "summarized" | "skipped"
+
+export type AiChatAttachment = {
+  id: string
+  kind: AiChatAttachmentKind
+  path: string
+  name: string
+  status: AiChatAttachmentStatus
+  contextIncluded: boolean
+  imageIncluded: boolean
+  sizeBytes?: number
+  mimeType?: string
+  itemCount?: number
+  reason?: string
+}
+
+export type AiChatAttachmentBundle = {
+  attachments: AiChatAttachment[]
+  context: string
+  imagePaths: string[]
+  warnings: string[]
+}
+
+export type PastedAiChatImageInput = {
+  name?: string
+  mimeType: string
+  dataBase64: string
+}
+
+export type PastedAiChatImage = {
+  path: string
+}
+
 export type AiChatThread = {
   id: string
   environmentId?: string
@@ -62,6 +97,7 @@ export type AiChatWindowState = {
   model: AiChatModel
   reasoningEffort: AiReasoningEffort
   composerValue: string
+  pendingAttachments?: AiChatAttachmentBundle
   running: boolean
   error?: string
   settingsVersion?: number
@@ -86,6 +122,8 @@ export type AiChatMessageInput = {
   environmentId?: string
   message: string
   context?: string
+  attachments?: AiChatAttachment[]
+  imagePaths?: string[]
   provider: AiChatProvider
   model: AiChatModel
   reasoningEffort: AiReasoningEffort

@@ -38,6 +38,7 @@ export type RunClaudeTurnInput = {
   model?: string
   reasoningEffort?: ClaudeReasoningEffort
   toolResults?: DataverseToolResult[]
+  imagePaths?: string[]
 }
 
 export type RunClaudeTurnResult = {

@@ -6,7 +6,7 @@ import {
   useState,
   type FormEvent,
 } from "react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { dirname, normalize } from "@tauri-apps/api/path"
 import { watch, type UnwatchFn, type WatchEvent } from "@tauri-apps/plugin-fs"
 import { openUrl } from "@tauri-apps/plugin-opener"
@@ -72,23 +72,31 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   completeBrowserAuth,
   getWebResourceContent,
+  importWebResourcesInSolution,
   listWebResources,
+  listSolutions,
   startBrowserAuth,
   publishWebResource,
   saveWebResourceContent,
+  type SolutionManagedFilter,
 } from "@/core/desktop/bridge"
 import {
   listenToAiChatEvents,
   sendAiChatMessage,
   startAiChatThread,
 } from "@/core/desktop/ai-bridge"
-import { chooseLocalFile } from "@/core/desktop/file-dialog"
+import {
+  chooseLocalFile,
+  chooseWebResourceImportFiles,
+  chooseWebResourceImportFolder,
+} from "@/core/desktop/file-dialog"
 import {
   createId,
   getBindingsForEnvironment,
   getEnvironmentById,
   type BrowserAuthStart,
   type DataverseEnvironment,
+  type SolutionSummary,
   type ToolWindow,
   type WebResource,
   type WebResourceBinding,
@@ -137,6 +145,13 @@ type ResourceDraftState = {
 type ResourceActionError = {
   resourceId: string
   message: string
+}
+
+type ImportWebResourcesForm = {
+  sourcePaths: string[]
+  solutionUniqueName: string
+  targetRoot: string
+  description: string
 }
 
 type AuthDialogState = {
@@ -199,6 +214,8 @@ type WatchedBinding = {
 }
 
 type AutoPublishTimer = ReturnType<typeof globalThis.setTimeout>
+
+const webResourceImportSolutionFilter: SolutionManagedFilter = "unmanaged"
 
 function typeBadge(resource: WebResource) {
   const labels: Record<WebResource["type"], string> = {
@@ -351,6 +368,24 @@ function formatResourceCount(count: number) {
   return count === 1 ? "1 item" : `${count} items`
 }
 
+function defaultWebResourceRoot(solution?: SolutionSummary) {
+  const prefix = solution?.publisherPrefix?.trim() || "new"
+
+  return `${prefix}_/CustomWebresource`
+}
+
+function formatSelectedSource(paths: string[]) {
+  if (paths.length === 0) {
+    return "No source selected"
+  }
+
+  if (paths.length === 1) {
+    return paths[0]
+  }
+
+  return `${paths.length} files selected`
+}
+
 function isAccessOnlyEvent(event: WatchEvent) {
   return (
     typeof event.type === "object" &&
@@ -468,6 +503,242 @@ function AuthDialog({
             {authDialog.waiting ? "Waiting For Sign-In" : "Sign-In Stopped"}
           </Button>
         </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ImportWebResourcesDialog({
+  open,
+  onOpenChange,
+  environment,
+  solutions,
+  solutionsLoading,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  environment: DataverseEnvironment
+  solutions: SolutionSummary[]
+  solutionsLoading: boolean
+}) {
+  const queryClient = useQueryClient()
+  const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
+  const [form, setForm] = useState<ImportWebResourcesForm>({
+    sourcePaths: [],
+    solutionUniqueName: "",
+    targetRoot: "",
+    description: "",
+  })
+  const selectedSolution =
+    solutions.find((solution) => solution.uniqueName === form.solutionUniqueName) ??
+    solutions[0]
+  const targetRoot = form.targetRoot.trim() || defaultWebResourceRoot(selectedSolution)
+
+  const mutation = useMutation({
+    mutationFn: (input: ImportWebResourcesForm) =>
+      importWebResourcesInSolution(environment, {
+        solutionUniqueName: input.solutionUniqueName,
+        sourcePaths: input.sourcePaths,
+        targetRoot: input.targetRoot,
+        description: input.description,
+      }),
+    onSuccess: async (result) => {
+      setLastMessage(result.message)
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["webResources", environment.id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["solutions", environment.id],
+        }),
+      ])
+      onOpenChange(false)
+      resetForm()
+    },
+    onError: (error) => {
+      setLastMessage(error instanceof Error ? error.message : "Import failed")
+    },
+  })
+
+  function resetForm() {
+    setForm({
+      sourcePaths: [],
+      solutionUniqueName: "",
+      targetRoot: "",
+      description: "",
+    })
+    mutation.reset()
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      resetForm()
+    }
+
+    onOpenChange(nextOpen)
+  }
+
+  function updateField<Key extends keyof ImportWebResourcesForm>(
+    key: Key,
+    value: ImportWebResourcesForm[Key],
+  ) {
+    setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function selectSolution(solutionUniqueName: string) {
+    const previousDefault = defaultWebResourceRoot(selectedSolution)
+    const nextSolution = solutions.find(
+      (solution) => solution.uniqueName === solutionUniqueName,
+    )
+
+    setForm((current) => ({
+      ...current,
+      solutionUniqueName,
+      targetRoot:
+        current.targetRoot.trim() === "" || current.targetRoot === previousDefault
+          ? defaultWebResourceRoot(nextSolution)
+          : current.targetRoot,
+    }))
+  }
+
+  async function selectFiles() {
+    const sourcePaths = await chooseWebResourceImportFiles()
+    if (sourcePaths.length === 0) {
+      return
+    }
+
+    updateField("sourcePaths", sourcePaths)
+  }
+
+  async function selectFolder() {
+    const sourcePath = await chooseWebResourceImportFolder()
+    if (!sourcePath) {
+      return
+    }
+
+    updateField("sourcePaths", [sourcePath])
+  }
+
+  function submitImport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!selectedSolution) {
+      setLastMessage("Select an unmanaged solution before importing web resources.")
+      return
+    }
+
+    mutation.mutate({
+      ...form,
+      solutionUniqueName: selectedSolution.uniqueName,
+      targetRoot,
+    })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Import Web Resources</DialogTitle>
+          <DialogDescription>{environment.name}</DialogDescription>
+        </DialogHeader>
+
+        <form className="space-y-4" onSubmit={submitImport}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void selectFiles()}
+            >
+              <Upload className="size-4" />
+              Files
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void selectFolder()}
+            >
+              <FolderOpen className="size-4" />
+              Folder
+            </Button>
+          </div>
+
+          <div className="space-y-1">
+            <Label>Source</Label>
+            <div className="truncate border bg-muted px-3 py-2 font-mono text-xs text-muted-foreground">
+              {formatSelectedSource(form.sourcePaths)}
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="web-resource-import-solution">Solution</Label>
+            <Select
+              value={selectedSolution?.uniqueName}
+              onValueChange={selectSolution}
+              disabled={solutionsLoading || solutions.length === 0}
+            >
+              <SelectTrigger id="web-resource-import-solution" className="w-full">
+                <SelectValue
+                  placeholder={
+                    solutionsLoading ? "Loading solutions" : "Select solution"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {solutions.map((solution) => (
+                  <SelectItem key={solution.id} value={solution.uniqueName}>
+                    {solution.friendlyName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="web-resource-import-root">Web Resource Root</Label>
+            <Input
+              id="web-resource-import-root"
+              placeholder="AG_/CustomWebresource"
+              value={targetRoot}
+              onChange={(event) => updateField("targetRoot", event.target.value)}
+              required
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="web-resource-import-description">Description</Label>
+            <Input
+              id="web-resource-import-description"
+              value={form.description}
+              onChange={(event) => updateField("description", event.target.value)}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleOpenChange(false)}
+            >
+              Close
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                mutation.isPending ||
+                form.sourcePaths.length === 0 ||
+                !selectedSolution ||
+                !targetRoot.trim()
+              }
+            >
+              {mutation.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Upload className="size-4" />
+              )}
+              Import
+            </Button>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )
@@ -1383,6 +1654,7 @@ export function WebResourceManagementModule({
   const [includeManaged, setIncludeManaged] = useState(false)
   const [selectedResourceId, setSelectedResourceId] = useState<string>()
   const [resourceViewerOpen, setResourceViewerOpen] = useState(false)
+  const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [savingResourceAction, setSavingResourceAction] =
     useState<ResourceContentSaveAction>()
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
@@ -1423,6 +1695,15 @@ export function WebResourceManagementModule({
     queryFn: () => listWebResources(environment as DataverseEnvironment, includeManaged),
   })
   const refetchResources = resourceQuery.refetch
+  const unmanagedSolutionsQuery = useQuery({
+    queryKey: ["solutions", environment?.id, webResourceImportSolutionFilter],
+    enabled: Boolean(environment),
+    queryFn: () =>
+      listSolutions(
+        environment as DataverseEnvironment,
+        webResourceImportSolutionFilter,
+      ),
+  })
 
   const selectedResource = useMemo(
     () =>
@@ -1815,6 +2096,14 @@ export function WebResourceManagementModule({
         savingAction={savingResourceAction}
         onSave={saveResourceContent}
       />
+      <ImportWebResourcesDialog
+        key={environment.id}
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        environment={environment}
+        solutions={unmanagedSolutionsQuery.data ?? []}
+        solutionsLoading={unmanagedSolutionsQuery.isLoading}
+      />
 
       <header className="flex min-h-16 items-center justify-between gap-4 border-b px-4">
         <div className="min-w-0">
@@ -1876,6 +2165,14 @@ export function WebResourceManagementModule({
             disabled={resourceQuery.isFetching}
           >
             <RefreshCw className={cn(resourceQuery.isFetching && "animate-spin")} />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setImportDialogOpen(true)}
+          >
+            <Upload />
+            Import
           </Button>
           <Button
             size="sm"

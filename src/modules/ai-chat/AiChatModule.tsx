@@ -1,13 +1,20 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import type { ClipboardEvent as ReactClipboardEvent, FormEvent } from "react"
+import { convertFileSrc } from "@tauri-apps/api/core"
 import {
   BotMessageSquare,
   Brain,
   Circle,
   Cpu,
+  FileText,
+  FolderOpen,
   History,
+  ImagePlus,
   Loader2,
   MessageSquarePlus,
+  Paperclip,
   SendHorizontal,
+  X,
 } from "lucide-react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
@@ -18,9 +25,17 @@ import {
   listAiChatThreads,
   loadAiChatThread,
   listenToAiChatEvents,
+  prepareAiChatAttachments,
+  savePastedAiChatImage,
   startAiChatThread,
   sendAiChatMessage,
 } from "@/core/desktop/ai-bridge"
+import {
+  chooseAiChatContextFiles,
+  chooseAiChatContextFolders,
+  chooseAiChatImageFiles,
+} from "@/core/desktop/file-dialog"
+import { isTauriRuntime } from "@/core/desktop/bridge"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,6 +59,8 @@ import {
 } from "@/core/dataverse/schemas"
 import { cn } from "@/lib/utils"
 import type {
+  AiChatAttachment,
+  AiChatAttachmentBundle,
   AiChatMessage,
   AiChatModel,
   AiChatProvider,
@@ -74,6 +91,8 @@ const starterPrompts = [
   "Show account metadata for the primary name and created fields.",
   "Get the first 5 accounts with name and accountid.",
 ]
+
+const maxPastedImageBytes = 15_000_000
 
 const markdownAllowedElements = [
   "a",
@@ -231,8 +250,84 @@ const defaultAiChatState: AiChatWindowState = {
   model: defaultModelByProvider.codex,
   reasoningEffort: defaultReasoningByProvider.codex,
   composerValue: "",
+  pendingAttachments: undefined,
   running: false,
   settingsVersion: 5,
+}
+
+function pastedFileLooksLikeImage(file: File) {
+  return (
+    file.type.startsWith("image/") ||
+    /\.(png|jpe?g|gif|webp)$/i.test(file.name)
+  )
+}
+
+function pastedImageMimeType(file: File) {
+  if (file.type.startsWith("image/")) {
+    return file.type
+  }
+
+  if (/\.jpe?g$/i.test(file.name)) {
+    return "image/jpeg"
+  }
+
+  if (/\.gif$/i.test(file.name)) {
+    return "image/gif"
+  }
+
+  if (/\.webp$/i.test(file.name)) {
+    return "image/webp"
+  }
+
+  return "image/png"
+}
+
+function imageFilesFromClipboard(
+  event: ReactClipboardEvent<HTMLTextAreaElement>,
+) {
+  const clipboard = event.clipboardData
+  const itemFiles = Array.from(clipboard.items)
+    .filter((item) => item.kind === "file")
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file))
+    .filter(pastedFileLooksLikeImage)
+
+  if (itemFiles.length > 0) {
+    return itemFiles
+  }
+
+  return Array.from(clipboard.files).filter(pastedFileLooksLikeImage)
+}
+
+function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error("Could not read pasted image."))
+        return
+      }
+
+      const markerIndex = reader.result.indexOf(",")
+      const dataBase64 =
+        markerIndex === -1
+          ? reader.result
+          : reader.result.slice(markerIndex + 1)
+
+      if (!dataBase64) {
+        reject(new Error("Pasted image was empty."))
+        return
+      }
+
+      resolve(dataBase64)
+    }
+
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("Could not read pasted image."))
+
+    reader.readAsDataURL(file)
+  })
 }
 
 function getAiChatWindowState(window: ToolWindow): AiChatWindowState {
@@ -387,6 +482,167 @@ function createChatTitle(message: string) {
   return normalized.length > 80 ? `${normalized.slice(0, 80)}...` : normalized
 }
 
+function isAiChatAttachment(value: unknown): value is AiChatAttachment {
+  if (!value || typeof value !== "object") {
+    return false
+  }
+
+  const candidate = value as Partial<AiChatAttachment>
+  return (
+    typeof candidate.id === "string" &&
+    typeof candidate.path === "string" &&
+    typeof candidate.name === "string" &&
+    (candidate.kind === "image" ||
+      candidate.kind === "file" ||
+      candidate.kind === "folder")
+  )
+}
+
+function getMessageAttachments(message: AiChatMessage) {
+  const attachments = message.metadata?.attachments
+  return Array.isArray(attachments)
+    ? attachments.filter(isAiChatAttachment)
+    : []
+}
+
+function createUserMessage(
+  content: string,
+  createdAt: string,
+  pendingAttachments?: AiChatAttachmentBundle,
+): AiChatMessage {
+  const attachments = pendingAttachments?.attachments ?? []
+
+  return {
+    id: createId("ai-message"),
+    role: "user",
+    content,
+    createdAt,
+    status: "complete",
+    metadata:
+      attachments.length > 0
+        ? {
+            attachments,
+            attachmentContextChars: pendingAttachments?.context.length ?? 0,
+            imagePathCount: pendingAttachments?.imagePaths.length ?? 0,
+          }
+        : undefined,
+  }
+}
+
+function formatAttachmentSize(value?: number) {
+  if (typeof value !== "number") {
+    return undefined
+  }
+
+  if (value < 1024) {
+    return `${value} B`
+  }
+
+  if (value < 1024 * 1024) {
+    return `${Math.round(value / 1024)} KB`
+  }
+
+  return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+
+function attachmentIcon(attachment: AiChatAttachment) {
+  if (attachment.kind === "image") {
+    return <ImagePlus className="size-3.5" />
+  }
+
+  if (attachment.kind === "folder") {
+    return <FolderOpen className="size-3.5" />
+  }
+
+  return <FileText className="size-3.5" />
+}
+
+function attachmentPreviewSrc(attachment: AiChatAttachment) {
+  if (attachment.kind !== "image" || !isTauriRuntime()) {
+    return undefined
+  }
+
+  return convertFileSrc(attachment.path)
+}
+
+function attachmentTitle(attachment: AiChatAttachment) {
+  return [
+    attachment.path,
+    attachment.mimeType,
+    formatAttachmentSize(attachment.sizeBytes),
+    attachment.reason,
+  ]
+    .filter(Boolean)
+    .join("\n")
+}
+
+function AttachmentList({
+  attachments,
+  disabled,
+  onRemove,
+}: {
+  attachments: AiChatAttachment[]
+  disabled?: boolean
+  onRemove?: (path: string) => void
+}) {
+  if (attachments.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {attachments.map((attachment) => {
+        const previewSrc = attachmentPreviewSrc(attachment)
+        const detail = attachment.itemCount
+          ? `${attachment.itemCount} files`
+          : formatAttachmentSize(attachment.sizeBytes)
+
+        return (
+          <div
+            key={attachment.id}
+            className={cn(
+              "group flex max-w-72 items-center gap-2 border bg-muted/40 px-2 py-1 text-xs",
+              attachment.status === "skipped" &&
+                "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100",
+            )}
+            title={attachmentTitle(attachment)}
+          >
+            {previewSrc ? (
+              <img
+                alt=""
+                className="size-9 shrink-0 border object-cover"
+                src={previewSrc}
+              />
+            ) : (
+              <span className="flex size-6 shrink-0 items-center justify-center border bg-background text-muted-foreground">
+                {attachmentIcon(attachment)}
+              </span>
+            )}
+            <span className="min-w-0">
+              <span className="block truncate font-medium">{attachment.name}</span>
+              <span className="block truncate text-muted-foreground">
+                {detail ?? attachment.status}
+              </span>
+            </span>
+            {onRemove && (
+              <button
+                type="button"
+                className="ml-auto flex size-5 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                aria-label={`Remove ${attachment.name}`}
+                title={`Remove ${attachment.name}`}
+                onClick={() => onRemove(attachment.path)}
+                disabled={disabled}
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function formatChatTimestamp(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) {
@@ -443,6 +699,7 @@ function MessageBubble({ message }: { message: AiChatMessage }) {
   }
 
   const fromUser = message.role === "user"
+  const attachments = getMessageAttachments(message)
 
   return (
     <div className={cn("flex", fromUser ? "justify-end" : "justify-start")}>
@@ -457,8 +714,11 @@ function MessageBubble({ message }: { message: AiChatMessage }) {
         )}
       >
         {fromUser ? (
-          <div className="whitespace-pre-wrap break-words text-sm leading-6">
-            {message.content}
+          <div className="space-y-2">
+            {attachments.length > 0 && <AttachmentList attachments={attachments} />}
+            <div className="whitespace-pre-wrap break-words text-sm leading-6">
+              {message.content}
+            </div>
           </div>
         ) : (
           <MarkdownMessage content={message.content} />
@@ -486,6 +746,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
   const aiState = getAiChatWindowState(window)
   const thread = aiState.thread
   const composerValue = aiState.composerValue
+  const pendingAttachments = aiState.pendingAttachments
   const running = aiState.running
   const error = aiState.error
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -493,7 +754,10 @@ export function AiChatModule({ window }: AiChatModuleProps) {
   const [historyLoading, setHistoryLoading] = useState(false)
   const messages = thread?.messages ?? []
   const lastTool = thread?.messages ? getLastTool(thread.messages) : undefined
-  const canSend = Boolean(environment && composerValue.trim() && !running)
+  const hasPendingAttachments = Boolean(pendingAttachments?.attachments.length)
+  const canSend = Boolean(
+    environment && !running && (composerValue.trim() || hasPendingAttachments),
+  )
   const providerLocked = messages.length > 0
   const scopedChatHistory = environment
     ? chatHistory.filter((summary) => summary.environmentId === environment.id)
@@ -572,6 +836,133 @@ export function AiChatModule({ window }: AiChatModuleProps) {
     messagesEndRef.current?.scrollIntoView({ block: "end" })
   }, [messages.length, running])
 
+  async function setPendingAttachmentPaths(paths: string[]) {
+    if (running || paths.length === 0) {
+      return
+    }
+
+    const current = getStoredAiChatState(window.id)
+    const existingPaths =
+      current.pendingAttachments?.attachments.map((attachment) => attachment.path) ??
+      []
+    const nextPaths = Array.from(new Set([...existingPaths, ...paths]))
+
+    try {
+      const bundle = await prepareAiChatAttachments(nextPaths)
+      persistAiState({
+        pendingAttachments: bundle.attachments.length > 0 ? bundle : undefined,
+        error: undefined,
+      })
+
+      if (bundle.warnings.length > 0) {
+        setLastMessage(bundle.warnings[0])
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not prepare attachments"
+      setLastMessage(message)
+      persistAiState({ error: message })
+    }
+  }
+
+  async function removePendingAttachment(path: string) {
+    if (running) {
+      return
+    }
+
+    const current = getStoredAiChatState(window.id)
+    const remainingPaths =
+      current.pendingAttachments?.attachments
+        .map((attachment) => attachment.path)
+        .filter((attachmentPath) => attachmentPath !== path) ?? []
+
+    if (remainingPaths.length === 0) {
+      persistAiState({ pendingAttachments: undefined, error: undefined })
+      return
+    }
+
+    try {
+      const bundle = await prepareAiChatAttachments(remainingPaths)
+      persistAiState({
+        pendingAttachments: bundle.attachments.length > 0 ? bundle : undefined,
+        error: undefined,
+      })
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not update attachments"
+      setLastMessage(message)
+      persistAiState({ error: message })
+    }
+  }
+
+  async function attachImages() {
+    const paths = await chooseAiChatImageFiles()
+    await setPendingAttachmentPaths(paths)
+  }
+
+  async function attachFiles() {
+    const paths = await chooseAiChatContextFiles()
+    await setPendingAttachmentPaths(paths)
+  }
+
+  async function attachFolders() {
+    const paths = await chooseAiChatContextFolders()
+    await setPendingAttachmentPaths(paths)
+  }
+
+  async function attachPastedImages(files: File[]) {
+    if (running || files.length === 0) {
+      return
+    }
+
+    const savedPaths: string[] = []
+    const oversized = files.find((file) => file.size > maxPastedImageBytes)
+
+    if (oversized) {
+      setLastMessage(
+        `${oversized.name || "Pasted image"} is larger than ${Math.round(
+          maxPastedImageBytes / 1024 / 1024,
+        )} MB.`,
+      )
+      return
+    }
+
+    try {
+      for (const file of files) {
+        const dataBase64 = await fileToBase64(file)
+        const saved = await savePastedAiChatImage({
+          name: file.name || undefined,
+          mimeType: pastedImageMimeType(file),
+          dataBase64,
+        })
+        savedPaths.push(saved.path)
+      }
+
+      await setPendingAttachmentPaths(savedPaths)
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not paste image"
+      setLastMessage(message)
+      persistAiState({ error: message })
+    }
+  }
+
+  function handleComposerPaste(
+    event: ReactClipboardEvent<HTMLTextAreaElement>,
+  ) {
+    if (!environment || running) {
+      return
+    }
+
+    const files = imageFilesFromClipboard(event)
+    if (files.length === 0) {
+      return
+    }
+
+    event.preventDefault()
+    void attachPastedImages(files)
+  }
+
   async function clearChat() {
     if (running) {
       return
@@ -580,6 +971,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
     persistAiState({
       thread: undefined,
       composerValue: "",
+      pendingAttachments: undefined,
       running: false,
       error: undefined,
     })
@@ -604,6 +996,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
           savedThread.reasoningEffort ??
           defaultReasoningByProvider[savedThread.provider],
         composerValue: "",
+        pendingAttachments: undefined,
         running: false,
         error: undefined,
       })
@@ -618,12 +1011,15 @@ export function AiChatModule({ window }: AiChatModuleProps) {
   async function submitMessage(event?: FormEvent<HTMLFormElement>, value?: string) {
     event?.preventDefault()
 
-    const message = (value ?? composerValue).trim()
+    const current = getStoredAiChatState(window.id)
+    const pendingAttachments = current.pendingAttachments
+    const message =
+      (value ?? composerValue).trim() ||
+      (pendingAttachments?.attachments.length ? "Use the attached context." : "")
     if (!message || !environment || running) {
       return
     }
 
-    const current = getStoredAiChatState(window.id)
     let activeThread = current.thread
 
     if (!activeThread) {
@@ -640,19 +1036,12 @@ export function AiChatModule({ window }: AiChatModuleProps) {
       activeThread.messages.length === 0
         ? createChatTitle(message)
         : activeThread.title
-    const pendingMessages: AiChatMessage[] = [
-      ...activeThread.messages,
-      {
-        id: createId("ai-message"),
-        role: "user",
-        content: message,
-        createdAt: now,
-        status: "complete",
-      },
-    ]
+    const userMessage = createUserMessage(message, now, pendingAttachments)
+    const pendingMessages: AiChatMessage[] = [...activeThread.messages, userMessage]
 
     persistAiState({
       composerValue: "",
+      pendingAttachments: undefined,
       running: true,
       error: undefined,
       thread: {
@@ -672,6 +1061,9 @@ export function AiChatModule({ window }: AiChatModuleProps) {
         threadId: activeThread.id,
         environmentId: environment.id,
         message,
+        context: pendingAttachments?.context,
+        attachments: pendingAttachments?.attachments,
+        imagePaths: pendingAttachments?.imagePaths,
         provider: current.provider,
         model: current.model,
         reasoningEffort: current.reasoningEffort,
@@ -721,13 +1113,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
           updatedAt: new Date().toISOString(),
           messages: [
             ...activeThread.messages,
-            {
-              id: createId("ai-message"),
-              role: "user",
-              content: message,
-              createdAt: now,
-              status: "complete",
-            },
+            userMessage,
             {
               id: createId("ai-message"),
               role: "assistant",
@@ -954,27 +1340,77 @@ export function AiChatModule({ window }: AiChatModuleProps) {
       </div>
 
       <form className="border-t p-3" onSubmit={submitMessage}>
-        <div className="mx-auto flex max-w-5xl items-end gap-2">
-          <textarea
-            className="min-h-16 flex-1 resize-none border bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-            value={composerValue}
-            onChange={(event) =>
-              persistAiState({ composerValue: event.target.value })
-            }
-            placeholder={
-              environment ? "Ask about Dataverse" : "Select environment"
-            }
-            disabled={!environment || running}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault()
-                void submitMessage()
+        <div className="mx-auto flex max-w-5xl flex-col gap-2">
+          {pendingAttachments?.attachments.length ? (
+            <AttachmentList
+              attachments={pendingAttachments.attachments}
+              disabled={running}
+              onRemove={(path) => void removePendingAttachment(path)}
+            />
+          ) : null}
+          <div className="flex items-end gap-2">
+            <div className="flex shrink-0 items-center gap-1 pb-1">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                aria-label="Attach image"
+                title="Attach image"
+                disabled={!environment || running}
+                onClick={() => void attachImages()}
+              >
+                <ImagePlus />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                aria-label="Attach file"
+                title="Attach file"
+                disabled={!environment || running}
+                onClick={() => void attachFiles()}
+              >
+                <Paperclip />
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                aria-label="Attach folder"
+                title="Attach folder"
+                disabled={!environment || running}
+                onClick={() => void attachFolders()}
+              >
+                <FolderOpen />
+              </Button>
+            </div>
+            <textarea
+              className="min-h-16 flex-1 resize-none border bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+              value={composerValue}
+              onChange={(event) =>
+                persistAiState({ composerValue: event.target.value })
               }
-            }}
-          />
-          <Button type="submit" size="icon-lg" aria-label="Send" disabled={!canSend}>
-            {running ? <Loader2 className="animate-spin" /> : <SendHorizontal />}
-          </Button>
+              onPaste={handleComposerPaste}
+              placeholder={
+                environment ? "Ask about Dataverse" : "Select environment"
+              }
+              disabled={!environment || running}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault()
+                  void submitMessage()
+                }
+              }}
+            />
+            <Button
+              type="submit"
+              size="icon-lg"
+              aria-label="Send"
+              disabled={!canSend}
+            >
+              {running ? <Loader2 className="animate-spin" /> : <SendHorizontal />}
+            </Button>
+          </div>
         </div>
       </form>
     </section>

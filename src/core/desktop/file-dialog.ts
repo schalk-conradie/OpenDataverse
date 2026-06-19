@@ -21,6 +21,120 @@ export async function chooseLocalFile() {
   return typeof selected === "string" ? selected : undefined
 }
 
+export async function chooseWebResourceImportFiles() {
+  if (!isTauriRuntime()) {
+    return [
+      "/workspace/webresources/CustomWebresource/index.html",
+      "/workspace/webresources/CustomWebresource/index.css",
+      "/workspace/webresources/CustomWebresource/index.js",
+    ]
+  }
+
+  const selected = await open({
+    multiple: true,
+    directory: false,
+    filters: [
+      {
+        name: "Web resource files",
+        extensions: [
+          "js",
+          "ts",
+          "css",
+          "html",
+          "htm",
+          "xml",
+          "json",
+          "svg",
+          "png",
+          "jpg",
+          "jpeg",
+          "gif",
+          "ico",
+          "resx",
+          "xsl",
+          "xslt",
+        ],
+      },
+    ],
+  })
+
+  if (Array.isArray(selected)) {
+    return selected
+  }
+
+  return typeof selected === "string" ? [selected] : []
+}
+
+export async function chooseWebResourceImportFolder() {
+  if (!isTauriRuntime()) {
+    return "/workspace/webresources/CustomWebresource"
+  }
+
+  const selected = await open({
+    multiple: false,
+    directory: true,
+  })
+
+  return typeof selected === "string" ? selected : undefined
+}
+
+export async function chooseAiChatImageFiles() {
+  if (!isTauriRuntime()) {
+    return ["/workspace/screenshots/account-form.png"]
+  }
+
+  const selected = await open({
+    multiple: true,
+    directory: false,
+    filters: [
+      {
+        name: "Images",
+        extensions: ["png", "jpg", "jpeg", "gif", "webp"],
+      },
+    ],
+  })
+
+  if (Array.isArray(selected)) {
+    return selected
+  }
+
+  return typeof selected === "string" ? [selected] : []
+}
+
+export async function chooseAiChatContextFiles() {
+  if (!isTauriRuntime()) {
+    return ["/workspace/notes/table-plan.md", "/workspace/src/form-script.ts"]
+  }
+
+  const selected = await open({
+    multiple: true,
+    directory: false,
+  })
+
+  if (Array.isArray(selected)) {
+    return selected
+  }
+
+  return typeof selected === "string" ? [selected] : []
+}
+
+export async function chooseAiChatContextFolders() {
+  if (!isTauriRuntime()) {
+    return ["/workspace/docs/context"]
+  }
+
+  const selected = await open({
+    multiple: true,
+    directory: true,
+  })
+
+  if (Array.isArray(selected)) {
+    return selected
+  }
+
+  return typeof selected === "string" ? [selected] : []
+}
+
 export async function choosePluginAssemblyFile() {
   if (!isTauriRuntime()) {
     return "/workspace/bin/Contoso.Plugins.dll"

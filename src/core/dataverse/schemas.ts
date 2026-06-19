@@ -212,6 +212,24 @@ export type SolutionWriteResult = {
   message: string
 }
 
+export type WebResourceImportItem = {
+  sourcePath: string
+  name: string
+  type: WebResource["type"]
+  webResourceId?: string
+}
+
+export type WebResourceImportSkip = {
+  sourcePath: string
+  reason: string
+}
+
+export type WebResourceImportResult = {
+  imported: WebResourceImportItem[]
+  skipped: WebResourceImportSkip[]
+  message: string
+}
+
 export type PluginOptionSummary = {
   value: number
   label: string

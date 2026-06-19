@@ -11,6 +11,35 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.40",
+    date: "2026-06-19",
+    title: "AI chat pasted images",
+    changes: [
+      "Added AI Chat support for pasting screenshots and other images directly into the composer.",
+      "Stored pasted images in the app cache, displayed them as pending attachments, and sent them to Codex with the chat turn.",
+    ],
+  },
+  {
+    version: "0.1.39",
+    date: "2026-06-19",
+    title: "AI chat attachments",
+    changes: [
+      "Added AI Chat composer actions for attaching screenshots, files, and folders as turn context.",
+      "Sent selected image attachments to Codex as local images while bounding text file and folder context before it reaches the AI provider.",
+      "Rendered attached screenshots, files, and folders in user chat messages with local thumbnail previews where available.",
+    ],
+  },
+  {
+    version: "0.1.38",
+    date: "2026-06-19",
+    title: "Web resource imports",
+    changes: [
+      "Added solution-scoped web resource imports from selected files or folders.",
+      "Exposed web resource imports from Webresource Management and Solution Explorer.",
+      "Preserved folder-relative paths under an editable Dataverse web resource root such as AG_/CustomWebresource.",
+    ],
+  },
+  {
     version: "0.1.37",
     date: "2026-06-18",
     title: "Latest update install",

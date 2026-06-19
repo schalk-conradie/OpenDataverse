@@ -1,5 +1,6 @@
 use super::web_resources::{is_microsoft_web_resource_name, map_resource_type, resource_type_code};
 use super::*;
+use std::{collections::HashSet, path::Component};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -135,12 +136,53 @@ pub(super) struct CreateWebResourceInput {
     content: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ImportWebResourcesInput {
+    solution_unique_name: String,
+    source_paths: Vec<String>,
+    target_root: String,
+    description: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct SolutionWriteResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     web_resource_id: Option<String>,
     message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct WebResourceImportItem {
+    source_path: String,
+    name: String,
+    #[serde(rename = "type")]
+    resource_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    web_resource_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct WebResourceImportSkip {
+    source_path: String,
+    reason: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct WebResourcesImportResult {
+    imported: Vec<WebResourceImportItem>,
+    skipped: Vec<WebResourceImportSkip>,
+    message: String,
+}
+
+#[derive(Debug, Clone)]
+struct WebResourceImportFile {
+    path: PathBuf,
+    relative_path: String,
 }
 
 pub(super) fn solution_component_type_label(component_type: i32) -> &'static str {
@@ -703,8 +745,8 @@ pub(super) async fn dependency_function_items(
     component_type: i32,
 ) -> Result<Vec<SolutionDependencyItem>, String> {
     let path = format!(
-    "/{function_name}(ObjectId=@ObjectId,ComponentType=@ComponentType)?@ObjectId={object_id}&@ComponentType={component_type}"
-  );
+        "/{function_name}(ObjectId=@ObjectId,ComponentType=@ComponentType)?@ObjectId={object_id}&@ComponentType={component_type}"
+    );
     let response = dataverse_get_json_value(app, environment, &path, &[]).await?;
 
     Ok(response
@@ -968,6 +1010,289 @@ pub(super) async fn add_existing_web_resource_to_solution(
     })
 }
 
+fn normalize_web_resource_path(value: &str) -> String {
+    value
+        .trim()
+        .replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn validate_web_resource_name(value: &str) -> Result<(), String> {
+    if value.is_empty() {
+        return Err("Web resource name is required.".to_string());
+    }
+
+    if value.len() > 256 {
+        return Err(format!(
+            "Web resource name must be 256 characters or fewer: {value}"
+        ));
+    }
+
+    if value.starts_with('/') || value.ends_with('/') || value.contains("//") {
+        return Err(format!(
+            "Web resource name cannot start, end, or contain consecutive slashes: {value}"
+        ));
+    }
+
+    if value
+        .chars()
+        .any(|ch| ch.is_control() || ch.is_whitespace())
+    {
+        return Err(format!(
+            "Web resource name cannot contain whitespace or control characters: {value}"
+        ));
+    }
+
+    if value.contains('\\') {
+        return Err(format!(
+            "Web resource name must use forward slashes, not backslashes: {value}"
+        ));
+    }
+
+    Ok(())
+}
+
+fn relative_file_path(root: &Path, path: &Path) -> Result<String, String> {
+    let relative = path.strip_prefix(root).map_err(|error| {
+        format!(
+            "Could not calculate relative path for {}: {error}",
+            path.display()
+        )
+    })?;
+
+    path_components_to_web_resource_path(relative)
+}
+
+fn file_name_path(path: &Path) -> Result<String, String> {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(ToString::to_string)
+        .ok_or_else(|| format!("Could not read file name for {}", path.display()))
+}
+
+fn path_components_to_web_resource_path(path: &Path) -> Result<String, String> {
+    let mut parts = Vec::new();
+
+    for component in path.components() {
+        match component {
+            Component::Normal(value) => {
+                let value = value
+                    .to_str()
+                    .ok_or_else(|| format!("Path is not valid UTF-8: {}", path.display()))?;
+                parts.push(value.to_string());
+            }
+            Component::CurDir => {}
+            _ => {
+                return Err(format!(
+                    "Path contains unsupported traversal component: {}",
+                    path.display()
+                ));
+            }
+        }
+    }
+
+    let relative_path = parts.join("/");
+    if relative_path.is_empty() {
+        return Err(format!(
+            "Path did not contain a file name: {}",
+            path.display()
+        ));
+    }
+
+    Ok(relative_path)
+}
+
+fn web_resource_type_code_for_path(path: &Path) -> Option<i32> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+
+    match extension.as_str() {
+        "html" | "htm" => Some(1),
+        "css" => Some(2),
+        "js" | "ts" => Some(3),
+        "xml" | "json" => Some(4),
+        "png" => Some(5),
+        "jpg" | "jpeg" => Some(6),
+        "gif" => Some(7),
+        "xsl" | "xslt" => Some(9),
+        "ico" => Some(10),
+        "svg" => Some(11),
+        "resx" => Some(12),
+        _ => None,
+    }
+}
+
+fn collect_directory_import_files(
+    root: &Path,
+    directory: &Path,
+    files: &mut Vec<WebResourceImportFile>,
+    skipped: &mut Vec<WebResourceImportSkip>,
+) -> Result<(), String> {
+    let entries = fs::read_dir(directory)
+        .map_err(|error| format!("Could not read directory {}: {error}", directory.display()))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            format!(
+                "Could not read directory entry in {}: {error}",
+                directory.display()
+            )
+        })?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("Could not inspect {}: {error}", path.display()))?;
+
+        if file_type.is_dir() {
+            collect_directory_import_files(root, &path, files, skipped)?;
+            continue;
+        }
+
+        if !file_type.is_file() {
+            skipped.push(WebResourceImportSkip {
+                source_path: path.display().to_string(),
+                reason: "Skipped non-file entry.".to_string(),
+            });
+            continue;
+        }
+
+        if entry.file_name().to_string_lossy() == ".DS_Store" {
+            skipped.push(WebResourceImportSkip {
+                source_path: path.display().to_string(),
+                reason: "Skipped macOS metadata file.".to_string(),
+            });
+            continue;
+        }
+
+        files.push(WebResourceImportFile {
+            relative_path: relative_file_path(root, &path)?,
+            path,
+        });
+    }
+
+    Ok(())
+}
+
+fn collect_import_files(
+    source_paths: &[String],
+) -> Result<(Vec<WebResourceImportFile>, Vec<WebResourceImportSkip>), String> {
+    let mut files = Vec::new();
+    let mut skipped = Vec::new();
+
+    for source_path in source_paths {
+        let path = PathBuf::from(source_path);
+        if path.is_file() {
+            files.push(WebResourceImportFile {
+                relative_path: file_name_path(&path)?,
+                path,
+            });
+        } else if path.is_dir() {
+            collect_directory_import_files(&path, &path, &mut files, &mut skipped)?;
+        } else {
+            skipped.push(WebResourceImportSkip {
+                source_path: source_path.clone(),
+                reason: "Source path does not exist.".to_string(),
+            });
+        }
+    }
+
+    if files.is_empty() && skipped.is_empty() {
+        return Err("Choose at least one file or folder to import.".to_string());
+    }
+
+    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok((files, skipped))
+}
+
+fn import_file_plan(
+    source_paths: &[String],
+    target_root: &str,
+) -> Result<
+    (
+        Vec<(WebResourceImportFile, String, i32)>,
+        Vec<WebResourceImportSkip>,
+    ),
+    String,
+> {
+    let (files, mut skipped) = collect_import_files(source_paths)?;
+    let target_root = normalize_web_resource_path(target_root);
+    validate_web_resource_name(&target_root)?;
+
+    let mut names = HashSet::new();
+    let mut plan = Vec::new();
+
+    for file in files {
+        let Some(type_code) = web_resource_type_code_for_path(&file.path) else {
+            skipped.push(WebResourceImportSkip {
+                source_path: file.path.display().to_string(),
+                reason: "Skipped unsupported web resource extension.".to_string(),
+            });
+            continue;
+        };
+
+        let relative_path = normalize_web_resource_path(&file.relative_path);
+        let name = normalize_web_resource_path(&format!("{target_root}/{relative_path}"));
+        validate_web_resource_name(&name)?;
+
+        if !names.insert(name.clone()) {
+            return Err(format!("Multiple selected files map to {name}."));
+        }
+
+        plan.push((file, name, type_code));
+    }
+
+    if plan.is_empty() {
+        return Err("No supported web resource files were selected.".to_string());
+    }
+
+    Ok((plan, skipped))
+}
+
+async fn create_web_resource_record(
+    app: &AppHandle,
+    environment: &DataverseEnvironment,
+    solution_unique_name: &str,
+    name: &str,
+    display_name: &str,
+    description: &str,
+    type_code: i32,
+    bytes: &[u8],
+) -> Result<Option<String>, String> {
+    let content = BASE64.encode(bytes);
+    let mut payload = serde_json::json!({
+      "name": name,
+      "webresourcetype": type_code,
+      "content": content,
+    });
+
+    if !display_name.trim().is_empty() {
+        payload["displayname"] = Value::String(display_name.trim().to_string());
+    }
+
+    if !description.trim().is_empty() {
+        payload["description"] = Value::String(description.trim().to_string());
+    }
+
+    let (body, entity_id) = dataverse_post_json_with_headers(
+        app,
+        environment,
+        "/webresourceset",
+        &payload,
+        &[
+            ("MSCRM.SolutionUniqueName", solution_unique_name.to_string()),
+            ("Prefer", "return=representation".to_string()),
+        ],
+    )
+    .await?;
+
+    Ok(serde_json::from_str::<Value>(&body)
+        .ok()
+        .and_then(|value| json_string(&value, "webresourceid"))
+        .or_else(|| entity_id.as_deref().and_then(guid_from_entity_id)))
+}
+
 #[tauri::command]
 pub(super) async fn create_web_resource_in_solution(
     app: AppHandle,
@@ -987,39 +1312,124 @@ pub(super) async fn create_web_resource_in_solution(
     let type_code = resource_type_code(&input.resource_type)?;
     let display_name = input.display_name.trim();
     let description = input.description.trim();
-    let content = BASE64.encode(input.content.as_bytes());
-    let mut payload = serde_json::json!({
-      "name": name,
-      "webresourcetype": type_code,
-      "content": content,
-    });
-
-    if !display_name.is_empty() {
-        payload["displayname"] = Value::String(display_name.to_string());
-    }
-
-    if !description.is_empty() {
-        payload["description"] = Value::String(description.to_string());
-    }
-
-    let (body, entity_id) = dataverse_post_json_with_headers(
+    let web_resource_id = create_web_resource_record(
         &app,
         &environment,
-        "/webresourceset",
-        &payload,
-        &[
-            ("MSCRM.SolutionUniqueName", solution_unique_name.clone()),
-            ("Prefer", "return=representation".to_string()),
-        ],
+        &solution_unique_name,
+        name,
+        display_name,
+        description,
+        type_code,
+        input.content.as_bytes(),
     )
     .await?;
-    let web_resource_id = serde_json::from_str::<Value>(&body)
-        .ok()
-        .and_then(|value| json_string(&value, "webresourceid"))
-        .or_else(|| entity_id.as_deref().and_then(guid_from_entity_id));
 
     Ok(SolutionWriteResult {
         web_resource_id,
         message: format!("Created {name} in {solution_unique_name}"),
     })
+}
+
+#[tauri::command]
+pub(super) async fn import_web_resources_in_solution(
+    app: AppHandle,
+    environment: DataverseEnvironment,
+    input: ImportWebResourcesInput,
+) -> Result<WebResourcesImportResult, String> {
+    let solution_unique_name = validate_logical_name(&input.solution_unique_name)?;
+    let (plan, skipped) = import_file_plan(&input.source_paths, &input.target_root)?;
+    let mut imported = Vec::new();
+
+    for (file, name, type_code) in plan {
+        let bytes = fs::read(&file.path)
+            .map_err(|error| format!("Could not read {}: {error}", file.path.display()))?;
+        let display_name = file_name_path(&file.path)?;
+        let web_resource_id = create_web_resource_record(
+            &app,
+            &environment,
+            &solution_unique_name,
+            &name,
+            &display_name,
+            &input.description,
+            type_code,
+            &bytes,
+        )
+        .await
+        .map_err(|error| format!("Could not create {name}: {error}"))?;
+
+        imported.push(WebResourceImportItem {
+            source_path: file.path.display().to_string(),
+            name,
+            resource_type: map_resource_type(Some(type_code)),
+            web_resource_id,
+        });
+    }
+
+    let imported_count = imported.len();
+    let skipped_count = skipped.len();
+    let message = match (imported_count, skipped_count) {
+        (1, 0) => format!("Imported 1 web resource into {solution_unique_name}"),
+        (_, 0) => format!("Imported {imported_count} web resources into {solution_unique_name}"),
+        (1, _) => {
+            format!("Imported 1 web resource into {solution_unique_name}; skipped {skipped_count}")
+        }
+        _ => format!(
+            "Imported {imported_count} web resources into {solution_unique_name}; skipped {skipped_count}"
+        ),
+    };
+
+    Ok(WebResourcesImportResult {
+        imported,
+        skipped,
+        message,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn web_resource_import_paths_are_normalized() {
+        assert_eq!(
+            normalize_web_resource_path(" /AG_/CustomWebresource//index.html "),
+            "AG_/CustomWebresource/index.html"
+        );
+        assert_eq!(
+            normalize_web_resource_path("AG_\\CustomWebresource\\index.js"),
+            "AG_/CustomWebresource/index.js"
+        );
+    }
+
+    #[test]
+    fn web_resource_import_type_is_inferred_from_extension() {
+        assert_eq!(
+            web_resource_type_code_for_path(Path::new("index.html")),
+            Some(1)
+        );
+        assert_eq!(
+            web_resource_type_code_for_path(Path::new("index.css")),
+            Some(2)
+        );
+        assert_eq!(
+            web_resource_type_code_for_path(Path::new("index.js")),
+            Some(3)
+        );
+        assert_eq!(
+            web_resource_type_code_for_path(Path::new("icon.svg")),
+            Some(11)
+        );
+        assert_eq!(
+            web_resource_type_code_for_path(Path::new(".DS_Store")),
+            None
+        );
+    }
+
+    #[test]
+    fn web_resource_import_names_reject_ambiguous_slashes() {
+        assert!(validate_web_resource_name("AG_/CustomWebresource/index.html").is_ok());
+        assert!(validate_web_resource_name("/AG_/index.html").is_err());
+        assert!(validate_web_resource_name("AG_//index.html").is_err());
+        assert!(validate_web_resource_name("AG_/index.html ").is_err());
+    }
 }

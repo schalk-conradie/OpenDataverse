@@ -1,5 +1,6 @@
 import {
   Codex,
+  type Input as CodexInput,
   type ModelReasoningEffort,
   type Thread,
   type ThreadEvent,
@@ -30,6 +31,7 @@ export type RunCodexTurnInput = {
   model?: string
   reasoningEffort?: ModelReasoningEffort
   toolResults?: DataverseToolResult[]
+  imagePaths?: string[]
 }
 
 export type RunCodexTurnResult = {
@@ -39,6 +41,22 @@ export type RunCodexTurnResult = {
   response: string
   toolRequests: DataverseToolRequest[]
   items: Array<Pick<ThreadItem, "id" | "type">>
+}
+
+function buildCodexInput(prompt: string, imagePaths?: string[]): CodexInput {
+  const selectedImagePaths = imagePaths?.filter(Boolean) ?? []
+
+  if (selectedImagePaths.length === 0) {
+    return prompt
+  }
+
+  return [
+    { type: "text", text: prompt },
+    ...selectedImagePaths.map((path) => ({
+      type: "local_image" as const,
+      path,
+    })),
+  ]
 }
 
 export class CodexSessionManager {
@@ -73,7 +91,7 @@ export class CodexSessionManager {
       userMessage: input.message,
       toolResults: input.toolResults,
     })
-    const turn = await session.thread.run(prompt, {
+    const turn = await session.thread.run(buildCodexInput(prompt, input.imagePaths), {
       outputSchema: CODEX_TURN_OUTPUT_SCHEMA,
     })
 
@@ -110,9 +128,12 @@ export class CodexSessionManager {
       userMessage: input.message,
       toolResults: input.toolResults,
     })
-    const turn = await session.thread.runStreamed(prompt, {
-      outputSchema: CODEX_TURN_OUTPUT_SCHEMA,
-    })
+    const turn = await session.thread.runStreamed(
+      buildCodexInput(prompt, input.imagePaths),
+      {
+        outputSchema: CODEX_TURN_OUTPUT_SCHEMA,
+      },
+    )
     const items: ThreadItem[] = []
     let finalResponse = ""
 

@@ -3,17 +3,25 @@ import { invoke } from "@tauri-apps/api/core"
 import { isTauriRuntime } from "@/core/desktop/bridge"
 import { createId } from "@/core/dataverse/schemas"
 import type {
+  AiChatAttachment,
+  AiChatAttachmentBundle,
   AiChatMessage,
   AiChatMessageInput,
   AiChatStreamEvent,
   AiChatThread,
   AiChatThreadInput,
   AiChatThreadSummary,
+  PastedAiChatImage,
+  PastedAiChatImageInput,
 } from "@/modules/ai-chat/types"
 import { defaultModelByProvider } from "@/modules/ai-chat/options"
 
 const browserThreads = new Map<string, AiChatThread>()
 export const AI_CHAT_STREAM_EVENT = "ai-chat-event"
+
+function fileNameFromPath(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).at(-1) ?? path
+}
 
 function createBrowserThread(input: AiChatThreadInput): AiChatThread {
   const now = new Date().toISOString()
@@ -142,13 +150,97 @@ export async function startAiChatThread(input: AiChatThreadInput) {
   return thread
 }
 
+export async function prepareAiChatAttachments(paths: string[]) {
+  const selectedPaths = Array.from(new Set(paths.map((path) => path.trim()))).filter(
+    Boolean,
+  )
+
+  if (isTauriRuntime()) {
+    return invoke<AiChatAttachmentBundle>("prepare_ai_chat_attachments", {
+      paths: selectedPaths,
+    })
+  }
+
+  const attachments: AiChatAttachment[] = selectedPaths.map((path) => {
+    const lower = path.toLowerCase()
+    const imageIncluded = /\.(png|jpe?g|gif|webp)$/.test(lower)
+
+    return {
+      id: createId("ai-attachment"),
+      kind: imageIncluded ? "image" : "file",
+      path,
+      name: fileNameFromPath(path),
+      status: "summarized",
+      contextIncluded: true,
+      imageIncluded,
+      reason: "Browser preview uses selected paths as mock AI context.",
+    }
+  })
+
+  return {
+    attachments,
+    context:
+      attachments.length > 0
+        ? `Browser preview attachment paths:\n${attachments
+            .map((attachment) => `- ${attachment.path}`)
+            .join("\n")}`
+        : "",
+    imagePaths: attachments
+      .filter((attachment) => attachment.imageIncluded)
+      .map((attachment) => attachment.path),
+    warnings: [],
+  } satisfies AiChatAttachmentBundle
+}
+
+function pastedImageExtension(input: PastedAiChatImageInput) {
+  const mimeType = input.mimeType.toLowerCase()
+  const name = input.name?.toLowerCase() ?? ""
+
+  if (mimeType === "image/jpeg" || /\.(jpe?g)$/.test(name)) {
+    return "jpg"
+  }
+
+  if (mimeType === "image/gif" || name.endsWith(".gif")) {
+    return "gif"
+  }
+
+  if (mimeType === "image/webp" || name.endsWith(".webp")) {
+    return "webp"
+  }
+
+  return "png"
+}
+
+export async function savePastedAiChatImage(
+  input: PastedAiChatImageInput,
+): Promise<PastedAiChatImage> {
+  if (isTauriRuntime()) {
+    return invoke<PastedAiChatImage>("save_pasted_ai_chat_image", {
+      input,
+    })
+  }
+
+  return {
+    path: `/workspace/pasted-images/pasted-${createId("image")}.${pastedImageExtension(input)}`,
+  }
+}
+
 export async function sendAiChatMessage(input: AiChatMessageInput) {
   if (isTauriRuntime()) {
     return invoke<AiChatMessage[]>("send_ai_chat_message", input)
   }
 
   const thread = browserThreads.get(input.threadId) ?? createBrowserThread(input)
-  const userMessage = createMessage("user", input.message)
+  const userMessage = createMessage("user", input.message, {
+    metadata:
+      input.attachments && input.attachments.length > 0
+        ? {
+            attachments: input.attachments,
+            attachmentContextChars: input.context?.length ?? 0,
+            imagePathCount: input.imagePaths?.length ?? 0,
+          }
+        : undefined,
+  })
   const toolMessage = createMessage("tool", "browser-preview", {
     toolName: "browser_preview",
     metadata: {

@@ -44,6 +44,14 @@ const AI_MAX_TOP: u32 = 100;
 const AI_MAX_RESPONSE_BYTES: usize = 1_000_000;
 const AI_TOOL_REQUESTS_PER_ROUND: usize = 8;
 const AI_MAX_TOOL_ROUNDS: usize = 32;
+const AI_ATTACHMENT_MAX_SELECTED_PATHS: usize = 24;
+const AI_ATTACHMENT_MAX_FOLDER_FILES: usize = 80;
+const AI_ATTACHMENT_MAX_TEXT_FILE_BYTES: u64 = 1_000_000;
+const AI_ATTACHMENT_MAX_TEXT_CHARS_PER_FILE: usize = 12_000;
+const AI_ATTACHMENT_MAX_TOTAL_CONTEXT_CHARS: usize = 80_000;
+const AI_ATTACHMENT_MAX_CODEX_IMAGES: usize = 6;
+const AI_PASTED_IMAGES_DIR_NAME: &str = "ai-chat-pasted-images";
+const AI_PASTED_IMAGE_MAX_BYTES: usize = 15_000_000;
 const AI_CHAT_EVENT: &str = "ai-chat-event";
 const AI_DEFAULT_PROVIDER: &str = "codex";
 const AI_DEFAULT_MODEL: &str = "gpt-5.3-codex-spark";
@@ -799,6 +807,7 @@ pub(crate) fn run() {
             solutions::list_solution_web_resource_candidates,
             solutions::add_existing_web_resource_to_solution,
             solutions::create_web_resource_in_solution,
+            solutions::import_web_resources_in_solution,
             plugins::inspect_plugin_assembly,
             plugins::list_plugin_assemblies,
             plugins::list_plugin_packages,
@@ -828,6 +837,8 @@ pub(crate) fn run() {
             ai::list_ai_chat_threads,
             ai::load_ai_chat_thread,
             ai::start_ai_chat_thread,
+            ai::prepare_ai_chat_attachments,
+            ai::save_pasted_ai_chat_image,
             ai::send_ai_chat_message,
             ai::dataverse_ai_whoami,
             ai::dataverse_ai_list_entity_sets,
