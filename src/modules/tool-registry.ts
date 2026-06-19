@@ -1,6 +1,7 @@
 import {
   Braces,
   Boxes,
+  BotMessageSquare,
   FileCode2,
   MessageSquareText,
   Puzzle,
@@ -22,6 +23,13 @@ export const toolRegistry: ToolDefinition[] = [
     title: "AI Chat",
     description: "Ask Dataverse questions",
     icon: MessageSquareText,
+    status: "ready",
+  },
+  {
+    id: "ai-agent-experimental",
+    title: "AI Agent (Experimental)",
+    description: "Unsafe Dataverse changes",
+    icon: BotMessageSquare,
     status: "ready",
   },
   {

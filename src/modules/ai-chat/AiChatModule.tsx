@@ -61,6 +61,7 @@ import { cn } from "@/lib/utils"
 import type {
   AiChatAttachment,
   AiChatAttachmentBundle,
+  AiChatMode,
   AiChatMessage,
   AiChatModel,
   AiChatProvider,
@@ -83,6 +84,7 @@ import { useWorkspaceStore } from "@/store/workspace-store"
 
 type AiChatModuleProps = {
   window: ToolWindow
+  mode?: AiChatMode
 }
 
 const starterPrompts = [
@@ -90,6 +92,13 @@ const starterPrompts = [
   "List entity sets related to account.",
   "Show account metadata for the primary name and created fields.",
   "Get the first 5 accounts with name and accountid.",
+]
+
+const experimentalStarterPrompts = [
+  "Who am I connected as?",
+  "Create a draft plan before changing this environment.",
+  "Update one test account after I provide the exact row id.",
+  "Explain the Dataverse Web API request you would run.",
 ]
 
 const maxPastedImageBytes = 15_000_000
@@ -257,8 +266,7 @@ const defaultAiChatState: AiChatWindowState = {
 
 function pastedFileLooksLikeImage(file: File) {
   return (
-    file.type.startsWith("image/") ||
-    /\.(png|jpe?g|gif|webp)$/i.test(file.name)
+    file.type.startsWith("image/") || /\.(png|jpe?g|gif|webp)$/i.test(file.name)
   )
 }
 
@@ -331,7 +339,9 @@ function fileToBase64(file: File) {
 }
 
 function getAiChatWindowState(window: ToolWindow): AiChatWindowState {
-  const candidate = window.state?.aiChat as Partial<AiChatWindowState> | undefined
+  const candidate = window.state?.aiChat as
+    | Partial<AiChatWindowState>
+    | undefined
   const threadProvider = isAiChatProvider(candidate?.thread?.provider)
     ? candidate.thread.provider
     : undefined
@@ -340,9 +350,10 @@ function getAiChatWindowState(window: ToolWindow): AiChatWindowState {
       ? threadProvider
       : isAiChatProvider(candidate?.provider)
         ? candidate.provider
-        : threadProvider ?? defaultAiChatState.provider
+        : (threadProvider ?? defaultAiChatState.provider)
   const legacyDefaultModel =
-    (candidate?.settingsVersion === undefined && candidate?.model === "gpt-5.5") ||
+    (candidate?.settingsVersion === undefined &&
+      candidate?.model === "gpt-5.5") ||
     (provider === "codex" &&
       (candidate?.settingsVersion ?? 0) < 5 &&
       candidate?.model === "gpt-5.4-mini")
@@ -398,9 +409,7 @@ function getStoredAiChatState(windowId: string) {
     .getState()
     .openWindows.find((item) => item.id === windowId)
 
-  return storedWindow
-    ? getAiChatWindowState(storedWindow)
-    : defaultAiChatState
+  return storedWindow ? getAiChatWindowState(storedWindow) : defaultAiChatState
 }
 
 function upsertMessage(messages: AiChatMessage[], message: AiChatMessage) {
@@ -428,7 +437,10 @@ function authBadgeClass(environment?: DataverseEnvironment) {
     return "border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-200"
   }
 
-  if (environment.authState === "error" || environment.authState === "expired") {
+  if (
+    environment.authState === "error" ||
+    environment.authState === "expired"
+  ) {
     return "border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-950/40 dark:text-red-200"
   }
 
@@ -440,7 +452,9 @@ function statusLabel(environment?: DataverseEnvironment) {
     return "No environment"
   }
 
-  return environment.authState === "connected" ? "Connected" : environment.authState
+  return environment.authState === "connected"
+    ? "Connected"
+    : environment.authState
 }
 
 function formatMessageTime(value: string) {
@@ -619,7 +633,9 @@ function AttachmentList({
               </span>
             )}
             <span className="min-w-0">
-              <span className="block truncate font-medium">{attachment.name}</span>
+              <span className="block truncate font-medium">
+                {attachment.name}
+              </span>
               <span className="block truncate text-muted-foreground">
                 {detail ?? attachment.status}
               </span>
@@ -715,7 +731,9 @@ function MessageBubble({ message }: { message: AiChatMessage }) {
       >
         {fromUser ? (
           <div className="space-y-2">
-            {attachments.length > 0 && <AttachmentList attachments={attachments} />}
+            {attachments.length > 0 && (
+              <AttachmentList attachments={attachments} />
+            )}
             <div className="whitespace-pre-wrap break-words text-sm leading-6">
               {message.content}
             </div>
@@ -736,10 +754,16 @@ function MessageBubble({ message }: { message: AiChatMessage }) {
   )
 }
 
-export function AiChatModule({ window }: AiChatModuleProps) {
+function chatModeLabel(mode: AiChatMode) {
+  return mode === "experimental-agent" ? "AI Agent (Experimental)" : "AI Chat"
+}
+
+export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
   const config = useWorkspaceStore((state) => state.config)
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
-  const updateWindowState = useWorkspaceStore((state) => state.updateWindowState)
+  const updateWindowState = useWorkspaceStore(
+    (state) => state.updateWindowState,
+  )
   const environment =
     getEnvironmentById(config, window.environmentId) ??
     getEnvironmentById(config, config.currentEnvironmentId)
@@ -755,12 +779,19 @@ export function AiChatModule({ window }: AiChatModuleProps) {
   const messages = thread?.messages ?? []
   const lastTool = thread?.messages ? getLastTool(thread.messages) : undefined
   const hasPendingAttachments = Boolean(pendingAttachments?.attachments.length)
+  const moduleTitle = chatModeLabel(mode)
+  const isExperimentalAgent = mode === "experimental-agent"
+  const prompts = isExperimentalAgent
+    ? experimentalStarterPrompts
+    : starterPrompts
   const canSend = Boolean(
     environment && !running && (composerValue.trim() || hasPendingAttachments),
   )
   const providerLocked = messages.length > 0
   const scopedChatHistory = environment
-    ? chatHistory.filter((summary) => summary.environmentId === environment.id)
+    ? chatHistory
+        .filter((summary) => summary.environmentId === environment.id)
+        .filter((summary) => (summary.mode ?? "chat") === mode)
     : []
 
   const persistAiState = useCallback(
@@ -788,7 +819,9 @@ export function AiChatModule({ window }: AiChatModuleProps) {
       setChatHistory(summaries)
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Could not load AI chat history"
+        error instanceof Error
+          ? error.message
+          : "Could not load AI chat history"
       setLastMessage(message)
       persistAiState({ error: message })
     } finally {
@@ -843,8 +876,9 @@ export function AiChatModule({ window }: AiChatModuleProps) {
 
     const current = getStoredAiChatState(window.id)
     const existingPaths =
-      current.pendingAttachments?.attachments.map((attachment) => attachment.path) ??
-      []
+      current.pendingAttachments?.attachments.map(
+        (attachment) => attachment.path,
+      ) ?? []
     const nextPaths = Array.from(new Set([...existingPaths, ...paths]))
 
     try {
@@ -989,9 +1023,10 @@ export function AiChatModule({ window }: AiChatModuleProps) {
         threadId: summary.id,
       })
       persistAiState({
-        thread: savedThread,
+        thread: { ...savedThread, mode },
         provider: savedThread.provider,
-        model: savedThread.model ?? defaultModelByProvider[savedThread.provider],
+        model:
+          savedThread.model ?? defaultModelByProvider[savedThread.provider],
         reasoningEffort:
           savedThread.reasoningEffort ??
           defaultReasoningByProvider[savedThread.provider],
@@ -1008,23 +1043,30 @@ export function AiChatModule({ window }: AiChatModuleProps) {
     }
   }
 
-  async function submitMessage(event?: FormEvent<HTMLFormElement>, value?: string) {
+  async function submitMessage(
+    event?: FormEvent<HTMLFormElement>,
+    value?: string,
+  ) {
     event?.preventDefault()
 
     const current = getStoredAiChatState(window.id)
     const pendingAttachments = current.pendingAttachments
     const message =
       (value ?? composerValue).trim() ||
-      (pendingAttachments?.attachments.length ? "Use the attached context." : "")
+      (pendingAttachments?.attachments.length
+        ? "Use the attached context."
+        : "")
     if (!message || !environment || running) {
       return
     }
 
-    let activeThread = current.thread
+    let activeThread =
+      (current.thread?.mode ?? "chat") === mode ? current.thread : undefined
 
     if (!activeThread) {
       activeThread = await startAiChatThread({
         environmentId: environment.id,
+        mode,
         provider: current.provider,
         model: current.model,
         reasoningEffort: current.reasoningEffort,
@@ -1037,7 +1079,10 @@ export function AiChatModule({ window }: AiChatModuleProps) {
         ? createChatTitle(message)
         : activeThread.title
     const userMessage = createUserMessage(message, now, pendingAttachments)
-    const pendingMessages: AiChatMessage[] = [...activeThread.messages, userMessage]
+    const pendingMessages: AiChatMessage[] = [
+      ...activeThread.messages,
+      userMessage,
+    ]
 
     persistAiState({
       composerValue: "",
@@ -1047,6 +1092,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
       thread: {
         ...activeThread,
         environmentId: environment.id,
+        mode,
         provider: current.provider,
         model: current.model,
         reasoningEffort: current.reasoningEffort,
@@ -1060,6 +1106,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
       const responseMessages = await sendAiChatMessage({
         threadId: activeThread.id,
         environmentId: environment.id,
+        mode,
         message,
         context: pendingAttachments?.context,
         attachments: pendingAttachments?.attachments,
@@ -1079,6 +1126,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
         thread: {
           ...activeThread,
           environmentId: environment.id,
+          mode,
           provider: current.provider,
           providerThreadId:
             providerThreadId ??
@@ -1086,7 +1134,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
             activeThread.codexThreadId,
           codexThreadId:
             current.provider === "codex"
-              ? providerThreadId ?? activeThread.codexThreadId
+              ? (providerThreadId ?? activeThread.codexThreadId)
               : activeThread.codexThreadId,
           model: current.model,
           reasoningEffort: current.reasoningEffort,
@@ -1106,6 +1154,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
         thread: {
           ...activeThread,
           environmentId: environment.id,
+          mode,
           provider: current.provider,
           model: current.model,
           reasoningEffort: current.reasoningEffort,
@@ -1167,7 +1216,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
       <header className="flex min-h-16 items-center justify-between gap-4 border-b px-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h2 className="truncate text-base font-medium">AI Chat</h2>
+            <h2 className="truncate text-base font-medium">{moduleTitle}</h2>
             {environment && <Badge variant="outline">{environment.name}</Badge>}
             <Badge
               className={cn("capitalize", authBadgeClass(environment))}
@@ -1181,7 +1230,9 @@ export function AiChatModule({ window }: AiChatModuleProps) {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <DropdownMenu onOpenChange={(open) => open && void refreshChatHistory()}>
+          <DropdownMenu
+            onOpenChange={(open) => open && void refreshChatHistory()}
+          >
             <DropdownMenuTrigger asChild>
               <Button
                 variant="outline"
@@ -1210,7 +1261,9 @@ export function AiChatModule({ window }: AiChatModuleProps) {
                     disabled={summary.id === thread?.id}
                   >
                     <div className="min-w-0">
-                      <div className="truncate font-medium">{summary.title}</div>
+                      <div className="truncate font-medium">
+                        {summary.title}
+                      </div>
                       <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-muted-foreground">
                         <span className="capitalize">{summary.provider}</span>
                         <span>{summary.messageCount} messages</span>
@@ -1233,6 +1286,13 @@ export function AiChatModule({ window }: AiChatModuleProps) {
           </Button>
         </div>
       </header>
+
+      {isExperimentalAgent && (
+        <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs leading-5 text-destructive">
+          Unsafe module. It can make Dataverse changes, and serious harm could
+          come to an environment.
+        </div>
+      )}
 
       <div className="flex min-h-10 items-center gap-2 overflow-x-auto border-b px-4 py-2 text-xs">
         <Badge className={authBadgeClass(environment)} variant="outline">
@@ -1312,7 +1372,7 @@ export function AiChatModule({ window }: AiChatModuleProps) {
         <div className="mx-auto flex max-w-5xl flex-col gap-3">
           {messages.length === 0 && (
             <div className="grid gap-2 sm:grid-cols-2">
-              {starterPrompts.map((prompt) => (
+              {prompts.map((prompt) => (
                 <button
                   key={prompt}
                   type="button"
@@ -1392,7 +1452,11 @@ export function AiChatModule({ window }: AiChatModuleProps) {
               }
               onPaste={handleComposerPaste}
               placeholder={
-                environment ? "Ask about Dataverse" : "Select environment"
+                environment
+                  ? isExperimentalAgent
+                    ? "Ask the agent to inspect or change Dataverse"
+                    : "Ask about Dataverse"
+                  : "Select environment"
               }
               disabled={!environment || running}
               onKeyDown={(event) => {
@@ -1408,7 +1472,11 @@ export function AiChatModule({ window }: AiChatModuleProps) {
               aria-label="Send"
               disabled={!canSend}
             >
-              {running ? <Loader2 className="animate-spin" /> : <SendHorizontal />}
+              {running ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <SendHorizontal />
+              )}
             </Button>
           </div>
         </div>

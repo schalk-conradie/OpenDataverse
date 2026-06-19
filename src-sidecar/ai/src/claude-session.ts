@@ -10,10 +10,11 @@ import {
 } from "@anthropic-ai/claude-agent-sdk"
 
 import {
-  AI_TURN_OUTPUT_SCHEMA,
-  OPEN_DATAVERSE_BASE_PROMPT,
+  basePromptForMode,
   buildDataverseTurnPrompt,
+  outputSchemaForMode,
   parseAiStructuredTurn,
+  type AiChatMode,
   type DataverseToolRequest,
   type DataverseToolResult,
 } from "./dataverse-tools.js"
@@ -22,6 +23,7 @@ type ClaudeSession = {
   providerThreadId?: string
   model?: string
   reasoningEffort?: ClaudeReasoningEffort
+  mode?: AiChatMode
   started: boolean
 }
 
@@ -34,6 +36,7 @@ export type RunClaudeTurnInput = {
   threadId: string
   providerThreadId?: string
   environmentId?: string
+  mode?: AiChatMode
   message: string
   model?: string
   reasoningEffort?: ClaudeReasoningEffort
@@ -51,10 +54,6 @@ export type RunClaudeTurnResult = {
 
 const defaultClaudeModel = "claude-sonnet-4-6"
 const defaultClaudeReasoningEffort: ClaudeReasoningEffort = "medium"
-const outputFormatSchema = AI_TURN_OUTPUT_SCHEMA as unknown as Record<
-  string,
-  unknown
->
 
 function denyClaudeToolUse(): PermissionResult {
   return {
@@ -102,11 +101,13 @@ function createSession(input: {
   providerThreadId?: string
   model?: string
   reasoningEffort?: ClaudeReasoningEffort
+  mode?: AiChatMode
 }): ClaudeSession {
   return {
     providerThreadId: input.providerThreadId,
     model: input.model,
     reasoningEffort: input.reasoningEffort,
+    mode: input.mode ?? "chat",
     started: Boolean(input.providerThreadId),
   }
 }
@@ -119,11 +120,13 @@ export class ClaudeSessionManager {
     providerThreadId?: string
     model?: string
     reasoningEffort?: ClaudeReasoningEffort
+    mode?: AiChatMode
   }) {
     const session = createSession({
       providerThreadId: input.providerThreadId ?? randomUUID(),
       model: input.model,
       reasoningEffort: input.reasoningEffort,
+      mode: input.mode,
     })
     session.started = Boolean(input.providerThreadId)
     this.sessions.set(input.threadId, session)
@@ -138,10 +141,11 @@ export class ClaudeSessionManager {
     const session = this.ensureSession(input)
     const prompt = buildDataverseTurnPrompt({
       environmentId: input.environmentId,
+      mode: input.mode,
       userMessage: input.message,
       toolResults: input.toolResults,
     })
-    const result = await this.runClaudeQuery(prompt, session)
+    const result = await this.runClaudeQuery(prompt, session, input.mode)
     session.providerThreadId = result.session_id ?? session.providerThreadId
     session.started = true
 
@@ -164,7 +168,9 @@ export class ClaudeSessionManager {
     }
   }
 
-  async runTurnStreamed(input: RunClaudeTurnInput): Promise<RunClaudeTurnResult> {
+  async runTurnStreamed(
+    input: RunClaudeTurnInput,
+  ): Promise<RunClaudeTurnResult> {
     return this.runTurn(input)
   }
 
@@ -173,7 +179,8 @@ export class ClaudeSessionManager {
     if (
       existing &&
       existing.model === input.model &&
-      existing.reasoningEffort === input.reasoningEffort
+      existing.reasoningEffort === input.reasoningEffort &&
+      existing.mode === (input.mode ?? "chat")
     ) {
       return existing
     }
@@ -182,12 +189,21 @@ export class ClaudeSessionManager {
       providerThreadId: input.providerThreadId ?? existing?.providerThreadId,
       model: input.model,
       reasoningEffort: input.reasoningEffort,
+      mode: input.mode,
     })
     this.sessions.set(input.threadId, session)
     return session
   }
 
-  private async runClaudeQuery(prompt: string, session: ClaudeSession) {
+  private async runClaudeQuery(
+    prompt: string,
+    session: ClaudeSession,
+    mode?: AiChatMode,
+  ) {
+    const outputFormatSchema = outputSchemaForMode(mode) as unknown as Record<
+      string,
+      unknown
+    >
     const messages = query({
       prompt,
       options: {
@@ -201,7 +217,7 @@ export class ClaudeSessionManager {
           type: "json_schema",
           schema: outputFormatSchema,
         },
-        systemPrompt: OPEN_DATAVERSE_BASE_PROMPT,
+        systemPrompt: basePromptForMode(mode),
         settingSources: [],
         tools: [],
         allowedTools: [],

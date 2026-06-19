@@ -113,9 +113,18 @@ struct AppearanceSettings {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DangerZoneSettings {
+    #[serde(default)]
+    experimental_ai_agent_enabled: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct UserSettings {
     #[serde(default)]
     appearance: AppearanceSettings,
+    #[serde(default)]
+    danger_zone: DangerZoneSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

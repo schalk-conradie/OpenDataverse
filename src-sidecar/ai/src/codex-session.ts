@@ -9,8 +9,9 @@ import {
 
 import {
   buildCodexPrompt,
-  CODEX_TURN_OUTPUT_SCHEMA,
+  outputSchemaForMode,
   parseCodexStructuredTurn,
+  type AiChatMode,
   type DataverseToolRequest,
   type DataverseToolResult,
 } from "./dataverse-tools.js"
@@ -20,6 +21,7 @@ type LocalSession = {
   codexThreadId?: string
   model?: string
   reasoningEffort?: ModelReasoningEffort
+  mode?: AiChatMode
 }
 
 export type RunCodexTurnInput = {
@@ -27,6 +29,7 @@ export type RunCodexTurnInput = {
   providerThreadId?: string
   codexThreadId?: string
   environmentId?: string
+  mode?: AiChatMode
   message: string
   model?: string
   reasoningEffort?: ModelReasoningEffort
@@ -69,11 +72,13 @@ export class CodexSessionManager {
     codexThreadId?: string
     model?: string
     reasoningEffort?: ModelReasoningEffort
+    mode?: AiChatMode
   }) {
     const session = this.createSession({
       codexThreadId: input.providerThreadId ?? input.codexThreadId,
       model: input.model,
       reasoningEffort: input.reasoningEffort,
+      mode: input.mode,
     })
     this.sessions.set(input.threadId, session)
 
@@ -88,12 +93,16 @@ export class CodexSessionManager {
     const session = this.ensureSession(input)
     const prompt = buildCodexPrompt({
       environmentId: input.environmentId,
+      mode: input.mode,
       userMessage: input.message,
       toolResults: input.toolResults,
     })
-    const turn = await session.thread.run(buildCodexInput(prompt, input.imagePaths), {
-      outputSchema: CODEX_TURN_OUTPUT_SCHEMA,
-    })
+    const turn = await session.thread.run(
+      buildCodexInput(prompt, input.imagePaths),
+      {
+        outputSchema: outputSchemaForMode(input.mode),
+      },
+    )
 
     session.codexThreadId = session.thread.id ?? session.codexThreadId
 
@@ -125,13 +134,14 @@ export class CodexSessionManager {
     const session = this.ensureSession(input)
     const prompt = buildCodexPrompt({
       environmentId: input.environmentId,
+      mode: input.mode,
       userMessage: input.message,
       toolResults: input.toolResults,
     })
     const turn = await session.thread.runStreamed(
       buildCodexInput(prompt, input.imagePaths),
       {
-        outputSchema: CODEX_TURN_OUTPUT_SCHEMA,
+        outputSchema: outputSchemaForMode(input.mode),
       },
     )
     const items: ThreadItem[] = []
@@ -188,7 +198,8 @@ export class CodexSessionManager {
     if (
       existing &&
       existing.model === input.model &&
-      existing.reasoningEffort === input.reasoningEffort
+      existing.reasoningEffort === input.reasoningEffort &&
+      existing.mode === (input.mode ?? "chat")
     ) {
       return existing
     }
@@ -199,6 +210,7 @@ export class CodexSessionManager {
       codexThreadId,
       model: input.model,
       reasoningEffort: input.reasoningEffort,
+      mode: input.mode,
     })
     this.sessions.set(input.threadId, session)
     return session
@@ -208,12 +220,17 @@ export class CodexSessionManager {
     codexThreadId?: string
     model?: string
     reasoningEffort?: ModelReasoningEffort
+    mode?: AiChatMode
   }): LocalSession {
+    const mode = input.mode ?? "chat"
+    const isExperimentalAgent = mode === "experimental-agent"
     const options = {
       model: input.model,
-      sandboxMode: "read-only" as const,
+      sandboxMode: isExperimentalAgent
+        ? ("workspace-write" as const)
+        : ("read-only" as const),
       approvalPolicy: "never" as const,
-      networkAccessEnabled: false,
+      networkAccessEnabled: isExperimentalAgent,
       skipGitRepoCheck: true,
       modelReasoningEffort: input.reasoningEffort,
     }
@@ -226,6 +243,7 @@ export class CodexSessionManager {
       codexThreadId: input.codexThreadId,
       model: input.model,
       reasoningEffort: input.reasoningEffort,
+      mode,
     }
   }
 }

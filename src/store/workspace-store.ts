@@ -65,6 +65,7 @@ type WorkspaceStore = {
   ) => void
   setLastMessage: (message?: string) => void
   setDarkMode: (enabled: boolean) => void
+  setExperimentalAiAgentEnabled: (enabled: boolean) => void
   openTool: (toolId: ToolId, options?: OpenToolOptions) => void
   closeWindow: (windowId: string) => void
   activateWindow: (windowId: string) => void
@@ -94,7 +95,10 @@ function createToolWindow(toolId: ToolId, environmentId?: string): ToolWindow {
   }
 }
 
-function persistConfig(config: AppConfig, set: (state: Partial<WorkspaceStore>) => void) {
+function persistConfig(
+  config: AppConfig,
+  set: (state: Partial<WorkspaceStore>) => void,
+) {
   void saveAppConfig(config).catch((error: unknown) => {
     set({
       lastMessage:
@@ -189,7 +193,8 @@ function environmentInputResult(
   const duplicateUrl = config.environments.some(
     (environment) =>
       environment.id !== currentEnvironmentId &&
-      normalizeEnvironmentUrl(environment.url).toLowerCase() === url.toLowerCase(),
+      normalizeEnvironmentUrl(environment.url).toLowerCase() ===
+        url.toLowerCase(),
   )
 
   if (duplicateUrl) {
@@ -199,7 +204,10 @@ function environmentInputResult(
   return { data: { name, url } }
 }
 
-function nextEnvironmentIdAfterDelete(config: AppConfig, environmentId: string) {
+function nextEnvironmentIdAfterDelete(
+  config: AppConfig,
+  environmentId: string,
+) {
   const environmentIndex = config.environments.findIndex(
     (environment) => environment.id === environmentId,
   )
@@ -246,7 +254,10 @@ async function updateEnvironmentConnection(
       environmentId,
       "connecting",
     )
-    set({ config: connectingConfig, lastMessage: "Checking Dataverse connection" })
+    set({
+      config: connectingConfig,
+      lastMessage: "Checking Dataverse connection",
+    })
     persistConfig(connectingConfig, set)
   }
 
@@ -266,7 +277,10 @@ async function updateEnvironmentConnection(
         return
       } catch (checkError) {
         if (!interactive) {
-          const currentEnvironment = getEnvironmentById(get().config, environmentId)
+          const currentEnvironment = getEnvironmentById(
+            get().config,
+            environmentId,
+          )
           const nextState = authStateForConnectionError(checkError)
           const nextConfig = applyEnvironmentAuthState(
             get().config,
@@ -279,7 +293,10 @@ async function updateEnvironmentConnection(
             lastMessage:
               currentEnvironment?.authState === "connected" ||
               currentEnvironment?.authState === "connecting"
-                ? connectionErrorMessage(checkError, "Dataverse heartbeat failed")
+                ? connectionErrorMessage(
+                    checkError,
+                    "Dataverse heartbeat failed",
+                  )
                 : get().lastMessage,
           })
           persistConfig(nextConfig, set)
@@ -423,7 +440,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       nextUrl.toLowerCase()
 
     if (urlChanged && activeConnectionChecks.has(environmentId)) {
-      set({ lastMessage: "Wait for sign-in to finish before changing the URL" })
+      set({
+        lastMessage: "Wait for sign-in to finish before changing the URL",
+      })
       return false
     }
 
@@ -460,7 +479,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         : config.bindings,
     }
     const nextWindows = urlChanged
-      ? get().openWindows.filter((window) => window.environmentId !== environmentId)
+      ? get().openWindows.filter(
+          (window) => window.environmentId !== environmentId,
+        )
       : get().openWindows
     const activeWindowStillOpen = nextWindows.some(
       (window) => window.id === get().activeWindowId,
@@ -490,7 +511,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     }
 
     if (activeConnectionChecks.has(environmentId)) {
-      set({ lastMessage: "Wait for sign-in to finish before deleting this environment" })
+      set({
+        lastMessage:
+          "Wait for sign-in to finish before deleting this environment",
+      })
       return false
     }
 
@@ -608,12 +632,52 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     persistUserSettings(nextSettings, set)
   },
 
+  setExperimentalAiAgentEnabled(enabled) {
+    const settings = get().userSettings
+    const nextSettings = {
+      ...settings,
+      dangerZone: {
+        ...settings.dangerZone,
+        experimentalAiAgentEnabled: enabled,
+      },
+    }
+    const nextWindows = enabled
+      ? get().openWindows
+      : get().openWindows.filter(
+          (window) => window.toolId !== "ai-agent-experimental",
+        )
+    const activeWindowStillOpen = nextWindows.some(
+      (window) => window.id === get().activeWindowId,
+    )
+
+    set({
+      userSettings: nextSettings,
+      openWindows: nextWindows,
+      activeWindowId: activeWindowStillOpen
+        ? get().activeWindowId
+        : nextWindows.at(-1)?.id,
+      lastMessage: enabled ? undefined : "AI Agent (Experimental) disabled",
+    })
+    persistUserSettings(nextSettings, set)
+  },
+
   openTool(toolId, options) {
     const config = get().config
     const environment = getEnvironmentById(config, config.currentEnvironmentId)
 
     if (!environment) {
       set({ lastMessage: "Select an environment before opening a tool" })
+      return
+    }
+
+    if (
+      toolId === "ai-agent-experimental" &&
+      !get().userSettings.dangerZone.experimentalAiAgentEnabled
+    ) {
+      set({
+        lastMessage:
+          "Enable AI Agent (Experimental) in Settings > Danger Zone first",
+      })
       return
     }
 

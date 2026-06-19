@@ -65,6 +65,8 @@ pub(super) struct AiChatThread {
     id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     environment_id: Option<String>,
+    #[serde(default = "default_ai_chat_mode")]
+    mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     provider_thread_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -83,6 +85,7 @@ pub(super) struct AiChatThread {
 pub(super) struct AiChatThreadSummary {
     id: String,
     environment_id: String,
+    mode: String,
     provider: String,
     model: String,
     reasoning_effort: String,
@@ -109,6 +112,14 @@ pub(super) struct AiChatState {
 pub(super) struct AiGetRequest {
     path: String,
     query: Vec<(String, String)>,
+}
+
+#[derive(Debug)]
+pub(super) struct AiMutationRequest {
+    method: reqwest::Method,
+    method_label: String,
+    path: String,
+    payload: Option<Value>,
 }
 
 pub(super) struct AiSidecarProcess {
@@ -225,6 +236,7 @@ pub(super) fn summarize_ai_chat_thread(thread: &AiChatThread) -> Option<AiChatTh
     Some(AiChatThreadSummary {
         id: thread.id.clone(),
         environment_id,
+        mode: thread.mode.clone(),
         provider: thread.provider.clone(),
         model: thread.model.clone(),
         reasoning_effort: thread.reasoning_effort.clone(),
@@ -234,6 +246,23 @@ pub(super) fn summarize_ai_chat_thread(thread: &AiChatThread) -> Option<AiChatTh
         message_count: thread.messages.len(),
     })
 }
+
+pub(super) fn default_ai_chat_mode() -> String {
+    "chat".to_string()
+}
+
+pub(super) fn normalize_ai_chat_mode(mode: Option<&str>) -> Result<String, String> {
+    let mode = mode
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("chat");
+
+    match mode {
+        "chat" | "experimental-agent" => Ok(mode.to_string()),
+        _ => Err(format!("Unsupported AI chat mode: {mode}")),
+    }
+}
+
 pub(super) fn normalize_ai_provider(provider: Option<&str>) -> Result<String, String> {
     let provider = provider
         .map(str::trim)
@@ -311,12 +340,14 @@ pub(super) fn normalize_ai_reasoning_effort(
 
 pub(super) fn create_ai_chat_thread(
     environment_id: Option<String>,
+    mode: Option<&str>,
     provider: Option<&str>,
     model: Option<&str>,
     reasoning_effort: Option<&str>,
     provider_thread_id: Option<String>,
 ) -> Result<AiChatThread, String> {
     let now = now_rfc3339()?;
+    let mode = normalize_ai_chat_mode(mode)?;
     let provider = normalize_ai_provider(provider)?;
     let model = normalize_ai_model(&provider, model)?;
     let reasoning_effort = normalize_ai_reasoning_effort(&provider, reasoning_effort)?;
@@ -324,6 +355,7 @@ pub(super) fn create_ai_chat_thread(
     Ok(AiChatThread {
         id: format!("ai-thread-{}", Uuid::new_v4()),
         environment_id,
+        mode,
         provider_thread_id: provider_thread_id.clone(),
         codex_thread_id: if provider == "codex" {
             provider_thread_id
@@ -1807,6 +1839,174 @@ pub(super) async fn dataverse_ai_get_value(
     Ok((value, display_path))
 }
 
+pub(super) fn normalize_ai_mutation_path(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("A Dataverse mutation path is required.".to_string());
+    }
+
+    if trimmed.starts_with("//") || Url::parse(trimmed).is_ok() {
+        return Err("Absolute URLs are not allowed for AI Agent Dataverse mutations.".to_string());
+    }
+
+    if trimmed.contains('#') || trimmed.contains('\\') {
+        return Err("Fragments and backslashes are not allowed in mutation paths.".to_string());
+    }
+
+    if trimmed.chars().any(char::is_whitespace) {
+        return Err(
+            "Whitespace is not allowed in mutation paths. URL-encode values first.".to_string(),
+        );
+    }
+
+    let without_slash = trimmed.trim_start_matches('/');
+    let relative = if let Some(rest) = without_slash.strip_prefix("api/data/v9.2/") {
+        rest
+    } else if without_slash.starts_with("api/data/") {
+        return Err("Only Dataverse Web API v9.2 paths are allowed.".to_string());
+    } else {
+        without_slash
+    };
+    let path = relative.trim_start_matches('/');
+    let lower_path = path.to_lowercase();
+
+    if path.is_empty() {
+        return Err("A Dataverse mutation path is required.".to_string());
+    }
+
+    if lower_path.starts_with("$batch") || lower_path.starts_with("$metadata") {
+        return Err("$batch and $metadata are not available to AI Agent mutations.".to_string());
+    }
+
+    Ok(format!("/{path}"))
+}
+
+pub(super) fn normalize_ai_mutation_request(
+    arguments: &Value,
+) -> Result<AiMutationRequest, String> {
+    let method_label = ai_tool_argument(arguments, "method")
+        .ok_or_else(|| "dataverse_mutate requires a method argument.".to_string())?
+        .to_uppercase();
+    let method = match method_label.as_str() {
+        "POST" => reqwest::Method::POST,
+        "PATCH" => reqwest::Method::PATCH,
+        "DELETE" => reqwest::Method::DELETE,
+        _ => return Err("dataverse_mutate method must be POST, PATCH, or DELETE.".to_string()),
+    };
+    let path = normalize_ai_mutation_path(
+        &ai_tool_argument(arguments, "path")
+            .ok_or_else(|| "dataverse_mutate requires a path argument.".to_string())?,
+    )?;
+    let body_json = ai_tool_argument(arguments, "bodyJson");
+    let payload = if method_label == "DELETE" {
+        if body_json.is_some() {
+            return Err("DELETE mutations must not include bodyJson.".to_string());
+        }
+        None
+    } else {
+        let body_json = body_json.unwrap_or_else(|| "{}".to_string());
+        let payload = serde_json::from_str::<Value>(&body_json)
+            .map_err(|error| format!("bodyJson must be valid JSON: {error}"))?;
+
+        if !payload.is_object() {
+            return Err("bodyJson must be a JSON object. Use {} for no parameters.".to_string());
+        }
+
+        Some(payload)
+    };
+
+    Ok(AiMutationRequest {
+        method,
+        method_label,
+        path,
+        payload,
+    })
+}
+
+pub(super) fn mutation_display_from_arguments(arguments: &Value) -> Option<String> {
+    let method = ai_tool_argument(arguments, "method")?.to_uppercase();
+    let path = ai_tool_argument(arguments, "path")?;
+    Some(format!("{method} {path}"))
+}
+
+pub(super) async fn dataverse_ai_mutate_value(
+    app: &AppHandle,
+    environment: &DataverseEnvironment,
+    arguments: &Value,
+) -> Result<(Value, String), String> {
+    let request = normalize_ai_mutation_request(arguments)?;
+    let access_token = access_token_for(app, environment)
+        .await
+        .map_err(user_safe_ai_error)?;
+    let client = Client::new();
+    let mut builder = client
+        .request(
+            request.method.clone(),
+            api_url(&environment.url, &request.path),
+        )
+        .bearer_auth(access_token)
+        .header("Accept", "application/json")
+        .header("OData-MaxVersion", "4.0")
+        .header("OData-Version", "4.0");
+
+    if request.method_label == "PATCH" || request.method_label == "DELETE" {
+        builder = builder.header("If-Match", "*");
+    }
+
+    if let Some(payload) = &request.payload {
+        builder = builder
+            .header("Content-Type", "application/json")
+            .json(payload);
+    }
+
+    let response = builder
+        .send()
+        .await
+        .map_err(|error| user_safe_ai_error(error.to_string()))?;
+    let status = response.status();
+    let entity_id = response
+        .headers()
+        .get("OData-EntityId")
+        .or_else(|| response.headers().get("odata-entityid"))
+        .and_then(|value| value.to_str().ok())
+        .map(ToString::to_string);
+    let body = response
+        .text()
+        .await
+        .map_err(|error| user_safe_ai_error(error.to_string()))?;
+
+    if !status.is_success() {
+        return Err(user_safe_ai_error(format!(
+            "Dataverse mutation failed ({status}): {body}"
+        )));
+    }
+
+    let mut result = serde_json::json!({
+      "method": request.method_label,
+      "path": request.path,
+      "status": status.as_u16(),
+    });
+
+    if let Some(entity_id) = entity_id {
+        if let Some(object) = result.as_object_mut() {
+            object.insert("entityId".to_string(), Value::String(entity_id));
+        }
+    }
+
+    if !body.trim().is_empty() {
+        let body_value = serde_json::from_str::<Value>(&body)
+            .map(sanitize_json_value)
+            .unwrap_or_else(|_| Value::String(body));
+
+        if let Some(object) = result.as_object_mut() {
+            object.insert("body".to_string(), body_value);
+        }
+    }
+
+    let display = format!("{} {}", request.method_label, request.path);
+    Ok((result, display))
+}
+
 pub(super) fn ai_tool_argument(arguments: &Value, name: &str) -> Option<String> {
     arguments
         .get(name)
@@ -1836,6 +2036,7 @@ pub(super) fn run_ai_provider_turn(
         serde_json::json!({
           "threadId": thread.id,
           "provider": thread.provider,
+          "mode": thread.mode,
           "providerThreadId": provider_thread_id,
           "codexThreadId": thread.codex_thread_id,
           "environmentId": environment.id,
@@ -1862,6 +2063,7 @@ pub(super) async fn execute_ai_tool_request(
     thread_id: &str,
     environment: &DataverseEnvironment,
     request: &AiProviderToolRequest,
+    allow_mutations: bool,
 ) -> Result<(AiChatMessage, Value), String> {
     let arguments = if request.arguments.is_object() {
         request.arguments.clone()
@@ -1878,6 +2080,14 @@ pub(super) async fn execute_ai_tool_request(
         "dataverse_get" => ai_tool_argument(&arguments, "path")
             .map(|path| format!("GET {path}"))
             .unwrap_or_else(|| "dataverse_get".to_string()),
+        "dataverse_mutate" => {
+            let method = ai_tool_argument(&arguments, "method")
+                .unwrap_or_else(|| "POST".to_string())
+                .to_uppercase();
+            let path = ai_tool_argument(&arguments, "path")
+                .unwrap_or_else(|| "dataverse_mutate".to_string());
+            format!("{method} {path}")
+        }
         _ => request.name.clone(),
     };
     let pending_message = create_ai_tool_message(
@@ -1928,6 +2138,25 @@ pub(super) async fn execute_ai_tool_request(
                     )
                 }
                 Err(error) => (request.name.clone(), Err(error)),
+            }
+        }
+        "dataverse_mutate" => {
+            if !allow_mutations {
+                (
+                    request.name.clone(),
+                    Err(
+                        "Dataverse mutations are only available in AI Agent (Experimental)."
+                            .to_string(),
+                    ),
+                )
+            } else {
+                let value = dataverse_ai_mutate_value(app, environment, &arguments).await;
+                let fallback_display = mutation_display_from_arguments(&arguments)
+                    .unwrap_or_else(|| request.name.clone());
+                (
+                    fallback_display.clone(),
+                    value.map(|(value, display)| (value, display)),
+                )
             }
         }
         _ => (
@@ -2080,9 +2309,11 @@ pub(super) async fn build_ai_chat_response(
         }
 
         let mut next_tool_results = Vec::new();
+        let allow_mutations = thread.mode == "experimental-agent";
         for request in turn.tool_requests.iter().take(AI_TOOL_REQUESTS_PER_ROUND) {
             let (tool_message, tool_result) =
-                execute_ai_tool_request(app, &thread.id, environment, request).await?;
+                execute_ai_tool_request(app, &thread.id, environment, request, allow_mutations)
+                    .await?;
             messages.push(tool_message);
             next_tool_results.push(tool_result);
         }
@@ -2164,6 +2395,7 @@ pub(super) fn load_ai_chat_thread(
 pub(super) fn start_ai_chat_thread(
     state: State<'_, AiChatState>,
     environment_id: Option<String>,
+    mode: Option<String>,
     provider: Option<String>,
     model: Option<String>,
     reasoning_effort: Option<String>,
@@ -2171,6 +2403,7 @@ pub(super) fn start_ai_chat_thread(
 ) -> Result<AiChatThread, String> {
     let thread = create_ai_chat_thread(
         environment_id,
+        mode.as_deref(),
         provider.as_deref(),
         model.as_deref(),
         reasoning_effort.as_deref(),
@@ -2214,6 +2447,7 @@ pub(super) async fn send_ai_chat_message(
     state: State<'_, AiChatState>,
     thread_id: String,
     environment_id: Option<String>,
+    mode: Option<String>,
     message: String,
     context: Option<String>,
     attachments: Option<Vec<AiChatAttachment>>,
@@ -2230,6 +2464,7 @@ pub(super) async fn send_ai_chat_message(
     }
 
     let environment = environment_by_id(&app, environment_id.as_deref())?;
+    let requested_mode = normalize_ai_chat_mode(mode.as_deref())?;
     let requested_provider = normalize_ai_provider(provider.as_deref())?;
     let provider_thread_id = provider_thread_id.or(codex_thread_id);
     let existing_thread = state
@@ -2247,6 +2482,7 @@ pub(super) async fn send_ai_chat_message(
             normalize_ai_reasoning_effort(&requested_provider, reasoning_effort.as_deref())?;
         let mut thread = create_ai_chat_thread(
             Some(environment.id.clone()),
+            Some(&requested_mode),
             Some(&requested_provider),
             Some(&model),
             Some(&reasoning_effort),
@@ -2255,6 +2491,15 @@ pub(super) async fn send_ai_chat_message(
         thread.id = thread_id.clone();
         thread
     };
+
+    if !thread.messages.is_empty() && thread.mode != requested_mode {
+        state
+            .threads
+            .lock()
+            .map_err(|error| error.to_string())?
+            .insert(thread.id.clone(), thread);
+        return Err("This AI chat belongs to a different AI module. Clear the chat before switching modules.".to_string());
+    }
 
     if !thread.messages.is_empty() && thread.provider != requested_provider {
         let existing = ai_provider_display_name(&thread.provider);
@@ -2273,6 +2518,7 @@ pub(super) async fn send_ai_chat_message(
     let reasoning_effort =
         normalize_ai_reasoning_effort(&requested_provider, reasoning_effort.as_deref())?;
     thread.environment_id = Some(environment.id.clone());
+    thread.mode = requested_mode.clone();
     if thread.messages.is_empty() && thread.provider != requested_provider {
         thread.provider_thread_id = None;
         thread.codex_thread_id = None;

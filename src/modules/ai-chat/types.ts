@@ -12,6 +12,8 @@ export type AiChatMessage = {
   metadata?: Record<string, unknown>
 }
 
+export type AiChatMode = "chat" | "experimental-agent"
+
 export type AiChatAttachmentKind = "image" | "file" | "folder"
 
 export type AiChatAttachmentStatus = "included" | "summarized" | "skipped"
@@ -50,6 +52,7 @@ export type PastedAiChatImage = {
 export type AiChatThread = {
   id: string
   environmentId?: string
+  mode?: AiChatMode
   provider: AiChatProvider
   providerThreadId?: string
   codexThreadId?: string
@@ -64,6 +67,7 @@ export type AiChatThread = {
 export type AiChatThreadSummary = {
   id: string
   environmentId: string
+  mode?: AiChatMode
   provider: AiChatProvider
   model: AiChatModel
   reasoningEffort: AiReasoningEffort
@@ -110,6 +114,7 @@ export type AiChatStreamEvent = {
 
 export type AiChatThreadInput = {
   environmentId?: string
+  mode?: AiChatMode
   provider: AiChatProvider
   model: AiChatModel
   reasoningEffort: AiReasoningEffort
@@ -120,6 +125,7 @@ export type AiChatThreadInput = {
 export type AiChatMessageInput = {
   threadId: string
   environmentId?: string
+  mode?: AiChatMode
   message: string
   context?: string
   attachments?: AiChatAttachment[]

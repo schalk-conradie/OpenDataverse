@@ -11,6 +11,16 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.43",
+    date: "2026-06-19",
+    title: "Experimental AI agent",
+    changes: [
+      "Added a Danger Zone setting that hides or enables AI Agent (Experimental).",
+      "Added AI Agent (Experimental) as an unsafe module with visible warnings that Dataverse changes can seriously harm an environment.",
+      "Gave the experimental agent a write-capable Codex sandbox and an explicit Dataverse Web API mutation tool while keeping regular AI Chat read-only.",
+    ],
+  },
+  {
     version: "0.1.42",
     date: "2026-06-19",
     title: "Environment management",
@@ -350,9 +360,7 @@ export const changelogEntries: ChangelogEntry[] = [
     version: "0.1.3",
     date: "2026-06-12",
     title: "Sidebar cleanup",
-    changes: [
-      "Removed the desktop subtitle from the sidebar header.",
-    ],
+    changes: ["Removed the desktop subtitle from the sidebar header."],
   },
   {
     version: "0.1.2",

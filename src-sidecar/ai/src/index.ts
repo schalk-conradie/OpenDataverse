@@ -2,8 +2,12 @@ import process from "node:process"
 import { createInterface } from "node:readline"
 
 import type { DataverseToolResult } from "./dataverse-tools.js"
+import type { AiChatMode } from "./dataverse-tools.js"
 import type { ModelReasoningEffort, ThreadEvent } from "@openai/codex-sdk"
-import type { ClaudeReasoningEffort, ClaudeSessionManager } from "./claude-session.js"
+import type {
+  ClaudeReasoningEffort,
+  ClaudeSessionManager,
+} from "./claude-session.js"
 import type { CodexSessionManager } from "./codex-session.js"
 
 type AiProvider = "codex" | "claude"
@@ -15,6 +19,7 @@ type SidecarRequest =
       params: {
         threadId: string
         provider?: AiProvider
+        mode?: AiChatMode
         providerThreadId?: string
         codexThreadId?: string
         model?: string
@@ -27,6 +32,7 @@ type SidecarRequest =
       params: {
         threadId: string
         provider?: AiProvider
+        mode?: AiChatMode
         providerThreadId?: string
         codexThreadId?: string
         environmentId?: string
@@ -93,44 +99,50 @@ async function handleRequest(request: SidecarRequest) {
         const manager = await getClaudeManager()
         return manager.startThread({
           ...request.params,
-          reasoningEffort: request.params
-            .reasoningEffort as ClaudeReasoningEffort | undefined,
+          reasoningEffort: request.params.reasoningEffort as
+            | ClaudeReasoningEffort
+            | undefined,
         })
       }
 
       return (await getCodexManager()).startThread({
         ...request.params,
-        reasoningEffort: request.params
-          .reasoningEffort as ModelReasoningEffort | undefined,
+        reasoningEffort: request.params.reasoningEffort as
+          | ModelReasoningEffort
+          | undefined,
       })
     case "run_turn":
       if (provider === "claude") {
         return (await getClaudeManager()).runTurn({
           ...request.params,
-          reasoningEffort: request.params
-            .reasoningEffort as ClaudeReasoningEffort | undefined,
+          reasoningEffort: request.params.reasoningEffort as
+            | ClaudeReasoningEffort
+            | undefined,
         })
       }
 
       return (await getCodexManager()).runTurn({
         ...request.params,
-        reasoningEffort: request.params
-          .reasoningEffort as ModelReasoningEffort | undefined,
+        reasoningEffort: request.params.reasoningEffort as
+          | ModelReasoningEffort
+          | undefined,
       })
     case "run_turn_stream":
       if (provider === "claude") {
         return (await getClaudeManager()).runTurnStreamed({
           ...request.params,
-          reasoningEffort: request.params
-            .reasoningEffort as ClaudeReasoningEffort | undefined,
+          reasoningEffort: request.params.reasoningEffort as
+            | ClaudeReasoningEffort
+            | undefined,
         })
       }
 
       return (await getCodexManager()).runTurnStreamed(
         {
           ...request.params,
-          reasoningEffort: request.params
-            .reasoningEffort as ModelReasoningEffort | undefined,
+          reasoningEffort: request.params.reasoningEffort as
+            | ModelReasoningEffort
+            | undefined,
         },
         (event) => {
           writeResponse({ id: request.id, ok: true, event })
@@ -164,7 +176,8 @@ lines.on("line", (line) => {
       writeResponse({
         id: request.id,
         ok: false,
-        error: error instanceof Error ? error.message : "AI sidecar request failed",
+        error:
+          error instanceof Error ? error.message : "AI sidecar request failed",
       })
     }
   })()

@@ -29,6 +29,7 @@ function createBrowserThread(input: AiChatThreadInput): AiChatThread {
   return {
     id: createId("ai-thread"),
     environmentId: input.environmentId,
+    mode: input.mode ?? "chat",
     provider: input.provider,
     providerThreadId: input.providerThreadId,
     codexThreadId: input.codexThreadId,
@@ -58,6 +59,16 @@ function createMessage(
 
 function browserPreviewResponse(input: AiChatMessageInput) {
   const normalized = input.message.toLowerCase()
+  const isExperimental = input.mode === "experimental-agent"
+
+  if (
+    isExperimental &&
+    ["create", "update", "delete", "publish", "patch", "post"].some((term) =>
+      normalized.includes(term),
+    )
+  ) {
+    return "Browser preview cannot mutate Dataverse. In the desktop app AI Agent (Experimental) can issue Dataverse Web API mutation requests against the connected environment."
+  }
 
   if (normalized.includes("who") && normalized.includes("connected")) {
     return "Browser preview cannot call Dataverse WhoAmI. Run the Tauri app with a connected environment to execute this read-only tool."
@@ -74,7 +85,9 @@ function browserPreviewResponse(input: AiChatMessageInput) {
   return "Ask for WhoAmI, entity sets, metadata, or a bounded OData GET query."
 }
 
-function summarizeThread(thread: AiChatThread): AiChatThreadSummary | undefined {
+function summarizeThread(
+  thread: AiChatThread,
+): AiChatThreadSummary | undefined {
   if (!thread.environmentId) {
     return undefined
   }
@@ -82,6 +95,7 @@ function summarizeThread(thread: AiChatThread): AiChatThreadSummary | undefined 
   return {
     id: thread.id,
     environmentId: thread.environmentId,
+    mode: thread.mode ?? "chat",
     provider: thread.provider,
     model: thread.model ?? defaultModelByProvider[thread.provider],
     reasoningEffort: thread.reasoningEffort ?? "medium",
@@ -138,6 +152,7 @@ export async function startAiChatThread(input: AiChatThreadInput) {
   if (isTauriRuntime()) {
     return invoke<AiChatThread>("start_ai_chat_thread", {
       environmentId: input.environmentId,
+      mode: input.mode,
       provider: input.provider,
       model: input.model,
       reasoningEffort: input.reasoningEffort,
@@ -151,9 +166,9 @@ export async function startAiChatThread(input: AiChatThreadInput) {
 }
 
 export async function prepareAiChatAttachments(paths: string[]) {
-  const selectedPaths = Array.from(new Set(paths.map((path) => path.trim()))).filter(
-    Boolean,
-  )
+  const selectedPaths = Array.from(
+    new Set(paths.map((path) => path.trim())),
+  ).filter(Boolean)
 
   if (isTauriRuntime()) {
     return invoke<AiChatAttachmentBundle>("prepare_ai_chat_attachments", {
@@ -230,7 +245,8 @@ export async function sendAiChatMessage(input: AiChatMessageInput) {
     return invoke<AiChatMessage[]>("send_ai_chat_message", input)
   }
 
-  const thread = browserThreads.get(input.threadId) ?? createBrowserThread(input)
+  const thread =
+    browserThreads.get(input.threadId) ?? createBrowserThread(input)
   const userMessage = createMessage("user", input.message, {
     metadata:
       input.attachments && input.attachments.length > 0
@@ -247,10 +263,14 @@ export async function sendAiChatMessage(input: AiChatMessageInput) {
       environmentId: input.environmentId,
     },
   })
-  const assistantMessage = createMessage("assistant", browserPreviewResponse(input))
+  const assistantMessage = createMessage(
+    "assistant",
+    browserPreviewResponse(input),
+  )
   const updated = {
     ...thread,
     environmentId: input.environmentId,
+    mode: input.mode ?? thread.mode ?? "chat",
     provider: input.provider,
     providerThreadId: input.providerThreadId ?? thread.providerThreadId,
     codexThreadId: input.codexThreadId ?? thread.codexThreadId,

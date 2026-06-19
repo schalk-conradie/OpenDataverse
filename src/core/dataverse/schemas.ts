@@ -42,9 +42,16 @@ export const appConfigSchema = z.object({
 })
 
 export const userSettingsSchema = z.object({
-  appearance: z.object({
-    darkMode: z.boolean(),
-  }),
+  appearance: z
+    .object({
+      darkMode: z.boolean().catch(false),
+    })
+    .default({ darkMode: false }),
+  dangerZone: z
+    .object({
+      experimentalAiAgentEnabled: z.boolean().catch(false),
+    })
+    .default({ experimentalAiAgentEnabled: false }),
 })
 
 export const defaultAppConfig: AppConfig = {
@@ -57,6 +64,9 @@ export const defaultAppConfig: AppConfig = {
 export const defaultUserSettings: UserSettings = {
   appearance: {
     darkMode: false,
+  },
+  dangerZone: {
+    experimentalAiAgentEnabled: false,
   },
 }
 
@@ -466,10 +476,7 @@ export type PluginAssemblyInspection = {
 }
 
 export const registerPluginAssemblyInputSchema = z.object({
-  localPath: z
-    .string()
-    .trim()
-    .min(1, "Select a compiled plug-in assembly"),
+  localPath: z.string().trim().min(1, "Select a compiled plug-in assembly"),
   name: z.string().trim().min(1, "Assembly name is required"),
   version: z.string().trim().min(1, "Assembly version is required"),
   culture: z.string().trim().default("neutral"),
@@ -477,7 +484,9 @@ export const registerPluginAssemblyInputSchema = z.object({
   isolationMode: z.number().int().default(2),
   sourceType: z.number().int().default(0),
   description: z.string().trim().optional(),
-  typeNames: z.array(z.string().trim().min(1)).min(1, "Select at least one plug-in type"),
+  typeNames: z
+    .array(z.string().trim().min(1))
+    .min(1, "Select at least one plug-in type"),
   solutionUniqueName: z.string().trim().optional(),
 })
 
@@ -508,7 +517,9 @@ export type CreatePluginTypeInput = z.infer<typeof createPluginTypeInputSchema>
 export const registerPluginStepInputSchema = z
   .object({
     stepId: z.string().trim().optional(),
-    handlerType: z.enum(["plugintype", "serviceendpoint"]).default("plugintype"),
+    handlerType: z
+      .enum(["plugintype", "serviceendpoint"])
+      .default("plugintype"),
     pluginTypeId: z.string().trim().optional(),
     serviceEndpointId: z.string().trim().optional(),
     messageId: z.string().trim().min(1, "Message is required"),
@@ -608,6 +619,7 @@ export type PublishResult = {
 export type ToolId =
   | "autopublisher"
   | "ai-chat"
+  | "ai-agent-experimental"
   | "fetchxml-builder"
   | "plugin-registration"
   | "solution-explorer"
@@ -635,11 +647,10 @@ export function normalizeEnvironmentUrl(value: string) {
   return value.trim().replace(/\/+$/, "")
 }
 
-export function getEnvironmentById(
-  config: AppConfig,
-  environmentId?: string,
-) {
-  return config.environments.find((environment) => environment.id === environmentId)
+export function getEnvironmentById(config: AppConfig, environmentId?: string) {
+  return config.environments.find(
+    (environment) => environment.id === environmentId,
+  )
 }
 
 export function getBindingsForEnvironment(

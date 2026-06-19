@@ -13,6 +13,7 @@ import {
   Plus,
   RefreshCw,
   Settings,
+  ShieldAlert,
   SlidersHorizontal,
   Trash2,
   X,
@@ -144,7 +145,9 @@ function EnvironmentFormDialog({
   const [submitting, setSubmitting] = useState(false)
   const config = useWorkspaceStore((state) => state.config)
   const addEnvironment = useWorkspaceStore((state) => state.addEnvironment)
-  const updateEnvironment = useWorkspaceStore((state) => state.updateEnvironment)
+  const updateEnvironment = useWorkspaceStore(
+    (state) => state.updateEnvironment,
+  )
 
   function resetForm() {
     setName(environment?.name ?? "")
@@ -248,8 +251,12 @@ function EnvironmentFormDialog({
 
 function ManageEnvironmentsDialog() {
   const config = useWorkspaceStore((state) => state.config)
-  const connectEnvironment = useWorkspaceStore((state) => state.connectEnvironment)
-  const deleteEnvironment = useWorkspaceStore((state) => state.deleteEnvironment)
+  const connectEnvironment = useWorkspaceStore(
+    (state) => state.connectEnvironment,
+  )
+  const deleteEnvironment = useWorkspaceStore(
+    (state) => state.deleteEnvironment,
+  )
   const [deleteTarget, setDeleteTarget] = useState<DataverseEnvironment>()
   const [reconnectingId, setReconnectingId] = useState<string>()
   const [deleting, setDeleting] = useState(false)
@@ -422,11 +429,7 @@ function ManageEnvironmentsDialog() {
               disabled={deleting}
               onClick={confirmDelete}
             >
-              {deleting ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <Trash2 />
-              )}
+              {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
               Delete
             </Button>
           </DialogFooter>
@@ -440,7 +443,13 @@ function SettingsDialog({ appVersion }: { appVersion: string }) {
   const darkMode = useWorkspaceStore(
     (state) => state.userSettings.appearance.darkMode,
   )
+  const experimentalAiAgentEnabled = useWorkspaceStore(
+    (state) => state.userSettings.dangerZone.experimentalAiAgentEnabled,
+  )
   const setDarkMode = useWorkspaceStore((state) => state.setDarkMode)
+  const setExperimentalAiAgentEnabled = useWorkspaceStore(
+    (state) => state.setExperimentalAiAgentEnabled,
+  )
 
   return (
     <Dialog>
@@ -462,6 +471,9 @@ function SettingsDialog({ appVersion }: { appVersion: string }) {
             <TabsTrigger value="appearance" className="flex-none px-2">
               Appearance
             </TabsTrigger>
+            <TabsTrigger value="danger-zone" className="flex-none px-2">
+              Danger Zone
+            </TabsTrigger>
             <TabsTrigger value="changelog" className="flex-none px-2">
               Changelog
             </TabsTrigger>
@@ -481,7 +493,34 @@ function SettingsDialog({ appVersion }: { appVersion: string }) {
               />
             </div>
           </TabsContent>
-          <TabsContent value="changelog" className="h-[min(520px,calc(100vh-14rem))] pt-3">
+          <TabsContent value="danger-zone" className="pt-3">
+            <div className="flex min-h-20 items-start justify-between gap-4 border border-destructive/40 bg-destructive/10 px-3 py-3">
+              <div className="flex min-w-0 items-start gap-3">
+                <ShieldAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
+                <div className="min-w-0">
+                  <Label
+                    htmlFor="settings-experimental-ai-agent"
+                    className="text-sm font-medium"
+                  >
+                    AI Agent (Experimental)
+                  </Label>
+                  <p className="mt-1 text-xs leading-5 text-destructive">
+                    Unsafe module. It can make Dataverse changes, and serious
+                    harm could come to an environment.
+                  </p>
+                </div>
+              </div>
+              <Switch
+                id="settings-experimental-ai-agent"
+                checked={experimentalAiAgentEnabled}
+                onCheckedChange={setExperimentalAiAgentEnabled}
+              />
+            </div>
+          </TabsContent>
+          <TabsContent
+            value="changelog"
+            className="h-[min(520px,calc(100vh-14rem))] pt-3"
+          >
             <ChangelogContent appVersion={appVersion} />
           </TabsContent>
         </Tabs>
@@ -497,6 +536,10 @@ function renderToolWindow(window: ToolWindow) {
 
   if (window.toolId === "ai-chat") {
     return <AiChatModule window={window} />
+  }
+
+  if (window.toolId === "ai-agent-experimental") {
+    return <AiChatModule window={window} mode="experimental-agent" />
   }
 
   if (window.toolId === "fetchxml-builder") {
@@ -536,8 +579,12 @@ function App() {
   const openWindows = useWorkspaceStore((state) => state.openWindows)
   const activeWindowId = useWorkspaceStore((state) => state.activeWindowId)
   const lastMessage = useWorkspaceStore((state) => state.lastMessage)
-  const selectEnvironment = useWorkspaceStore((state) => state.selectEnvironment)
-  const connectEnvironment = useWorkspaceStore((state) => state.connectEnvironment)
+  const selectEnvironment = useWorkspaceStore(
+    (state) => state.selectEnvironment,
+  )
+  const connectEnvironment = useWorkspaceStore(
+    (state) => state.connectEnvironment,
+  )
   const heartbeatEnvironment = useWorkspaceStore(
     (state) => state.heartbeatEnvironment,
   )
@@ -547,6 +594,9 @@ function App() {
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
   const darkMode = useWorkspaceStore(
     (state) => state.userSettings.appearance.darkMode,
+  )
+  const experimentalAiAgentEnabled = useWorkspaceStore(
+    (state) => state.userSettings.dangerZone.experimentalAiAgentEnabled,
   )
   const [availableUpdate, setAvailableUpdate] =
     useState<AvailableAppUpdate | null>(null)
@@ -688,6 +738,9 @@ function App() {
   const pendingTool = pendingToolOpen
     ? getToolDefinition(pendingToolOpen.toolId)
     : undefined
+  const visibleTools = toolRegistry.filter(
+    (tool) => tool.id !== "ai-agent-experimental" || experimentalAiAgentEnabled,
+  )
 
   function requestEnvironmentForTool(
     toolId: ToolId,
@@ -740,7 +793,8 @@ function App() {
           <DialogHeader>
             <DialogTitle>Select Environment</DialogTitle>
             <DialogDescription>
-              Choose an environment before opening {pendingTool?.title ?? "a tool"}.
+              Choose an environment before opening{" "}
+              {pendingTool?.title ?? "a tool"}.
             </DialogDescription>
           </DialogHeader>
           {config.environments.length > 0 ? (
@@ -780,226 +834,232 @@ function App() {
       </Dialog>
 
       <main className="grid h-screen min-h-0 grid-cols-[280px_minmax(0,1fr)] bg-muted/30 text-sm text-foreground">
-      <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r bg-sidebar">
-        <header className="flex h-16 items-center gap-3 border-b px-4">
-          <div className="flex size-9 items-center justify-center border bg-background">
-            <DatabaseZap className="size-5 text-primary" />
-          </div>
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-2">
-              <h1 className="truncate text-base font-semibold">
-                OpenDataverse
-              </h1>
-              {availableUpdate && (
-                <button
-                  className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-primary px-2 text-[11px] font-medium leading-none text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-default disabled:opacity-80"
-                  type="button"
-                  title={`Install OpenDataverse ${availableUpdate.version}`}
-                  onClick={installUpdate}
-                  disabled={installingUpdate}
-                >
-                  {installingUpdate ? (
-                    <Loader2 className="size-3 animate-spin" />
-                  ) : (
-                    <Download className="size-3" />
-                  )}
-                  <span>
-                    {installingUpdate && updateProgress?.percentage
-                      ? `${updateProgress.percentage}%`
-                      : "Update"}
-                  </span>
-                </button>
-              )}
+        <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r bg-sidebar">
+          <header className="flex h-16 items-center gap-3 border-b px-4">
+            <div className="flex size-9 items-center justify-center border bg-background">
+              <DatabaseZap className="size-5 text-primary" />
             </div>
-            <div className="mt-0.5 truncate text-xs text-muted-foreground">
-              {appNightlyLabel}
-            </div>
-          </div>
-        </header>
-
-        <section className="grid gap-3 border-b p-4">
-          <div className="flex items-center justify-between gap-2">
-            <Label className="text-xs text-muted-foreground">Environment</Label>
-            <div className="flex items-center gap-1">
-              <ManageEnvironmentsDialog />
-              <EnvironmentFormDialog
-                mode="add"
-                trigger={
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    aria-label="Add environment"
-                  >
-                    <Plus />
-                  </Button>
-                }
-              />
-            </div>
-          </div>
-          <Select
-            value={config.currentEnvironmentId ?? ""}
-            onValueChange={selectEnvironment}
-          >
-            <SelectTrigger className="w-full bg-background">
-              <SelectValue placeholder="Select environment" />
-            </SelectTrigger>
-            <SelectContent>
-              {config.environments.map((environment) => (
-                <SelectItem key={environment.id} value={environment.id}>
-                  {environment.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {activeEnvironment && (
-            <div className="min-w-0 text-xs text-muted-foreground">
-              <div className="truncate">{activeEnvironment.url}</div>
-              <div className="mt-2 flex items-center gap-2">
-                <Badge variant="outline" className="capitalize">
-                  {activeEnvironment.authState}
-                </Badge>
-                {activeEnvironmentNeedsReconnect && (
-                  <Button
+            <div className="min-w-0">
+              <div className="flex min-w-0 items-center gap-2">
+                <h1 className="truncate text-base font-semibold">
+                  OpenDataverse
+                </h1>
+                {availableUpdate && (
+                  <button
+                    className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-primary px-2 text-[11px] font-medium leading-none text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-default disabled:opacity-80"
                     type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={() => void connectEnvironment(activeEnvironment.id)}
+                    title={`Install OpenDataverse ${availableUpdate.version}`}
+                    onClick={installUpdate}
+                    disabled={installingUpdate}
                   >
-                    <RefreshCw />
-                    Reconnect
-                  </Button>
+                    {installingUpdate ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Download className="size-3" />
+                    )}
+                    <span>
+                      {installingUpdate && updateProgress?.percentage
+                        ? `${updateProgress.percentage}%`
+                        : "Update"}
+                    </span>
+                  </button>
                 )}
               </div>
+              <div className="mt-0.5 truncate text-xs text-muted-foreground">
+                {appNightlyLabel}
+              </div>
             </div>
-          )}
-        </section>
+          </header>
 
-        <section className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
-          <div className="px-2 py-2 text-xs font-medium text-muted-foreground">
-            Tools
-          </div>
-          <div className="grid gap-1">
-            {toolRegistry.map((tool) => (
-              <ContextMenu key={tool.id}>
-                <ContextMenuTrigger asChild>
-                  <button
-                    className={cn(
-                      "flex w-full min-w-0 items-center gap-3 border border-transparent px-2 py-2 text-left transition-colors hover:border-border hover:bg-background",
-                      tool.status === "planned" && "opacity-60",
-                    )}
-                    type="button"
-                    onClick={() => handleOpenTool(tool.id)}
-                  >
-                    <tool.icon className="size-4 text-muted-foreground" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium">
-                        {tool.title}
+          <section className="grid gap-3 border-b p-4">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs text-muted-foreground">
+                Environment
+              </Label>
+              <div className="flex items-center gap-1">
+                <ManageEnvironmentsDialog />
+                <EnvironmentFormDialog
+                  mode="add"
+                  trigger={
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      aria-label="Add environment"
+                    >
+                      <Plus />
+                    </Button>
+                  }
+                />
+              </div>
+            </div>
+            <Select
+              value={config.currentEnvironmentId ?? ""}
+              onValueChange={selectEnvironment}
+            >
+              <SelectTrigger className="w-full bg-background">
+                <SelectValue placeholder="Select environment" />
+              </SelectTrigger>
+              <SelectContent>
+                {config.environments.map((environment) => (
+                  <SelectItem key={environment.id} value={environment.id}>
+                    {environment.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {activeEnvironment && (
+              <div className="min-w-0 text-xs text-muted-foreground">
+                <div className="truncate">{activeEnvironment.url}</div>
+                <div className="mt-2 flex items-center gap-2">
+                  <Badge variant="outline" className="capitalize">
+                    {activeEnvironment.authState}
+                  </Badge>
+                  {activeEnvironmentNeedsReconnect && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      onClick={() =>
+                        void connectEnvironment(activeEnvironment.id)
+                      }
+                    >
+                      <RefreshCw />
+                      Reconnect
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+
+          <section className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
+            <div className="px-2 py-2 text-xs font-medium text-muted-foreground">
+              Tools
+            </div>
+            <div className="grid gap-1">
+              {visibleTools.map((tool) => (
+                <ContextMenu key={tool.id}>
+                  <ContextMenuTrigger asChild>
+                    <button
+                      className={cn(
+                        "flex w-full min-w-0 items-center gap-3 border border-transparent px-2 py-2 text-left transition-colors hover:border-border hover:bg-background",
+                        tool.status === "planned" && "opacity-60",
+                      )}
+                      type="button"
+                      onClick={() => handleOpenTool(tool.id)}
+                    >
+                      <tool.icon className="size-4 text-muted-foreground" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">
+                          {tool.title}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {tool.description}
+                        </span>
                       </span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {tool.description}
-                      </span>
-                    </span>
-                    {tool.status === "planned" && (
-                      <Badge variant="secondary" className="shrink-0">
-                        Planned
-                      </Badge>
-                    )}
-                  </button>
-                </ContextMenuTrigger>
-                <ContextMenuContent>
-                  <ContextMenuItem
-                    onSelect={() =>
-                      handleOpenTool(tool.id, { newWindow: true })
-                    }
-                  >
-                    <Plus className="size-3.5" />
-                    Open Second Tab
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-            ))}
-          </div>
-        </section>
+                      {tool.status === "planned" && (
+                        <Badge variant="secondary" className="shrink-0">
+                          Planned
+                        </Badge>
+                      )}
+                    </button>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent>
+                    <ContextMenuItem
+                      onSelect={() =>
+                        handleOpenTool(tool.id, { newWindow: true })
+                      }
+                    >
+                      <Plus className="size-3.5" />
+                      Open Second Tab
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
+              ))}
+            </div>
+          </section>
 
-        <footer className="border-t p-3">
-          <SettingsDialog appVersion={runningAppVersion} />
-          {lastMessage && (
-            <>
-              <Separator className="my-3" />
-              <p className="line-clamp-2 text-xs text-muted-foreground">
-                {lastMessage}
-              </p>
-            </>
-          )}
-        </footer>
-      </aside>
+          <footer className="border-t p-3">
+            <SettingsDialog appVersion={runningAppVersion} />
+            {lastMessage && (
+              <>
+                <Separator className="my-3" />
+                <p className="line-clamp-2 text-xs text-muted-foreground">
+                  {lastMessage}
+                </p>
+              </>
+            )}
+          </footer>
+        </aside>
 
-      <section className="flex min-w-0 min-h-0 flex-col">
-        <div className="flex h-10 items-end overflow-x-auto border-b bg-background px-2">
-          {openWindows.map((window) => {
-            const tool = getToolDefinition(window.toolId)
-            const windowEnvironment = getEnvironmentById(
-              config,
-              window.environmentId ?? config.currentEnvironmentId,
-            )
-            const active = window.id === activeWindowId
+        <section className="flex min-w-0 min-h-0 flex-col">
+          <div className="flex h-10 items-end overflow-x-auto border-b bg-background px-2">
+            {openWindows.map((window) => {
+              const tool = getToolDefinition(window.toolId)
+              const windowEnvironment = getEnvironmentById(
+                config,
+                window.environmentId ?? config.currentEnvironmentId,
+              )
+              const active = window.id === activeWindowId
 
-            return (
-              <button
-                key={window.id}
-                className={cn(
-                  "flex h-9 max-w-64 items-center gap-2 border border-b-0 px-3 text-left text-xs",
-                  active
-                    ? "bg-muted text-foreground"
-                    : "bg-background text-muted-foreground hover:bg-muted/60",
-                )}
-                type="button"
-                onClick={() => activateWindow(window.id)}
-              >
-                <tool.icon className="size-3.5 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">
-                  {window.title}
-                  {windowEnvironment ? ` - ${windowEnvironment.name}` : ""}
-                </span>
-                <span
-                  className="flex size-5 shrink-0 items-center justify-center hover:text-foreground"
-                  role="button"
-                  tabIndex={0}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    closeWindow(window.id)
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
+              return (
+                <button
+                  key={window.id}
+                  className={cn(
+                    "flex h-9 max-w-64 items-center gap-2 border border-b-0 px-3 text-left text-xs",
+                    active
+                      ? "bg-muted text-foreground"
+                      : "bg-background text-muted-foreground hover:bg-muted/60",
+                  )}
+                  type="button"
+                  onClick={() => activateWindow(window.id)}
+                >
+                  <tool.icon className="size-3.5 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">
+                    {window.title}
+                    {windowEnvironment ? ` - ${windowEnvironment.name}` : ""}
+                  </span>
+                  <span
+                    className="flex size-5 shrink-0 items-center justify-center hover:text-foreground"
+                    role="button"
+                    tabIndex={0}
+                    onClick={(event) => {
                       event.stopPropagation()
                       closeWindow(window.id)
-                    }
-                  }}
-                >
-                  <X className="size-3" />
-                </span>
-              </button>
-            )
-          })}
-        </div>
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.stopPropagation()
+                        closeWindow(window.id)
+                      }
+                    }}
+                  >
+                    <X className="size-3" />
+                  </span>
+                </button>
+              )
+            })}
+          </div>
 
-        <div className="min-h-0 flex-1">
-          {loadState === "loading" && (
-            <div className="flex h-full items-center justify-center gap-2 text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Loading
-            </div>
-          )}
+          <div className="min-h-0 flex-1">
+            {loadState === "loading" && (
+              <div className="flex h-full items-center justify-center gap-2 text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Loading
+              </div>
+            )}
 
-          {loadState !== "loading" && activeWindow && renderToolWindow(activeWindow)}
+            {loadState !== "loading" &&
+              activeWindow &&
+              renderToolWindow(activeWindow)}
 
-          {loadState !== "loading" && !activeWindow && (
-            <div className="flex h-full items-center justify-center bg-background text-sm text-muted-foreground">
-              Select a tool from the sidebar.
-            </div>
-          )}
-        </div>
-      </section>
+            {loadState !== "loading" && !activeWindow && (
+              <div className="flex h-full items-center justify-center bg-background text-sm text-muted-foreground">
+                Select a tool from the sidebar.
+              </div>
+            )}
+          </div>
+        </section>
       </main>
     </>
   )
