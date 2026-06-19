@@ -11,6 +11,24 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.42",
+    date: "2026-06-19",
+    title: "Environment management",
+    changes: [
+      "Added a Manage Environments dialog for editing, reconnecting, and deleting saved Dataverse environments.",
+      "Kept environment deletes local-only by removing saved config, auth tokens, bindings, and open tabs without touching Dataverse.",
+      "Made URL edits clear local auth and bindings, close affected tabs, and require an explicit reconnect.",
+    ],
+  },
+  {
+    version: "0.1.41",
+    date: "2026-06-19",
+    title: "Webresource Management chat removal",
+    changes: [
+      "Removed the embedded AI chat panel from Webresource Management so the workspace focuses on browsing, editing, binding, and publishing web resources.",
+    ],
+  },
+  {
     version: "0.1.40",
     date: "2026-06-19",
     title: "AI chat pasted images",

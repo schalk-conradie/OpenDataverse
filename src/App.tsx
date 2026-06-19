@@ -1,10 +1,20 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react"
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react"
 import {
   DatabaseZap,
   Download,
   Loader2,
+  Pencil,
   Plus,
+  RefreshCw,
   Settings,
+  SlidersHorizontal,
+  Trash2,
   X,
 } from "lucide-react"
 
@@ -37,6 +47,14 @@ import {
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { appNightlyLabel, appVersion, appWindowTitle } from "@/core/build-info"
 import {
@@ -55,6 +73,7 @@ import {
   dataverseUrlPattern,
   getEnvironmentById,
   normalizeEnvironmentUrl,
+  type DataverseEnvironment,
   type ToolId,
   type ToolWindow,
 } from "@/core/dataverse/schemas"
@@ -67,47 +86,133 @@ import { getToolDefinition, toolRegistry } from "@/modules/tool-registry"
 import { WebResourceManagementModule } from "@/modules/webresource-management/WebResourceManagementModule"
 import { useWorkspaceStore } from "@/store/workspace-store"
 
-function EnvironmentDialog() {
+type EnvironmentFormDialogProps = {
+  mode: "add" | "edit"
+  environment?: DataverseEnvironment
+  trigger: ReactNode
+}
+
+function validateEnvironmentForm(
+  environments: DataverseEnvironment[],
+  name: string,
+  normalizedUrl: string,
+  currentEnvironmentId?: string,
+) {
+  const trimmedName = name.trim()
+
+  if (!trimmedName) {
+    return "Name is required"
+  }
+
+  if (!dataverseUrlPattern.test(normalizedUrl)) {
+    return "Use a URL like https://org.crm.dynamics.com"
+  }
+
+  const duplicateName = environments.some(
+    (environment) =>
+      environment.id !== currentEnvironmentId &&
+      environment.name.trim().toLowerCase() === trimmedName.toLowerCase(),
+  )
+
+  if (duplicateName) {
+    return "Environment name already exists"
+  }
+
+  const duplicateUrl = environments.some(
+    (environment) =>
+      environment.id !== currentEnvironmentId &&
+      normalizeEnvironmentUrl(environment.url).toLowerCase() ===
+        normalizedUrl.toLowerCase(),
+  )
+
+  if (duplicateUrl) {
+    return "Environment URL already exists"
+  }
+
+  return undefined
+}
+
+function EnvironmentFormDialog({
+  mode,
+  environment,
+  trigger,
+}: EnvironmentFormDialogProps) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [url, setUrl] = useState("")
   const [error, setError] = useState<string>()
+  const [submitting, setSubmitting] = useState(false)
+  const config = useWorkspaceStore((state) => state.config)
   const addEnvironment = useWorkspaceStore((state) => state.addEnvironment)
+  const updateEnvironment = useWorkspaceStore((state) => state.updateEnvironment)
 
-  function submitEnvironment(event: FormEvent<HTMLFormElement>) {
+  function resetForm() {
+    setName(environment?.name ?? "")
+    setUrl(environment?.url ?? "")
+    setError(undefined)
+    setSubmitting(false)
+  }
+
+  async function submitEnvironment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
     const normalizedUrl = normalizeEnvironmentUrl(url)
-    if (!name.trim()) {
-      setError("Name is required")
+    const validationError = validateEnvironmentForm(
+      config.environments,
+      name,
+      normalizedUrl,
+      environment?.id,
+    )
+    if (validationError) {
+      setError(validationError)
       return
     }
 
-    if (!dataverseUrlPattern.test(normalizedUrl)) {
-      setError("Use a URL like https://org.crm.dynamics.com")
-      return
+    setSubmitting(true)
+
+    if (mode === "edit" && environment) {
+      const updated = await updateEnvironment(environment.id, {
+        name,
+        url: normalizedUrl,
+      })
+
+      if (!updated) {
+        setSubmitting(false)
+        setError("Could not update environment")
+        return
+      }
+    } else {
+      addEnvironment({ name, url: normalizedUrl })
     }
 
-    addEnvironment({ name, url: normalizedUrl })
     setName("")
     setUrl("")
     setError(undefined)
+    setSubmitting(false)
     setOpen(false)
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="icon-sm" aria-label="Add environment">
-          <Plus />
-        </Button>
-      </DialogTrigger>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) {
+          resetForm()
+        }
+        setOpen(nextOpen)
+      }}
+    >
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <form onSubmit={submitEnvironment} className="grid gap-4">
           <DialogHeader>
-            <DialogTitle>Add Environment</DialogTitle>
+            <DialogTitle>
+              {mode === "edit" ? "Edit Environment" : "Add Environment"}
+            </DialogTitle>
             <DialogDescription className="sr-only">
-              Add a Dataverse environment by name and organization URL.
+              {mode === "edit"
+                ? "Edit a saved Dataverse environment."
+                : "Add a Dataverse environment by name and organization URL."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
@@ -130,11 +235,204 @@ function EnvironmentDialog() {
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
           <DialogFooter>
-            <Button type="submit">Add</Button>
+            <Button type="submit" disabled={submitting}>
+              {submitting && <Loader2 className="animate-spin" />}
+              {mode === "edit" ? "Save" : "Add"}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function ManageEnvironmentsDialog() {
+  const config = useWorkspaceStore((state) => state.config)
+  const connectEnvironment = useWorkspaceStore((state) => state.connectEnvironment)
+  const deleteEnvironment = useWorkspaceStore((state) => state.deleteEnvironment)
+  const [deleteTarget, setDeleteTarget] = useState<DataverseEnvironment>()
+  const [reconnectingId, setReconnectingId] = useState<string>()
+  const [deleting, setDeleting] = useState(false)
+
+  async function reconnect(environmentId: string) {
+    setReconnectingId(environmentId)
+    try {
+      await connectEnvironment(environmentId)
+    } finally {
+      setReconnectingId(undefined)
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) {
+      return
+    }
+
+    setDeleting(true)
+    const deleted = await deleteEnvironment(deleteTarget.id)
+    setDeleting(false)
+
+    if (deleted) {
+      setDeleteTarget(undefined)
+    }
+  }
+
+  return (
+    <>
+      <Dialog>
+        <DialogTrigger asChild>
+          <Button variant="outline" size="sm">
+            <SlidersHorizontal />
+            Manage
+          </Button>
+        </DialogTrigger>
+        <DialogContent className="sm:max-w-3xl">
+          <div className="flex items-start justify-between gap-4">
+            <DialogHeader>
+              <DialogTitle>Manage Environments</DialogTitle>
+              <DialogDescription className="sr-only">
+                Edit, reconnect, or delete saved Dataverse environments.
+              </DialogDescription>
+            </DialogHeader>
+            <EnvironmentFormDialog
+              mode="add"
+              trigger={
+                <Button type="button" size="sm">
+                  <Plus />
+                  Add
+                </Button>
+              }
+            />
+          </div>
+
+          {config.environments.length === 0 ? (
+            <div className="border bg-background p-6 text-center text-xs text-muted-foreground">
+              No environments saved.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>URL</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {config.environments.map((environment) => {
+                  const reconnecting =
+                    reconnectingId === environment.id ||
+                    environment.authState === "connecting"
+
+                  return (
+                    <TableRow key={environment.id}>
+                      <TableCell className="font-medium">
+                        {environment.name}
+                      </TableCell>
+                      <TableCell className="max-w-72 truncate font-mono text-[11px] text-muted-foreground">
+                        {environment.url}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="capitalize">
+                          {environment.authState}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1">
+                          <EnvironmentFormDialog
+                            mode="edit"
+                            environment={environment}
+                            trigger={
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon-xs"
+                                title={`Edit ${environment.name}`}
+                              >
+                                <Pencil />
+                                <span className="sr-only">Edit</span>
+                              </Button>
+                            }
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon-xs"
+                            title={`Reconnect ${environment.name}`}
+                            disabled={reconnecting}
+                            onClick={() => void reconnect(environment.id)}
+                          >
+                            {reconnecting ? (
+                              <Loader2 className="animate-spin" />
+                            ) : (
+                              <RefreshCw />
+                            )}
+                            <span className="sr-only">Reconnect</span>
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="icon-xs"
+                            title={`Delete ${environment.name}`}
+                            disabled={reconnecting}
+                            onClick={() => setDeleteTarget(environment)}
+                          >
+                            <Trash2 />
+                            <span className="sr-only">Delete</span>
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open && !deleting) {
+            setDeleteTarget(undefined)
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Environment</DialogTitle>
+            <DialogDescription>
+              Delete {deleteTarget?.name} from local OpenDataverse state.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={deleting}
+              onClick={() => setDeleteTarget(undefined)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={deleting}
+              onClick={confirmDelete}
+            >
+              {deleting ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <Trash2 />
+              )}
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
@@ -239,6 +537,7 @@ function App() {
   const activeWindowId = useWorkspaceStore((state) => state.activeWindowId)
   const lastMessage = useWorkspaceStore((state) => state.lastMessage)
   const selectEnvironment = useWorkspaceStore((state) => state.selectEnvironment)
+  const connectEnvironment = useWorkspaceStore((state) => state.connectEnvironment)
   const heartbeatEnvironment = useWorkspaceStore(
     (state) => state.heartbeatEnvironment,
   )
@@ -379,6 +678,9 @@ function App() {
     config,
     config.currentEnvironmentId,
   )
+  const activeEnvironmentNeedsReconnect =
+    activeEnvironment?.authState === "expired" ||
+    activeEnvironment?.authState === "error"
   const activeWindow = useMemo(
     () => openWindows.find((window) => window.id === activeWindowId),
     [activeWindowId, openWindows],
@@ -518,7 +820,21 @@ function App() {
         <section className="grid gap-3 border-b p-4">
           <div className="flex items-center justify-between gap-2">
             <Label className="text-xs text-muted-foreground">Environment</Label>
-            <EnvironmentDialog />
+            <div className="flex items-center gap-1">
+              <ManageEnvironmentsDialog />
+              <EnvironmentFormDialog
+                mode="add"
+                trigger={
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    aria-label="Add environment"
+                  >
+                    <Plus />
+                  </Button>
+                }
+              />
+            </div>
           </div>
           <Select
             value={config.currentEnvironmentId ?? ""}
@@ -538,10 +854,21 @@ function App() {
           {activeEnvironment && (
             <div className="min-w-0 text-xs text-muted-foreground">
               <div className="truncate">{activeEnvironment.url}</div>
-              <div className="mt-2">
+              <div className="mt-2 flex items-center gap-2">
                 <Badge variant="outline" className="capitalize">
                   {activeEnvironment.authState}
                 </Badge>
+                {activeEnvironmentNeedsReconnect && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="xs"
+                    onClick={() => void connectEnvironment(activeEnvironment.id)}
+                  >
+                    <RefreshCw />
+                    Reconnect
+                  </Button>
+                )}
               </div>
             </div>
           )}

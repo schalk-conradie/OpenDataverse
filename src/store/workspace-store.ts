@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener"
 import {
   checkDataverseConnection,
   completeBrowserAuth,
+  deleteEnvironmentToken,
   isTauriRuntime,
   loadAppConfig,
   loadUserSettings,
@@ -34,6 +35,8 @@ type NewEnvironmentInput = {
   url: string
 }
 
+type UpdateEnvironmentInput = NewEnvironmentInput
+
 type OpenToolOptions = {
   newWindow?: boolean
 }
@@ -47,6 +50,11 @@ type WorkspaceStore = {
   lastMessage?: string
   hydrate: () => Promise<void>
   addEnvironment: (input: NewEnvironmentInput) => void
+  updateEnvironment: (
+    environmentId: string,
+    input: UpdateEnvironmentInput,
+  ) => Promise<boolean>
+  deleteEnvironment: (environmentId: string) => Promise<boolean>
   selectEnvironment: (environmentId: string) => void
   connectEnvironment: (environmentId: string) => Promise<void>
   heartbeatEnvironment: (environmentId: string) => Promise<void>
@@ -145,6 +153,71 @@ function connectionErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : String(error ?? fallback)
 }
 
+function environmentInputResult(
+  config: AppConfig,
+  input: NewEnvironmentInput,
+  currentEnvironmentId?: string,
+) {
+  const name = input.name.trim()
+  const url = normalizeEnvironmentUrl(input.url)
+
+  if (!name) {
+    return { error: "Name is required" }
+  }
+
+  const parsed = dataverseEnvironmentSchema.safeParse({
+    id: currentEnvironmentId ?? "environment-validation",
+    name,
+    url,
+    authState: "disconnected",
+  })
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid environment" }
+  }
+
+  const duplicateName = config.environments.some(
+    (environment) =>
+      environment.id !== currentEnvironmentId &&
+      environment.name.trim().toLowerCase() === name.toLowerCase(),
+  )
+
+  if (duplicateName) {
+    return { error: "Environment name already exists" }
+  }
+
+  const duplicateUrl = config.environments.some(
+    (environment) =>
+      environment.id !== currentEnvironmentId &&
+      normalizeEnvironmentUrl(environment.url).toLowerCase() === url.toLowerCase(),
+  )
+
+  if (duplicateUrl) {
+    return { error: "Environment URL already exists" }
+  }
+
+  return { data: { name, url } }
+}
+
+function nextEnvironmentIdAfterDelete(config: AppConfig, environmentId: string) {
+  const environmentIndex = config.environments.findIndex(
+    (environment) => environment.id === environmentId,
+  )
+
+  if (environmentIndex === -1) {
+    return config.currentEnvironmentId
+  }
+
+  const nextEnvironments = config.environments.filter(
+    (environment) => environment.id !== environmentId,
+  )
+
+  return (
+    nextEnvironments[environmentIndex]?.id ??
+    nextEnvironments[environmentIndex - 1]?.id
+  )
+}
+
 async function updateEnvironmentConnection(
   environmentId: string,
   options: {
@@ -152,13 +225,14 @@ async function updateEnvironmentConnection(
     set: (state: Partial<WorkspaceStore>) => void
     interactive: boolean
     showConnecting: boolean
+    forceBrowserAuth?: boolean
   },
 ) {
   if (activeConnectionChecks.has(environmentId)) {
     return
   }
 
-  const { get, set, interactive, showConnecting } = options
+  const { get, set, interactive, showConnecting, forceBrowserAuth } = options
   const environment = getEnvironmentById(get().config, environmentId)
   if (!environment) {
     return
@@ -177,37 +251,41 @@ async function updateEnvironmentConnection(
   }
 
   try {
-    const session = await checkDataverseConnection(environment)
-    const nextState =
-      session.status === "connected" ? "connected" : "disconnected"
-    const nextConfig = applyEnvironmentAuthState(
-      get().config,
-      environmentId,
-      nextState,
-    )
-    set({ config: nextConfig, lastMessage: session.message })
-    persistConfig(nextConfig, set)
-  } catch (checkError) {
-    if (!interactive) {
-      const currentEnvironment = getEnvironmentById(get().config, environmentId)
-      const nextState = authStateForConnectionError(checkError)
-      const nextConfig = applyEnvironmentAuthState(
-        get().config,
-        environmentId,
-        nextState,
-      )
+    if (!forceBrowserAuth) {
+      try {
+        const session = await checkDataverseConnection(environment)
+        const nextState =
+          session.status === "connected" ? "connected" : "disconnected"
+        const nextConfig = applyEnvironmentAuthState(
+          get().config,
+          environmentId,
+          nextState,
+        )
+        set({ config: nextConfig, lastMessage: session.message })
+        persistConfig(nextConfig, set)
+        return
+      } catch (checkError) {
+        if (!interactive) {
+          const currentEnvironment = getEnvironmentById(get().config, environmentId)
+          const nextState = authStateForConnectionError(checkError)
+          const nextConfig = applyEnvironmentAuthState(
+            get().config,
+            environmentId,
+            nextState,
+          )
 
-      set({
-        config: nextConfig,
-        lastMessage:
-          currentEnvironment?.authState === "connected" ||
-          currentEnvironment?.authState === "connecting"
-            ? connectionErrorMessage(checkError, "Dataverse heartbeat failed")
-            : get().lastMessage,
-      })
-      persistConfig(nextConfig, set)
-      activeConnectionChecks.delete(environmentId)
-      return
+          set({
+            config: nextConfig,
+            lastMessage:
+              currentEnvironment?.authState === "connected" ||
+              currentEnvironment?.authState === "connecting"
+                ? connectionErrorMessage(checkError, "Dataverse heartbeat failed")
+                : get().lastMessage,
+          })
+          persistConfig(nextConfig, set)
+          return
+        }
+      }
     }
 
     try {
@@ -290,29 +368,23 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   addEnvironment(input) {
     const config = get().config
-    const name = input.name.trim()
+    const result = environmentInputResult(config, input)
 
-    if (config.environments.some((environment) => environment.name === name)) {
-      set({ lastMessage: "Environment name already exists" })
+    if (result.error || !result.data) {
+      set({ lastMessage: result.error })
       return
     }
 
-    const parsed = dataverseEnvironmentSchema.safeParse({
+    const environment = {
       id: createId("environment"),
-      name,
-      url: normalizeEnvironmentUrl(input.url),
-      authState: "disconnected",
-    })
-
-    if (!parsed.success) {
-      set({ lastMessage: parsed.error.issues[0]?.message })
-      return
-    }
-
+      name: result.data.name,
+      url: result.data.url,
+      authState: "disconnected" as const,
+    } satisfies DataverseEnvironment
     const nextConfig = {
       ...config,
-      currentEnvironmentId: parsed.data.id,
-      environments: [...config.environments, parsed.data],
+      currentEnvironmentId: environment.id,
+      environments: [...config.environments, environment],
     }
 
     set({
@@ -321,12 +393,150 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       lastMessage: "Environment added",
     })
     persistConfig(nextConfig, set)
-    void updateEnvironmentConnection(parsed.data.id, {
+    void updateEnvironmentConnection(environment.id, {
       get,
       set,
       interactive: true,
       showConnecting: true,
     })
+  },
+
+  async updateEnvironment(environmentId, input) {
+    const config = get().config
+    const environment = getEnvironmentById(config, environmentId)
+
+    if (!environment) {
+      set({ lastMessage: "Environment was not found" })
+      return false
+    }
+
+    const result = environmentInputResult(config, input, environmentId)
+
+    if (result.error || !result.data) {
+      set({ lastMessage: result.error })
+      return false
+    }
+
+    const nextUrl = result.data.url
+    const urlChanged =
+      normalizeEnvironmentUrl(environment.url).toLowerCase() !==
+      nextUrl.toLowerCase()
+
+    if (urlChanged && activeConnectionChecks.has(environmentId)) {
+      set({ lastMessage: "Wait for sign-in to finish before changing the URL" })
+      return false
+    }
+
+    if (urlChanged) {
+      try {
+        await deleteEnvironmentToken(environmentId)
+      } catch (error) {
+        set({
+          lastMessage:
+            error instanceof Error
+              ? error.message
+              : "Could not remove environment token",
+        })
+        return false
+      }
+    }
+
+    const nextConfig = {
+      ...config,
+      environments: config.environments.map((item) =>
+        item.id === environmentId
+          ? {
+              ...item,
+              name: result.data.name,
+              url: nextUrl,
+              authState: urlChanged ? "disconnected" : item.authState,
+            }
+          : item,
+      ),
+      bindings: urlChanged
+        ? config.bindings.filter(
+            (binding) => binding.environmentId !== environmentId,
+          )
+        : config.bindings,
+    }
+    const nextWindows = urlChanged
+      ? get().openWindows.filter((window) => window.environmentId !== environmentId)
+      : get().openWindows
+    const activeWindowStillOpen = nextWindows.some(
+      (window) => window.id === get().activeWindowId,
+    )
+
+    set({
+      config: nextConfig,
+      openWindows: nextWindows,
+      activeWindowId: activeWindowStillOpen
+        ? get().activeWindowId
+        : nextWindows.at(-1)?.id,
+      lastMessage: urlChanged
+        ? "Environment updated. Reconnect to use the new URL."
+        : "Environment updated",
+    })
+    persistConfig(nextConfig, set)
+    return true
+  },
+
+  async deleteEnvironment(environmentId) {
+    const config = get().config
+    const environment = getEnvironmentById(config, environmentId)
+
+    if (!environment) {
+      set({ lastMessage: "Environment was not found" })
+      return false
+    }
+
+    if (activeConnectionChecks.has(environmentId)) {
+      set({ lastMessage: "Wait for sign-in to finish before deleting this environment" })
+      return false
+    }
+
+    try {
+      await deleteEnvironmentToken(environmentId)
+    } catch (error) {
+      set({
+        lastMessage:
+          error instanceof Error
+            ? error.message
+            : "Could not remove environment token",
+      })
+      return false
+    }
+
+    const currentEnvironmentId =
+      config.currentEnvironmentId === environmentId
+        ? nextEnvironmentIdAfterDelete(config, environmentId)
+        : config.currentEnvironmentId
+    const nextWindows = get().openWindows.filter(
+      (window) => window.environmentId !== environmentId,
+    )
+    const activeWindowStillOpen = nextWindows.some(
+      (window) => window.id === get().activeWindowId,
+    )
+    const nextConfig = {
+      ...config,
+      currentEnvironmentId,
+      environments: config.environments.filter(
+        (item) => item.id !== environmentId,
+      ),
+      bindings: config.bindings.filter(
+        (binding) => binding.environmentId !== environmentId,
+      ),
+    }
+
+    set({
+      config: nextConfig,
+      openWindows: nextWindows,
+      activeWindowId: activeWindowStillOpen
+        ? get().activeWindowId
+        : nextWindows.at(-1)?.id,
+      lastMessage: `Deleted ${environment.name}`,
+    })
+    persistConfig(nextConfig, set)
+    return true
   },
 
   selectEnvironment(environmentId) {
@@ -357,6 +567,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       set,
       interactive: true,
       showConnecting: true,
+      forceBrowserAuth: true,
     })
   },
 

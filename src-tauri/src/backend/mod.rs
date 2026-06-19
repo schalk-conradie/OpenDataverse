@@ -335,6 +335,14 @@ fn legacy_token_path(app: &AppHandle, environment_id: &str) -> Result<PathBuf, S
         .join(format!("token-{}.json", environment_id)))
 }
 
+fn delete_token_file(path: PathBuf) -> Result<(), String> {
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Could not delete {}: {error}", path.display())),
+    }
+}
+
 fn safe_storage_segment(value: &str) -> String {
     let sanitized = value
         .chars()
@@ -793,6 +801,7 @@ pub(crate) fn run() {
             auth::save_config,
             auth::load_user_settings,
             auth::save_user_settings,
+            auth::delete_environment_token,
             auth::start_browser_auth,
             auth::complete_browser_auth,
             auth::check_dataverse_connection,

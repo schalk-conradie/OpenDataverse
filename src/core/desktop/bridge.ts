@@ -96,6 +96,12 @@ export async function saveAppConfig(config: AppConfig) {
   window.localStorage.setItem(storageKey, JSON.stringify(parsed, null, 2))
 }
 
+export async function deleteEnvironmentToken(environmentId: string) {
+  if (isTauriRuntime()) {
+    await invoke("delete_environment_token", { environmentId })
+  }
+}
+
 export async function loadUserSettings() {
   if (isTauriRuntime()) {
     const settings = await invoke<unknown>("load_user_settings")

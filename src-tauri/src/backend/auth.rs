@@ -45,6 +45,17 @@ pub(super) fn save_config(app: AppHandle, config: AppConfig) -> Result<(), Strin
 }
 
 #[tauri::command]
+pub(super) fn delete_environment_token(
+    app: AppHandle,
+    environment_id: String,
+) -> Result<(), String> {
+    delete_token_file(token_path(&app, &environment_id)?)?;
+    delete_token_file(legacy_home_token_path(&app, &environment_id)?)?;
+    delete_token_file(legacy_token_path(&app, &environment_id)?)?;
+    Ok(())
+}
+
+#[tauri::command]
 pub(super) fn load_user_settings(app: AppHandle) -> Result<UserSettings, String> {
     let path = user_settings_path(&app)?;
 
