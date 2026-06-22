@@ -11,6 +11,16 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.46",
+    date: "2026-06-22",
+    title: "Browser preview mock coverage",
+    changes: [
+      "Expanded browser-preview web resource mock data so PNG, JPG, GIF, ICO, and XSL resources can be tested with the Browser plugin.",
+      "Matched browser-preview web resource content fallbacks to image and XSL resource types instead of returning JavaScript content for every non-PNG resource.",
+      "Fixed closed dialogs so they no longer intercept clicks after nested browser-preview forms are submitted.",
+    ],
+  },
+  {
     version: "0.1.45",
     date: "2026-06-22",
     title: "Web resource image previews",

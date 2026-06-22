@@ -67,6 +67,96 @@ function isMicrosoftWebResourceName(name: string) {
   )
 }
 
+function browserWebResourceContent(resource: WebResource): WebResourceContent {
+  const lowerName = resource.name.toLowerCase()
+  const binaryImageContentByExtension: Record<
+    string,
+    { content: string; mimeType: string }
+  > = {
+    ".png": {
+      content:
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      mimeType: "image/png",
+    },
+    ".jpg": {
+      content:
+        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/ASP/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/ASP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Ap//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/IV//2gAMAwEAAgADAAAAEP/EFBQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EFBQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EFBABAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z",
+      mimeType: "image/jpeg",
+    },
+    ".jpeg": {
+      content:
+        "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAEDAQE/ASP/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/ASP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAY/Ap//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/IV//2gAMAwEAAgADAAAAEP/EFBQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EFBQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EFBABAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z",
+      mimeType: "image/jpeg",
+    },
+    ".gif": {
+      content: "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==",
+      mimeType: "image/gif",
+    },
+    ".ico": {
+      content:
+        "AAABAAEBAQEAAAEAIiwAAABWAAAAKAAAABAAAAAgAAAAAQAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+      mimeType: "image/x-icon",
+    },
+  }
+
+  const imageContent = Object.entries(binaryImageContentByExtension).find(
+    ([extension]) => lowerName.endsWith(extension),
+  )?.[1]
+
+  if (resource.type === "image" && imageContent) {
+    return {
+      id: resource.id,
+      name: resource.name,
+      type: resource.type,
+      language: "binary",
+      content: imageContent.content,
+      contentEncoding: "base64",
+      mimeType: imageContent.mimeType,
+    }
+  }
+
+  if (lowerName.endsWith(".xsl") || lowerName.endsWith(".xslt")) {
+    return {
+      id: resource.id,
+      name: resource.name,
+      type: "xml",
+      language: "xml",
+      content: `<?xml version="1.0" encoding="UTF-8"?>
+<xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+  <xsl:template match="/">
+    <section class="account-summary">
+      <xsl:value-of select="/account/name" />
+    </section>
+  </xsl:template>
+</xsl:stylesheet>`,
+      contentEncoding: "text",
+      mimeType: "application/xslt+xml",
+    }
+  }
+
+  return {
+    id: resource.id,
+    name: resource.name,
+    type: resource.type,
+    language:
+      resource.type === "css"
+        ? "css"
+        : resource.type === "html"
+          ? "html"
+          : "javascript",
+    content: `function onLoad(executionContext) {
+  const formContext = executionContext.getFormContext();
+  const accountName = formContext.getAttribute("name")?.getValue();
+
+  if (accountName) {
+    console.log("Account loaded", accountName);
+  }
+}`,
+    contentEncoding: "text",
+    mimeType: "application/javascript",
+  }
+}
+
 export function isTauriRuntime() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 }
@@ -211,29 +301,15 @@ export async function getWebResourceContent(
     "@/modules/webresource-management/mock-data"
   )
   const resource = mockWebResources.find((item) => item.id === webResourceId)
-  if (resource?.type === "image" && resource.name.endsWith(".png")) {
-    return {
-      id: webResourceId,
-      name: resource.name,
-      type: resource.type,
-      language: "binary",
-      content:
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
-      contentEncoding: "base64",
-      mimeType: "image/png",
-    } satisfies WebResourceContent
+  if (resource) {
+    return browserWebResourceContent(resource)
   }
 
   return {
     id: webResourceId,
-    name: resource?.name ?? "new_/scripts/account-form.js",
-    type: resource?.type ?? "js",
-    language:
-      resource?.type === "css"
-        ? "css"
-        : resource?.type === "html"
-          ? "html"
-          : "javascript",
+    name: "new_/scripts/account-form.js",
+    type: "js",
+    language: "javascript",
     content: `function onLoad(executionContext) {
   const formContext = executionContext.getFormContext();
   const accountName = formContext.getAttribute("name")?.getValue();
