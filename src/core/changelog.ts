@@ -11,6 +11,15 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.45",
+    date: "2026-06-22",
+    title: "Web resource image previews",
+    changes: [
+      "Fixed Webresource Management so imported PNG, JPG, GIF, ICO, and XSL web resources are included in the resource list.",
+      "Added preview-only rendering for binary image web resources instead of trying to open them as UTF-8 text.",
+    ],
+  },
+  {
     version: "0.1.44",
     date: "2026-06-22",
     title: "AI chat history management",

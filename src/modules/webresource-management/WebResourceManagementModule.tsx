@@ -20,6 +20,7 @@ import {
   FileSymlink,
   Folder,
   FolderOpen,
+  ImageIcon,
   FolderSync,
   Loader2,
   Play,
@@ -727,13 +728,21 @@ function ResourceViewerDialog({
   const [actionError, setActionError] = useState<ResourceActionError>()
   const resourceId = content?.id
   const savedContent = content?.content ?? ""
+  const contentEncoding = content?.contentEncoding ?? "text"
+  const isBinaryContent = contentEncoding === "base64"
+  const imagePreviewSrc =
+    content && isBinaryContent
+      ? `data:${content.mimeType ?? "application/octet-stream"};base64,${content.content}`
+      : undefined
   const draftContent =
-    draftState && draftState.resourceId === resourceId
+    !isBinaryContent && draftState && draftState.resourceId === resourceId
       ? draftState.content
       : savedContent
-  const dirty = draftContent !== savedContent
+  const dirty = !isBinaryContent && draftContent !== savedContent
   const isSaving = Boolean(savingAction)
-  const canEdit = Boolean(content && !loading && !error && !resource?.isManaged)
+  const canEdit = Boolean(
+    content && !isBinaryContent && !loading && !error && !resource?.isManaged,
+  )
   const editMode = editResourceId === resourceId && canEdit
   const actionErrorMessage =
     actionError && actionError.resourceId === resourceId
@@ -743,7 +752,7 @@ function ResourceViewerDialog({
   const editorPath = editorPathForWebResource(content)
 
   async function copyContent() {
-    if (!draftContent) {
+    if (!draftContent || isBinaryContent) {
       return
     }
 
@@ -824,6 +833,11 @@ function ResourceViewerDialog({
                     {content.language}
                   </span>
                 )}
+                {content?.mimeType && (
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {content.mimeType}
+                  </span>
+                )}
                 {dirty && (
                   <Badge
                     variant="outline"
@@ -861,7 +875,7 @@ function ResourceViewerDialog({
                 variant="outline"
                 size="sm"
                 onClick={() => void copyContent()}
-                disabled={!draftContent}
+                disabled={!draftContent || isBinaryContent}
               >
                 <Copy />
                 Copy
@@ -935,46 +949,63 @@ function ResourceViewerDialog({
             </div>
           )}
 
-          {!error && (!loading || content) && (
-            <div className="min-h-0">
-              <Editor
-                beforeMount={configureWebResourceIntellisense}
-                height="100%"
-                language={editorLanguage}
-                path={editorPath}
-                value={draftContent}
-                onChange={(value) => {
-                  if (resourceId) {
-                    setDraftState({ resourceId, content: value ?? "" })
-                  }
-                }}
-                loading={
-                  <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="size-4 animate-spin" />
-                    Loading content
-                  </div>
-                }
-                options={{
-                  readOnly: !editMode || !canEdit || isSaving,
-                  minimap: { enabled: true },
-                  fontSize: 13,
-                  lineNumbersMinChars: 3,
-                  scrollBeyondLastLine: false,
-                  automaticLayout: true,
-                  wordWrap: "on",
-                  renderLineHighlight: "line",
-                  quickSuggestions: {
-                    other: true,
-                    comments: false,
-                    strings: false,
-                  },
-                  suggestOnTriggerCharacters: true,
-                  tabCompletion: "on",
-                  parameterHints: { enabled: true, cycle: true },
-                  hover: { enabled: true },
-                }}
-                theme="vs"
-              />
+              {!error && (!loading || content) && (
+                <div className="min-h-0">
+                  {imagePreviewSrc ? (
+                    <div className="flex h-full min-h-0 items-center justify-center bg-muted/30 p-6">
+                      <div className="flex max-h-full max-w-full flex-col items-center gap-3">
+                        <img
+                          src={imagePreviewSrc}
+                          alt={content?.name ?? "Web resource image"}
+                          className="max-h-[calc(100vh-14rem)] max-w-full border bg-background object-contain"
+                        />
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <ImageIcon className="size-3.5" />
+                          Preview only. Use Bind and Publish to replace binary
+                          image content.
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <Editor
+                      beforeMount={configureWebResourceIntellisense}
+                      height="100%"
+                      language={editorLanguage}
+                      path={editorPath}
+                      value={draftContent}
+                      onChange={(value) => {
+                        if (resourceId) {
+                          setDraftState({ resourceId, content: value ?? "" })
+                        }
+                      }}
+                      loading={
+                        <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                          <Loader2 className="size-4 animate-spin" />
+                          Loading content
+                        </div>
+                      }
+                      options={{
+                        readOnly: !editMode || !canEdit || isSaving,
+                        minimap: { enabled: true },
+                        fontSize: 13,
+                        lineNumbersMinChars: 3,
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                        wordWrap: "on",
+                        renderLineHighlight: "line",
+                        quickSuggestions: {
+                          other: true,
+                          comments: false,
+                          strings: false,
+                        },
+                        suggestOnTriggerCharacters: true,
+                        tabCompletion: "on",
+                        parameterHints: { enabled: true, cycle: true },
+                        hover: { enabled: true },
+                      }}
+                      theme="vs"
+                    />
+                  )}
             </div>
           )}
         </div>

@@ -211,11 +211,29 @@ export async function getWebResourceContent(
     "@/modules/webresource-management/mock-data"
   )
   const resource = mockWebResources.find((item) => item.id === webResourceId)
+  if (resource?.type === "image" && resource.name.endsWith(".png")) {
+    return {
+      id: webResourceId,
+      name: resource.name,
+      type: resource.type,
+      language: "binary",
+      content:
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      contentEncoding: "base64",
+      mimeType: "image/png",
+    } satisfies WebResourceContent
+  }
+
   return {
     id: webResourceId,
     name: resource?.name ?? "new_/scripts/account-form.js",
     type: resource?.type ?? "js",
-    language: resource?.type === "css" ? "css" : resource?.type === "html" ? "html" : "javascript",
+    language:
+      resource?.type === "css"
+        ? "css"
+        : resource?.type === "html"
+          ? "html"
+          : "javascript",
     content: `function onLoad(executionContext) {
   const formContext = executionContext.getFormContext();
   const accountName = formContext.getAttribute("name")?.getValue();
@@ -224,6 +242,8 @@ export async function getWebResourceContent(
     console.log("Account loaded", accountName);
   }
 }`,
+    contentEncoding: "text",
+    mimeType: "application/javascript",
   } satisfies WebResourceContent
 }
 

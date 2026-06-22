@@ -41,4 +41,12 @@ export const mockWebResources: WebResource[] = [
     isManaged: true,
     solution: "MicrosoftDynamics",
   },
+  {
+    id: "3f3c9f6a-1111-4d58-b77d-100000000006",
+    name: "new_/images/logo.png",
+    type: "image",
+    version: "1.0.0",
+    isManaged: false,
+    solution: "PortalUi",
+  },
 ]
