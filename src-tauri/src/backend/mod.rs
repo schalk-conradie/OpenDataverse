@@ -854,6 +854,8 @@ pub(crate) fn run() {
             plugins::export_plugin_registration,
             ai::list_ai_chat_threads,
             ai::load_ai_chat_thread,
+            ai::rename_ai_chat_thread,
+            ai::delete_ai_chat_thread,
             ai::start_ai_chat_thread,
             ai::prepare_ai_chat_attachments,
             ai::save_pasted_ai_chat_image,

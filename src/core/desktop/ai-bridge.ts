@@ -148,6 +148,61 @@ export async function loadAiChatThread(input: {
   return thread
 }
 
+export async function renameAiChatThread(input: {
+  environmentId: string
+  threadId: string
+  title: string
+}) {
+  if (isTauriRuntime()) {
+    return invoke<AiChatThreadSummary>("rename_ai_chat_thread", {
+      environmentId: input.environmentId,
+      threadId: input.threadId,
+      title: input.title,
+    })
+  }
+
+  const title = input.title.trim()
+  if (!title) {
+    throw new Error("Chat title is required.")
+  }
+
+  const thread = browserThreads.get(input.threadId)
+  if (!thread || thread.environmentId !== input.environmentId) {
+    throw new Error("Saved AI chat was not found.")
+  }
+
+  const updated = {
+    ...thread,
+    title,
+  }
+  browserThreads.set(updated.id, updated)
+  const summary = summarizeThread(updated)
+  if (!summary) {
+    throw new Error("Saved AI chat was not found.")
+  }
+
+  return summary
+}
+
+export async function deleteAiChatThread(input: {
+  environmentId: string
+  threadId: string
+}) {
+  if (isTauriRuntime()) {
+    return invoke<void>("delete_ai_chat_thread", {
+      environmentId: input.environmentId,
+      threadId: input.threadId,
+    })
+  }
+
+  const thread = browserThreads.get(input.threadId)
+  if (!thread || thread.environmentId !== input.environmentId) {
+    throw new Error("Saved AI chat was not found.")
+  }
+
+  browserThreads.delete(input.threadId)
+}
+
 export async function startAiChatThread(input: AiChatThreadInput) {
   if (isTauriRuntime()) {
     return invoke<AiChatThread>("start_ai_chat_thread", {

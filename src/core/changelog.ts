@@ -11,6 +11,15 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.44",
+    date: "2026-06-22",
+    title: "AI chat history management",
+    changes: [
+      "Added right-click rename actions for saved AI Chat and AI Agent history entries.",
+      "Added hover delete controls in Saved Chats so unwanted chat history entries can be removed locally.",
+    ],
+  },
+  {
     version: "0.1.43",
     date: "2026-06-19",
     title: "Experimental AI agent",
