@@ -49,6 +49,9 @@ pub(super) struct WebResourceContent {
     resource_type: String,
     language: String,
     content: String,
+    content_encoding: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mime_type: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -69,6 +72,28 @@ pub(super) fn map_resource_type(value: Option<i32>) -> String {
         _ => "xml",
     }
     .to_string()
+}
+
+fn is_binary_resource_type(value: Option<i32>) -> bool {
+    matches!(value, Some(5) | Some(6) | Some(7) | Some(10))
+}
+
+fn resource_mime_type(resource_type: Option<i32>) -> Option<String> {
+    match resource_type {
+        Some(1) => Some("text/html"),
+        Some(2) => Some("text/css"),
+        Some(3) => Some("application/javascript"),
+        Some(4) => Some("application/xml"),
+        Some(5) => Some("image/png"),
+        Some(6) => Some("image/jpeg"),
+        Some(7) => Some("image/gif"),
+        Some(9) => Some("application/xslt+xml"),
+        Some(10) => Some("image/x-icon"),
+        Some(11) => Some("image/svg+xml"),
+        Some(12) => Some("application/xml"),
+        _ => None,
+    }
+    .map(str::to_string)
 }
 
 pub(super) fn resource_type_code(value: &str) -> Result<i32, String> {
@@ -104,6 +129,8 @@ pub(super) fn map_resource_language(resource_type: Option<i32>, name: &str) -> S
             }
         }
         Some(4) => "xml",
+        Some(5) | Some(6) | Some(7) | Some(10) => "binary",
+        Some(9) => "xml",
         Some(11) => "xml",
         Some(12) => "xml",
         _ if lower_name.ends_with(".json") => "json",
@@ -114,15 +141,66 @@ pub(super) fn map_resource_language(resource_type: Option<i32>, name: &str) -> S
     }
     .to_string()
 }
+
+fn web_resource_type_filter() -> String {
+    [
+        "webresourcetype eq 1",
+        "webresourcetype eq 2",
+        "webresourcetype eq 3",
+        "webresourcetype eq 4",
+        "webresourcetype eq 5",
+        "webresourcetype eq 6",
+        "webresourcetype eq 7",
+        "webresourcetype eq 9",
+        "webresourcetype eq 10",
+        "webresourcetype eq 11",
+        "webresourcetype eq 12",
+    ]
+    .join(" or ")
+}
+
+fn web_resource_content_from_api(
+    resource: WebResourceContentApiItem,
+) -> Result<WebResourceContent, String> {
+    let encoded = resource.content.unwrap_or_default();
+    let content = if is_binary_resource_type(resource.web_resource_type) {
+        encoded
+    } else {
+        let bytes = if encoded.trim().is_empty() {
+            Vec::new()
+        } else {
+            BASE64
+                .decode(encoded)
+                .map_err(|error| format!("Decode web resource content: {error}"))?
+        };
+
+        String::from_utf8(bytes)
+            .map_err(|error| format!("Web resource content is not UTF-8 text: {error}"))?
+    };
+
+    Ok(WebResourceContent {
+        id: resource.id,
+        name: resource.name.clone(),
+        resource_type: map_resource_type(resource.web_resource_type),
+        language: map_resource_language(resource.web_resource_type, &resource.name),
+        content,
+        content_encoding: if is_binary_resource_type(resource.web_resource_type) {
+            "base64"
+        } else {
+            "text"
+        }
+        .to_string(),
+        mime_type: resource_mime_type(resource.web_resource_type),
+    })
+}
+
 #[tauri::command]
 pub(super) async fn list_web_resources(
     app: AppHandle,
     environment: DataverseEnvironment,
     include_managed: bool,
 ) -> Result<Vec<WebResource>, String> {
-    let mut filter =
-    "(webresourcetype eq 1 or webresourcetype eq 2 or webresourcetype eq 3 or webresourcetype eq 4 or webresourcetype eq 11 or webresourcetype eq 12)"
-      .to_string();
+    let mut filter = format!("({})", web_resource_type_filter());
     if !include_managed {
         filter.push_str(" and ismanaged eq false");
     }
@@ -178,24 +256,60 @@ pub(super) async fn get_web_resource_content(
 
     let resource: WebResourceContentApiItem = serde_json::from_str(&body)
         .map_err(|error| format!("Parse web resource content response: {error}"))?;
-    let encoded = resource.content.unwrap_or_default();
-    let bytes = if encoded.trim().is_empty() {
-        Vec::new()
-    } else {
-        BASE64
-            .decode(encoded)
-            .map_err(|error| format!("Decode web resource content: {error}"))?
-    };
-    let content = String::from_utf8(bytes)
-        .map_err(|error| format!("Web resource content is not UTF-8 text: {error}"))?;
+    web_resource_content_from_api(resource)
+}
 
-    Ok(WebResourceContent {
-        id: resource.id,
-        name: resource.name.clone(),
-        resource_type: map_resource_type(resource.web_resource_type),
-        language: map_resource_language(resource.web_resource_type, &resource.name),
-        content,
-    })
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn web_resource_list_filter_includes_raster_images() {
+        let filter = web_resource_type_filter();
+
+        for type_code in [5, 6, 7, 10] {
+            assert!(
+                filter.contains(&format!("webresourcetype eq {type_code}")),
+                "filter should include web resource type {type_code}"
+            );
+        }
+    }
+
+    #[test]
+    fn png_content_is_returned_as_base64_without_utf8_decoding() {
+        let png_bytes = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+        let encoded = BASE64.encode(png_bytes);
+        let content = web_resource_content_from_api(WebResourceContentApiItem {
+            id: "image-id".to_string(),
+            name: "new_/images/logo.png".to_string(),
+            web_resource_type: Some(5),
+            content: Some(encoded.clone()),
+        })
+        .expect("png content should not be decoded as UTF-8");
+
+        assert_eq!(content.resource_type, "image");
+        assert_eq!(content.language, "binary");
+        assert_eq!(content.content_encoding, "base64");
+        assert_eq!(content.mime_type.as_deref(), Some("image/png"));
+        assert_eq!(content.content, encoded);
+    }
+
+    #[test]
+    fn javascript_content_is_returned_as_text() {
+        let source = "function onLoad() { return true; }";
+        let content = web_resource_content_from_api(WebResourceContentApiItem {
+            id: "script-id".to_string(),
+            name: "new_/scripts/account.js".to_string(),
+            web_resource_type: Some(3),
+            content: Some(BASE64.encode(source.as_bytes())),
+        })
+        .expect("javascript content should decode as UTF-8");
+
+        assert_eq!(content.resource_type, "js");
+        assert_eq!(content.language, "javascript");
+        assert_eq!(content.content_encoding, "text");
+        assert_eq!(content.content, source);
+    }
 }
 
 pub(super) async fn patch_web_resource_content(

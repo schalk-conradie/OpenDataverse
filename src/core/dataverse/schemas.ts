@@ -91,6 +91,8 @@ export type WebResourceContent = {
   type: WebResource["type"]
   language: string
   content: string
+  contentEncoding: "text" | "base64"
+  mimeType?: string
 }
 
 export type FetchXmlEntitySummary = {
