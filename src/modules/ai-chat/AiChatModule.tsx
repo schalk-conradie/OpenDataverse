@@ -22,10 +22,12 @@ import remarkGfm from "remark-gfm"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
+  deleteAiChatThread,
   listAiChatThreads,
   loadAiChatThread,
   listenToAiChatEvents,
   prepareAiChatAttachments,
+  renameAiChatThread,
   savePastedAiChatImage,
   startAiChatThread,
   sendAiChatMessage,
@@ -44,6 +46,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -776,6 +792,10 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [chatHistory, setChatHistory] = useState<AiChatThreadSummary[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyMenuOpen, setHistoryMenuOpen] = useState(false)
+  const [renameTarget, setRenameTarget] =
+    useState<AiChatThreadSummary | null>(null)
+  const [renameTitle, setRenameTitle] = useState("")
   const messages = thread?.messages ?? []
   const lastTool = thread?.messages ? getLastTool(thread.messages) : undefined
   const hasPendingAttachments = Boolean(pendingAttachments?.attachments.length)
@@ -1012,7 +1032,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
   }
 
   async function loadSavedChat(summary: AiChatThreadSummary) {
-    if (!environment || running) {
+    if (!environment || running || summary.id === thread?.id) {
       return
     }
 
@@ -1038,6 +1058,106 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Could not load AI chat"
+      setLastMessage(message)
+      persistAiState({ error: message })
+    }
+  }
+
+  function startRenameChat(summary: AiChatThreadSummary) {
+    if (running) {
+      return
+    }
+
+    setRenameTarget(summary)
+    setRenameTitle(summary.title)
+  }
+
+  async function submitRenameChat(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!environment || !renameTarget || running) {
+      return
+    }
+
+    const title = renameTitle.trim()
+    if (!title) {
+      const message = "Chat title is required."
+      setLastMessage(message)
+      persistAiState({ error: message })
+      return
+    }
+
+    try {
+      const updated = await renameAiChatThread({
+        environmentId: environment.id,
+        threadId: renameTarget.id,
+        title,
+      })
+      setChatHistory((summaries) =>
+        summaries.map((summary) =>
+          summary.id === updated.id ? updated : summary,
+        ),
+      )
+
+      const current = getStoredAiChatState(window.id)
+      if (current.thread?.id === updated.id) {
+        persistAiState({
+          thread: {
+            ...current.thread,
+            title: updated.title,
+          },
+          error: undefined,
+        })
+      } else {
+        persistAiState({ error: undefined })
+      }
+
+      setRenameTarget(null)
+      setRenameTitle("")
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not rename AI chat"
+      setLastMessage(message)
+      persistAiState({ error: message })
+    }
+  }
+
+  async function deleteSavedChat(
+    summary: AiChatThreadSummary,
+    keepHistoryMenuOpen = false,
+  ) {
+    if (!environment || running) {
+      return
+    }
+
+    try {
+      await deleteAiChatThread({
+        environmentId: environment.id,
+        threadId: summary.id,
+      })
+      setChatHistory((summaries) =>
+        summaries.filter((item) => item.id !== summary.id),
+      )
+
+      const current = getStoredAiChatState(window.id)
+      if (current.thread?.id === summary.id) {
+        persistAiState({
+          thread: undefined,
+          composerValue: "",
+          pendingAttachments: undefined,
+          running: false,
+          error: undefined,
+        })
+      } else {
+        persistAiState({ error: undefined })
+      }
+
+      if (keepHistoryMenuOpen) {
+        setHistoryMenuOpen(true)
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not delete AI chat"
       setLastMessage(message)
       persistAiState({ error: message })
     }
@@ -1231,7 +1351,13 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <DropdownMenu
-            onOpenChange={(open) => open && void refreshChatHistory()}
+            open={historyMenuOpen}
+            onOpenChange={(open) => {
+              setHistoryMenuOpen(open)
+              if (open) {
+                void refreshChatHistory()
+              }
+            }}
           >
             <DropdownMenuTrigger asChild>
               <Button
@@ -1254,27 +1380,113 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
                 <DropdownMenuItem disabled>No saved chats</DropdownMenuItem>
               ) : (
                 scopedChatHistory.map((summary) => (
-                  <DropdownMenuItem
-                    key={summary.id}
-                    className="items-start"
-                    onSelect={() => void loadSavedChat(summary)}
-                    disabled={summary.id === thread?.id}
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate font-medium">
-                        {summary.title}
-                      </div>
-                      <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-muted-foreground">
-                        <span className="capitalize">{summary.provider}</span>
-                        <span>{summary.messageCount} messages</span>
-                        <span>{formatChatTimestamp(summary.updatedAt)}</span>
-                      </div>
-                    </div>
-                  </DropdownMenuItem>
+                  <ContextMenu key={summary.id}>
+                    <ContextMenuTrigger asChild>
+                      <DropdownMenuItem
+                        className="group/chat-history-row items-start pr-1"
+                        onSelect={(event) => {
+                          const target = event.target as HTMLElement
+                          if (target.closest("[data-chat-history-delete]")) {
+                            event.preventDefault()
+                            return
+                          }
+
+                          void loadSavedChat(summary)
+                        }}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-medium">
+                            {summary.title}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-muted-foreground">
+                            <span className="capitalize">
+                              {summary.provider}
+                            </span>
+                            <span>{summary.messageCount} messages</span>
+                            <span>{formatChatTimestamp(summary.updatedAt)}</span>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          data-chat-history-delete
+                          className="ml-2 flex size-6 shrink-0 items-center justify-center opacity-0 outline-none transition hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring group-hover/chat-history-row:opacity-100"
+                          aria-label={`Delete ${summary.title}`}
+                          disabled={running}
+                          onPointerDown={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                          }}
+                          onClick={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            void deleteSavedChat(summary, true)
+                          }}
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      </DropdownMenuItem>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent>
+                      <ContextMenuItem
+                        onSelect={() => startRenameChat(summary)}
+                        disabled={running}
+                      >
+                        Rename
+                      </ContextMenuItem>
+                      <ContextMenuItem
+                        variant="destructive"
+                        onSelect={() => void deleteSavedChat(summary)}
+                        disabled={running}
+                      >
+                        Delete
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
                 ))
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          <Dialog
+            open={Boolean(renameTarget)}
+            onOpenChange={(open) => {
+              if (!open) {
+                setRenameTarget(null)
+                setRenameTitle("")
+              }
+            }}
+          >
+            <DialogContent>
+              <form className="space-y-4" onSubmit={submitRenameChat}>
+                <DialogHeader>
+                  <DialogTitle>Rename Chat</DialogTitle>
+                </DialogHeader>
+                <Input
+                  autoFocus
+                  value={renameTitle}
+                  maxLength={123}
+                  onChange={(event) => setRenameTitle(event.target.value)}
+                />
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setRenameTarget(null)
+                      setRenameTitle("")
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={running || renameTitle.trim().length === 0}
+                  >
+                    Rename
+                  </Button>
+                </DialogFooter>
+              </form>
+            </DialogContent>
+          </Dialog>
           <Button
             variant="outline"
             size="icon-sm"

@@ -391,6 +391,26 @@ pub(super) fn ai_chat_title_from_message(message: &str) -> String {
     title
 }
 
+pub(super) fn normalize_manual_ai_chat_title(title: &str) -> Result<String, String> {
+    let normalized = title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string();
+
+    if normalized.is_empty() {
+        return Err("Chat title is required.".to_string());
+    }
+
+    let mut title = normalized.chars().take(120).collect::<String>();
+    if normalized.chars().count() > 120 {
+        title.push_str("...");
+    }
+
+    Ok(title)
+}
+
 pub(super) fn maybe_update_ai_chat_title(thread: &mut AiChatThread, message: &str) {
     if thread.messages.is_empty() || thread.title == "Dataverse Chat" {
         thread.title = ai_chat_title_from_message(message);
@@ -2389,6 +2409,54 @@ pub(super) fn load_ai_chat_thread(
         .insert(thread.id.clone(), thread.clone());
 
     Ok(thread)
+}
+
+#[tauri::command]
+pub(super) fn rename_ai_chat_thread(
+    app: AppHandle,
+    state: State<'_, AiChatState>,
+    environment_id: String,
+    thread_id: String,
+    title: String,
+) -> Result<AiChatThreadSummary, String> {
+    let mut thread = load_ai_chat_thread_from_disk(&app, &environment_id, &thread_id)?
+        .ok_or_else(|| "Saved AI chat was not found.".to_string())?;
+    thread.title = normalize_manual_ai_chat_title(&title)?;
+    save_ai_chat_thread(&app, &thread)?;
+
+    state
+        .threads
+        .lock()
+        .map_err(|error| error.to_string())?
+        .insert(thread.id.clone(), thread.clone());
+
+    summarize_ai_chat_thread(&thread).ok_or_else(|| "Saved AI chat was not found.".to_string())
+}
+
+#[tauri::command]
+pub(super) fn delete_ai_chat_thread(
+    app: AppHandle,
+    state: State<'_, AiChatState>,
+    environment_id: String,
+    thread_id: String,
+) -> Result<(), String> {
+    let thread = load_ai_chat_thread_from_disk(&app, &environment_id, &thread_id)?
+        .ok_or_else(|| "Saved AI chat was not found.".to_string())?;
+    let path = ai_chat_thread_path(&app, &environment_id, &thread_id)?;
+
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.to_string()),
+    }
+
+    state
+        .threads
+        .lock()
+        .map_err(|error| error.to_string())?
+        .remove(&thread.id);
+
+    Ok(())
 }
 
 #[tauri::command]
