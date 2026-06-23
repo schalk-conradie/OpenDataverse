@@ -6,7 +6,6 @@ import {
   type ReactNode,
 } from "react"
 import {
-  DatabaseZap,
   Download,
   Loader2,
   Pencil,
@@ -825,8 +824,13 @@ function App() {
       <main className="grid h-screen min-h-0 grid-cols-[260px_minmax(0,1fr)] bg-background text-sm text-foreground">
         <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar">
           <header className="flex h-14 items-center gap-3 border-b border-sidebar-border px-4">
-            <div className="flex size-8 items-center justify-center rounded-lg border border-border bg-background shadow-sm">
-              <DatabaseZap className="size-4 text-primary" />
+            <div className="flex size-8 items-center justify-center overflow-hidden rounded-lg shadow-sm ring-1 ring-border/70">
+              <img
+                src="/opendataverse-icon.png"
+                alt=""
+                className="size-full"
+                aria-hidden="true"
+              />
             </div>
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
@@ -1071,8 +1075,13 @@ function App() {
 
             {loadState !== "loading" && !activeWindow && (
               <div className="flex h-full flex-col items-center justify-center gap-4 bg-background text-sm text-muted-foreground">
-                <div className="flex size-12 items-center justify-center rounded-2xl border border-border bg-muted">
-                  <DatabaseZap className="size-6 text-muted-foreground" />
+                <div className="flex size-12 items-center justify-center overflow-hidden rounded-2xl shadow-sm ring-1 ring-border/70">
+                  <img
+                    src="/opendataverse-icon.png"
+                    alt=""
+                    className="size-full"
+                    aria-hidden="true"
+                  />
                 </div>
                 <div className="text-center">
                   <p className="font-medium text-foreground">No tool open</p>

@@ -11,6 +11,15 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.50",
+    date: "2026-06-23",
+    title: "Application icon refresh",
+    changes: [
+      "Replaced the app icon set with a rounded OpenDataverse brand mark that fits native dock and launcher surfaces.",
+      "Updated the in-app header, empty state, and browser-preview favicon to use the same OpenDataverse icon.",
+    ],
+  },
+  {
     version: "0.1.49",
     date: "2026-06-24",
     title: "Visual refresh across modules",
