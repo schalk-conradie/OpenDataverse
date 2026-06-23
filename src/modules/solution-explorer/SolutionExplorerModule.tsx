@@ -194,8 +194,8 @@ function DetailRow({
   value?: string | number | boolean
 }) {
   return (
-    <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 border-b py-2 last:border-b-0">
-      <dt className="text-muted-foreground">{label}</dt>
+    <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 border-b py-2.5 last:border-b-0">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="min-w-0 break-words font-mono text-[11px] text-foreground">
         {value === undefined || value === "" ? "Unknown" : String(value)}
       </dd>
@@ -216,43 +216,48 @@ function DependencyTable({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <h3 className="text-xs font-medium">{title}</h3>
-        <Badge variant="outline">{items.length}</Badge>
+        <Badge variant="outline" className="text-[11px] font-normal">{items.length}</Badge>
       </div>
       {items.length === 0 ? (
-        <p className="border py-4 text-center text-muted-foreground">{empty}</p>
+        <div className="flex flex-col items-center justify-center gap-2 rounded-lg border py-5 text-xs text-muted-foreground">
+          <Network className="size-4 text-muted-foreground/50" />
+          {empty}
+        </div>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Dependent</TableHead>
-              <TableHead>Required</TableHead>
-              <TableHead>Type</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell>
-                  <div className="font-medium">
-                    {item.dependentComponentTypeLabel}
-                  </div>
-                  <div className="font-mono text-[10px] text-muted-foreground">
-                    {item.dependentComponentObjectId}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="font-medium">
-                    {item.requiredComponentTypeLabel}
-                  </div>
-                  <div className="font-mono text-[10px] text-muted-foreground">
-                    {item.requiredComponentObjectId}
-                  </div>
-                </TableCell>
-                <TableCell>{item.dependencyTypeLabel}</TableCell>
+        <div className="overflow-hidden rounded-lg border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Dependent</TableHead>
+                <TableHead>Required</TableHead>
+                <TableHead>Type</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {items.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell>
+                    <div className="font-medium">
+                      {item.dependentComponentTypeLabel}
+                    </div>
+                    <div className="font-mono text-[10px] text-muted-foreground">
+                      {item.dependentComponentObjectId}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="font-medium">
+                      {item.requiredComponentTypeLabel}
+                    </div>
+                    <div className="font-mono text-[10px] text-muted-foreground">
+                      {item.requiredComponentObjectId}
+                    </div>
+                  </TableCell>
+                  <TableCell>{item.dependencyTypeLabel}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
     </div>
   )
@@ -261,38 +266,41 @@ function DependencyTable({
 function LayersTable({ layers }: { layers: SolutionLayer[] }) {
   if (layers.length === 0) {
     return (
-      <p className="border py-4 text-center text-muted-foreground">
+      <div className="flex flex-col items-center justify-center gap-2 rounded-lg border py-5 text-xs text-muted-foreground">
+        <Layers className="size-4 text-muted-foreground/50" />
         No layers returned for this component.
-      </p>
+      </div>
     )
   }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Order</TableHead>
-          <TableHead>Solution</TableHead>
-          <TableHead>Publisher</TableHead>
-          <TableHead>Changed</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {layers.map((layer) => (
-          <TableRow key={layer.id}>
-            <TableCell>{layer.order ?? "-"}</TableCell>
-            <TableCell>
-              <div className="font-medium">
-                {layer.solutionName ?? layer.name}
-              </div>
-              <div className="text-muted-foreground">{layer.componentName}</div>
-            </TableCell>
-            <TableCell>{layer.publisherName ?? "Unknown"}</TableCell>
-            <TableCell>{formatDate(layer.overwriteTime)}</TableCell>
+    <div className="overflow-hidden rounded-lg border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Order</TableHead>
+            <TableHead>Solution</TableHead>
+            <TableHead>Publisher</TableHead>
+            <TableHead>Changed</TableHead>
           </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+        </TableHeader>
+        <TableBody>
+          {layers.map((layer) => (
+            <TableRow key={layer.id}>
+              <TableCell>{layer.order ?? "-"}</TableCell>
+              <TableCell>
+                <div className="font-medium">
+                  {layer.solutionName ?? layer.name}
+                </div>
+                <div className="text-muted-foreground">{layer.componentName}</div>
+              </TableCell>
+              <TableCell>{layer.publisherName ?? "Unknown"}</TableCell>
+              <TableCell>{formatDate(layer.overwriteTime)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   )
 }
 
@@ -389,14 +397,15 @@ function AddExistingWebResourceDialog({
             />
           </div>
 
-          <ScrollArea className="h-72 border">
+          <ScrollArea className="h-72 rounded-lg border">
             {candidatesQuery.isLoading ? (
               <div className="flex h-40 items-center justify-center gap-2 text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 Loading
               </div>
             ) : filteredCandidates.length === 0 ? (
-              <div className="flex h-40 items-center justify-center text-muted-foreground">
+              <div className="flex h-40 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+                <FileCode2 className="size-5 text-muted-foreground/50" />
                 No available web resources.
               </div>
             ) : (
@@ -406,7 +415,7 @@ function AddExistingWebResourceDialog({
                     key={candidate.id}
                     type="button"
                     className={cn(
-                      "grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-2 text-left hover:bg-muted/60",
+                      "grid w-full grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted/60",
                       selectedId === candidate.id && "bg-muted",
                     )}
                     onClick={() => setSelectedId(candidate.id)}
@@ -420,8 +429,10 @@ function AddExistingWebResourceDialog({
                       </span>
                     </span>
                     <span className="flex items-center gap-2">
-                      <Badge variant="outline">{candidate.type}</Badge>
-                      {selectedId === candidate.id && <Check className="size-4" />}
+                      <Badge variant="outline" className="text-[11px] font-normal">
+                        {candidate.type}
+                      </Badge>
+                      {selectedId === candidate.id && <Check className="size-4 text-primary" />}
                     </span>
                   </button>
                 ))}
@@ -587,15 +598,25 @@ function CreateWebResourceDialog({
             <Label htmlFor="web-resource-content">Content</Label>
             <textarea
               id="web-resource-content"
-              className="h-48 w-full resize-none border border-input bg-transparent px-2.5 py-2 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50"
+              className="h-48 w-full resize-none rounded-lg border border-input bg-transparent px-3 py-2.5 font-mono text-xs leading-relaxed outline-none transition-colors focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50"
               value={form.content}
               onChange={(event) => updateField("content", event.target.value)}
               spellCheck={false}
             />
           </div>
 
-          <DialogFooter>
-            <Button type="submit" disabled={mutation.isPending || !form.name.trim()}>
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleOpenChange(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              disabled={mutation.isPending || !form.name.trim()}
+            >
               {mutation.isPending ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
@@ -736,7 +757,7 @@ function ImportWebResourcesDialog({
 
           <div className="space-y-1">
             <Label>Source</Label>
-            <div className="truncate border bg-muted px-3 py-2 font-mono text-xs text-muted-foreground">
+            <div className="truncate rounded-lg border bg-muted/50 px-3 py-2 font-mono text-xs text-muted-foreground">
               {formatSelectedSource(form.sourcePaths)}
             </div>
           </div>
@@ -761,7 +782,7 @@ function ImportWebResourcesDialog({
             />
           </div>
 
-          <DialogFooter>
+          <DialogFooter className="gap-2">
             <Button
               type="button"
               variant="outline"
@@ -925,16 +946,18 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
 
   return (
     <section className="grid h-full min-h-0 grid-cols-1 border-l bg-background xl:grid-cols-[18rem_minmax(34rem,1fr)_26rem]">
-      <aside className="min-h-0 border-r">
-        <div className="space-y-3 border-b p-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <FileCode2 className="size-4 text-muted-foreground" />
-              <h2 className="text-sm font-medium">Solutions</h2>
+      <aside className="min-h-0 border-r bg-muted/20">
+        <div className="space-y-3 border-b bg-background p-3">
+          <div className="flex items-center gap-2">
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-muted/50">
+              <FileCode2 className="size-4 text-primary" />
             </div>
-            <p className="mt-1 truncate text-xs text-muted-foreground">
-              {environment.name}
-            </p>
+            <div>
+              <h2 className="text-sm font-medium">Solutions</h2>
+              <p className="truncate text-[11px] text-muted-foreground">
+                {environment.name}
+              </p>
+            </div>
           </div>
 
           <div className="relative">
@@ -977,23 +1000,24 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
 
         <ScrollArea className="h-[calc(100%-9.75rem)]">
           {solutionsQuery.isLoading ? (
-            <div className="flex h-40 items-center justify-center gap-2 text-muted-foreground">
+            <div className="flex h-40 items-center justify-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
-              Loading
+              Loading solutions
             </div>
           ) : filteredSolutions.length === 0 ? (
-            <div className="p-4 text-center text-xs text-muted-foreground">
+            <div className="flex h-40 flex-col items-center justify-center gap-2 p-4 text-center text-xs text-muted-foreground">
+              <FileCode2 className="size-5 text-muted-foreground/50" />
               No solutions found.
             </div>
           ) : (
-            <div className="divide-y">
+            <div className="divide-y divide-border">
               {filteredSolutions.map((solution) => (
                 <button
                   key={solution.id}
                   type="button"
                   className={cn(
-                    "w-full px-3 py-3 text-left hover:bg-muted/60",
-                    solution.id === effectiveSelectedSolutionId && "bg-muted",
+                    "w-full px-3 py-3 text-left transition-colors hover:bg-muted/60",
+                    solution.id === effectiveSelectedSolutionId && "bg-background",
                   )}
                   onClick={() => {
                     setSelectedSolutionId(solution.id)
@@ -1004,7 +1028,10 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
                     <span className="min-w-0 truncate font-medium">
                       {solution.friendlyName}
                     </span>
-                    <Badge variant={solution.isManaged ? "secondary" : "outline"}>
+                    <Badge
+                      variant={solution.isManaged ? "secondary" : "outline"}
+                      className="text-[11px] font-normal"
+                    >
                       {solution.isManaged ? "Managed" : "Unmanaged"}
                     </Badge>
                   </div>
@@ -1028,7 +1055,7 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
         </ScrollArea>
       </aside>
 
-      <main className="min-h-0 border-r">
+      <main className="min-h-0 border-r bg-background">
         <div className="space-y-3 border-b p-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
@@ -1037,7 +1064,10 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
                   {selectedSolution?.friendlyName ?? "No solution"}
                 </h2>
                 {selectedSolution && (
-                  <Badge variant={selectedSolution.isManaged ? "secondary" : "outline"}>
+                  <Badge
+                    variant={selectedSolution.isManaged ? "secondary" : "outline"}
+                    className="text-[11px] font-normal"
+                  >
                     {selectedSolution.isManaged ? "Managed" : "Unmanaged"}
                   </Badge>
                 )}
@@ -1109,83 +1139,93 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
 
         <ScrollArea className="h-[calc(100%-8.75rem)]">
           {componentsQuery.isLoading ? (
-            <div className="flex h-64 items-center justify-center gap-2 text-muted-foreground">
+            <div className="flex h-64 items-center justify-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
-              Loading
+              Loading components
             </div>
           ) : !selectedSolution ? (
-            <div className="flex h-64 items-center justify-center text-muted-foreground">
-              Select a solution.
+            <div className="flex h-64 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+              <Layers className="size-5 text-muted-foreground/50" />
+              Select a solution to view its components.
             </div>
           ) : componentGroups.length === 0 ? (
-            <div className="flex h-64 items-center justify-center text-muted-foreground">
+            <div className="flex h-64 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+              <Search className="size-5 text-muted-foreground/50" />
               No components found.
             </div>
           ) : (
-            <Table>
-              <TableHeader className="sticky top-0 z-10 bg-background">
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Managed</TableHead>
-                  <TableHead>Modified</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {componentGroups.flatMap(([group, items]) => [
-                  <TableRow key={`group-${group}`} className="bg-muted/40 hover:bg-muted/40">
-                    <TableCell colSpan={4} className="font-medium">
-                      {group} <span className="text-muted-foreground">{items.length}</span>
-                    </TableCell>
-                  </TableRow>,
-                  ...items.map((component) => (
-                    <TableRow
-                      key={component.id}
-                      data-state={
-                        component.id === effectiveSelectedComponentId
-                          ? "selected"
-                          : undefined
-                      }
-                      className="cursor-pointer"
-                      onClick={() => setSelectedComponentId(component.id)}
-                    >
-                      <TableCell>
-                        <div className="max-w-[28rem] truncate font-medium">
-                          {component.displayName}
-                        </div>
-                        <div className="max-w-[28rem] truncate font-mono text-[11px] text-muted-foreground">
-                          {component.logicalName ?? component.schemaName ?? component.objectId}
-                        </div>
-                      </TableCell>
-                      <TableCell>{component.componentTypeLabel}</TableCell>
-                      <TableCell>
-                        {component.isManaged === undefined ? (
-                          <span className="text-muted-foreground">Unknown</span>
-                        ) : component.isManaged ? (
-                          "Yes"
-                        ) : (
-                          "No"
-                        )}
-                      </TableCell>
-                      <TableCell>{formatDate(component.modifiedOn)}</TableCell>
+            <div className="p-3">
+              <div className="overflow-hidden rounded-lg border">
+                <Table>
+                  <TableHeader className="sticky top-0 z-10 bg-background">
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Managed</TableHead>
+                      <TableHead>Modified</TableHead>
                     </TableRow>
-                  )),
-                ])}
-              </TableBody>
-            </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {componentGroups.flatMap(([group, items]) => [
+                      <TableRow key={`group-${group}`} className="bg-muted/40 hover:bg-muted/40">
+                        <TableCell colSpan={4} className="font-medium">
+                          {group} <span className="text-muted-foreground">{items.length}</span>
+                        </TableCell>
+                      </TableRow>,
+                      ...items.map((component) => (
+                        <TableRow
+                          key={component.id}
+                          data-state={
+                            component.id === effectiveSelectedComponentId
+                              ? "selected"
+                              : undefined
+                          }
+                          className="cursor-pointer"
+                          onClick={() => setSelectedComponentId(component.id)}
+                        >
+                          <TableCell>
+                            <div className="max-w-[28rem] truncate font-medium">
+                              {component.displayName}
+                            </div>
+                            <div className="max-w-[28rem] truncate font-mono text-[11px] text-muted-foreground">
+                              {component.logicalName ?? component.schemaName ?? component.objectId}
+                            </div>
+                          </TableCell>
+                          <TableCell>{component.componentTypeLabel}</TableCell>
+                          <TableCell>
+                            {component.isManaged === undefined ? (
+                              <span className="text-muted-foreground">Unknown</span>
+                            ) : component.isManaged ? (
+                              "Yes"
+                            ) : (
+                              "No"
+                            )}
+                          </TableCell>
+                          <TableCell>{formatDate(component.modifiedOn)}</TableCell>
+                        </TableRow>
+                      )),
+                    ])}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
           )}
         </ScrollArea>
       </main>
 
-      <aside className="min-h-0">
-        <div className="border-b p-3">
+      <aside className="min-h-0 bg-muted/20">
+        <div className="border-b bg-background p-3">
           <div className="flex items-center gap-2">
-            <Network className="size-4 text-muted-foreground" />
-            <h2 className="text-sm font-medium">Inspector</h2>
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-muted/50">
+              <Network className="size-4 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-sm font-medium">Inspector</h2>
+              <p className="truncate text-[11px] text-muted-foreground">
+                {selectedComponent?.displayName ?? "No component selected"}
+              </p>
+            </div>
           </div>
-          <p className="mt-1 truncate text-xs text-muted-foreground">
-            {selectedComponent?.displayName ?? "No component selected"}
-          </p>
         </div>
 
         <Tabs defaultValue="details" className="h-[calc(100%-4.1rem)] gap-0">
@@ -1197,12 +1237,13 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
 
           <TabsContent value="details" className="min-h-0 p-3">
             {!selectedComponent ? (
-              <div className="flex h-64 items-center justify-center text-muted-foreground">
-                Select a component.
+              <div className="flex h-64 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+                <Network className="size-5 text-muted-foreground/50" />
+                Select a component to inspect its details.
               </div>
             ) : (
               <ScrollArea className="h-full">
-                <dl className="border">
+                <dl className="overflow-hidden rounded-lg border bg-background">
                   <DetailRow label="Name" value={selectedComponent.displayName} />
                   <DetailRow label="Type" value={selectedComponent.componentTypeLabel} />
                   <DetailRow label="Group" value={selectedComponent.group} />
@@ -1246,16 +1287,17 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
           <TabsContent value="dependencies" className="min-h-0 p-3">
             <ScrollArea className="h-full">
               {!selectedComponent ? (
-                <div className="flex h-64 items-center justify-center text-muted-foreground">
-                  Select a component.
+                <div className="flex h-64 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+                  <Network className="size-5 text-muted-foreground/50" />
+                  Select a component to view its dependencies.
                 </div>
               ) : dependenciesQuery.isLoading ? (
-                <div className="flex h-64 items-center justify-center gap-2 text-muted-foreground">
+                <div className="flex h-64 items-center justify-center gap-2 text-xs text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" />
-                  Loading
+                  Loading dependencies
                 </div>
               ) : dependenciesQuery.isError ? (
-                <div className="flex h-64 items-center justify-center gap-2 text-destructive">
+                <div className="flex h-64 items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 text-xs text-destructive">
                   <AlertTriangle className="size-4" />
                   Could not load dependencies.
                 </div>
@@ -1286,16 +1328,17 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
           <TabsContent value="layers" className="min-h-0 p-3">
             <ScrollArea className="h-full">
               {!selectedComponent ? (
-                <div className="flex h-64 items-center justify-center text-muted-foreground">
-                  Select a component.
+                <div className="flex h-64 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+                  <Layers className="size-5 text-muted-foreground/50" />
+                  Select a component to view its layers.
                 </div>
               ) : layersQuery.isLoading ? (
-                <div className="flex h-64 items-center justify-center gap-2 text-muted-foreground">
+                <div className="flex h-64 items-center justify-center gap-2 text-xs text-muted-foreground">
                   <Loader2 className="size-4 animate-spin" />
-                  Loading
+                  Loading layers
                 </div>
               ) : layersQuery.isError ? (
-                <div className="flex h-64 items-center justify-center gap-2 text-destructive">
+                <div className="flex h-64 items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 text-xs text-destructive">
                   <Layers className="size-4" />
                   Could not load layers.
                 </div>

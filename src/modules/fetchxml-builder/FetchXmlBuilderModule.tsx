@@ -740,7 +740,7 @@ function FilterGroupEditor({
   return (
     <section
       className={cn(
-        "min-w-[860px] border-l-2 border-primary/70 pl-4",
+        "min-w-[860px] rounded-lg border border-border pl-4",
         depth > 0 && "bg-muted/40 p-3",
       )}
     >

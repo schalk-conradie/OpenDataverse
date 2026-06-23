@@ -3,16 +3,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   AlertTriangle,
   Archive,
+  Boxes,
   ChevronDown,
   ChevronRight,
   Check,
   Download,
+  FileCode2,
   FileSearch,
   ImagePlus,
   Layers,
   Loader2,
   PlugZap,
-  Puzzle,
   RefreshCw,
   Search,
   Server,
@@ -496,21 +497,31 @@ function buildTreeRows(
   return rows
 }
 
+const kindConfig: Record<
+  RegistryKind,
+  { label: string; icon: React.ElementType }
+> = {
+  package: { label: "Package", icon: Boxes },
+  assembly: { label: "Assembly", icon: Archive },
+  type: { label: "Type", icon: FileCode2 },
+  step: { label: "Step", icon: PlugZap },
+  image: { label: "Image", icon: ImagePlus },
+  endpoint: { label: "Endpoint", icon: Server },
+}
+
 function kindLabel(kind: RegistryKind) {
-  switch (kind) {
-    case "package":
-      return "Packages"
-    case "assembly":
-      return "Assemblies"
-    case "type":
-      return "Types"
-    case "step":
-      return "Steps"
-    case "image":
-      return "Images"
-    case "endpoint":
-      return "Endpoints"
-  }
+  return kindConfig[kind].label
+}
+
+function KindIcon({
+  kind,
+  className,
+}: {
+  kind: RegistryKind
+  className?: string
+}) {
+  const Icon = kindConfig[kind].icon
+  return <Icon className={cn("size-4", className)} />
 }
 
 function DetailRow({
@@ -521,8 +532,8 @@ function DetailRow({
   value?: string | number | boolean
 }) {
   return (
-    <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-3 border-b py-2 last:border-b-0">
-      <dt className="text-muted-foreground">{label}</dt>
+    <div className="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 border-b py-2.5 last:border-b-0">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
       <dd className="min-w-0 break-words font-mono text-[11px] text-foreground">
         {value === undefined || value === "" ? "Unknown" : String(value)}
       </dd>
@@ -532,18 +543,34 @@ function DetailRow({
 
 function StateBadge({ item }: { item: RegistryItem }) {
   if (item.managed) {
-    return <Badge variant="secondary">Managed</Badge>
+    return (
+      <span className="inline-flex h-5 items-center gap-1.5 rounded-md border border-amber-300/70 bg-amber-50 px-2 text-[11px] font-medium text-amber-900 dark:border-amber-700/70 dark:bg-amber-950/40 dark:text-amber-200">
+        <span className="size-1.5 rounded-full bg-amber-500" />
+        Managed
+      </span>
+    )
   }
 
   if ("enabled" in item) {
     return item.enabled ? (
-      <Badge variant="outline">Enabled</Badge>
+      <span className="inline-flex h-5 items-center gap-1.5 rounded-md border border-emerald-300/70 bg-emerald-50 px-2 text-[11px] font-medium text-emerald-900 dark:border-emerald-700/70 dark:bg-emerald-950/40 dark:text-emerald-200">
+        <span className="size-1.5 rounded-full bg-emerald-500" />
+        Enabled
+      </span>
     ) : (
-      <Badge variant="secondary">Disabled</Badge>
+      <span className="inline-flex h-5 items-center gap-1.5 rounded-md border border-slate-300/70 bg-slate-50 px-2 text-[11px] font-medium text-slate-700 dark:border-slate-700/70 dark:bg-slate-950/40 dark:text-slate-300">
+        <span className="size-1.5 rounded-full bg-slate-400" />
+        Disabled
+      </span>
     )
   }
 
-  return <Badge variant="outline">Unmanaged</Badge>
+  return (
+    <span className="inline-flex h-5 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-[11px] font-medium text-muted-foreground">
+      <span className="size-1.5 rounded-full bg-primary" />
+      Unmanaged
+    </span>
+  )
 }
 
 function makeAssemblyForm(
@@ -624,9 +651,16 @@ function makeEndpointForm(
 function DependenciesPanel({ report }: { report?: PluginDependencyReport }) {
   if (!report) {
     return (
-      <p className="border py-3 text-center text-xs text-muted-foreground">
-        No dependency query loaded.
-      </p>
+      <div className="flex flex-col items-center justify-center rounded-lg border border-border bg-muted/30 px-4 py-8 text-center">
+        <div className="flex size-10 items-center justify-center rounded-xl border border-border bg-background">
+          <Layers className="size-5 text-muted-foreground" />
+        </div>
+        <p className="mt-3 text-sm font-medium">No dependency query loaded</p>
+        <p className="mt-1 max-w-[16rem] text-xs text-muted-foreground">
+          Click Dependencies on a selected component to see what blocks or
+          requires it.
+        </p>
+      </div>
     )
   }
 
@@ -638,14 +672,20 @@ function DependenciesPanel({ report }: { report?: PluginDependencyReport }) {
 
   if (rows.length === 0) {
     return (
-      <p className="border py-3 text-center text-xs text-muted-foreground">
-        No dependencies returned.
-      </p>
+      <div className="flex flex-col items-center justify-center rounded-lg border border-border bg-muted/30 px-4 py-8 text-center">
+        <div className="flex size-10 items-center justify-center rounded-xl border border-border bg-background">
+          <Check className="size-5 text-emerald-500" />
+        </div>
+        <p className="mt-3 text-sm font-medium">No dependencies</p>
+        <p className="mt-1 max-w-[16rem] text-xs text-muted-foreground">
+          Nothing is blocking or depending on this component.
+        </p>
+      </div>
     )
   }
 
   return (
-    <div className="max-h-64 overflow-auto border">
+    <div className="max-h-64 overflow-auto rounded-lg border border-border bg-background">
       <Table>
         <TableHeader>
           <TableRow>
@@ -656,7 +696,20 @@ function DependenciesPanel({ report }: { report?: PluginDependencyReport }) {
         <TableBody>
           {rows.map((item) => (
             <TableRow key={`${item.group}-${item.id}`}>
-              <TableCell>{item.group}</TableCell>
+              <TableCell>
+                <span
+                  className={cn(
+                    "inline-flex h-5 items-center rounded-md px-2 text-[11px] font-medium",
+                    item.group === "Delete blocker"
+                      ? "bg-destructive/10 text-destructive"
+                      : item.group === "Dependent"
+                        ? "bg-primary/10 text-primary"
+                        : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {item.group}
+                </span>
+              </TableCell>
               <TableCell>
                 <div className="font-medium">
                   {item.dependentComponentTypeLabel}
@@ -1194,11 +1247,14 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
   if (!environment) {
     return (
       <section className="flex h-full items-center justify-center border-l bg-background p-8 text-center">
-        <div>
-          <Puzzle className="mx-auto size-8 text-muted-foreground" />
-          <h2 className="mt-3 text-base font-medium">Plugin Registration</h2>
+        <div className="flex flex-col items-center">
+          <div className="flex size-12 items-center justify-center rounded-2xl border border-border bg-muted/60">
+            <PlugZap className="size-6 text-muted-foreground" />
+          </div>
+          <h2 className="mt-4 text-base font-medium">Plugin Registration</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Select an environment.
+            Select an environment to manage plug-in assemblies, steps, images,
+            and service endpoints.
           </p>
         </div>
       </section>
@@ -1208,11 +1264,16 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
   return (
     <section className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] border-l bg-background">
       <header className="flex min-w-0 items-center justify-between gap-3 border-b px-4 py-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold">Plugin Registration</h2>
-          <p className="truncate text-xs text-muted-foreground">
-            {environment.name} · unmanaged assemblies, steps, images, endpoints
-          </p>
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex size-9 items-center justify-center rounded-lg border border-border bg-muted/60">
+            <PlugZap className="size-5 text-primary" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="truncate text-base font-semibold">Plugin Registration</h2>
+            <p className="truncate text-xs text-muted-foreground">
+              {environment.name} · assemblies, steps, images, endpoints
+            </p>
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Button
@@ -1254,7 +1315,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
       </header>
 
       {(snapshotQuery.isLoading || snapshotQuery.isError || snapshot.warnings.length > 0) && (
-        <div className="border-b px-4 py-2">
+        <div className="space-y-2 border-b px-4 py-3">
           {snapshotQuery.isLoading && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" />
@@ -1262,7 +1323,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
             </div>
           )}
           {snapshotQuery.isError && (
-            <div className="flex gap-2 border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            <div className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
               <span>
                 {snapshotQuery.error instanceof Error
@@ -1272,7 +1333,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
             </div>
           )}
           {snapshot.warnings.length > 0 && (
-            <div className="grid gap-1 border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+            <div className="grid gap-1 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/70 dark:bg-amber-950/40 dark:text-amber-200">
               {snapshot.warnings.map((warning) => (
                 <div key={warning} className="flex gap-2">
                   <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
@@ -1290,7 +1351,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
             <div className="relative">
               <Search className="pointer-events-none absolute top-2 left-2 size-4 text-muted-foreground" />
               <Input
-                className="pl-8"
+                className="h-8 pl-8 text-xs"
                 placeholder="Search loaded nodes"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -1302,7 +1363,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
                 setKindFilter(value as RegistryKind | "all")
               }
             >
-              <SelectTrigger className="w-full bg-background">
+              <SelectTrigger className="h-8 w-full bg-background text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1327,15 +1388,15 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
           </div>
 
           <ScrollArea className="min-h-0">
-            <div className="grid gap-0.5 p-2" role="tree">
+            <div className="grid gap-1 p-2" role="tree">
               {visibleTreeRows.map((row) => (
                 <div
                   key={row.key}
                   className={cn(
-                    "flex min-w-0 items-stretch border border-transparent",
+                    "flex min-w-0 items-stretch rounded-md border border-transparent transition-colors",
                     selectedItem?.id === row.item.id &&
                       selectedItem.kind === row.item.kind &&
-                      "border-border bg-muted",
+                      "border-border bg-primary/5",
                   )}
                   role="treeitem"
                   aria-expanded={row.expandable ? row.expanded : undefined}
@@ -1344,7 +1405,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
                 >
                   <button
                     type="button"
-                    className="flex size-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
                     onClick={() => toggleTreeNode(row)}
                     disabled={!row.expandable}
                     aria-label={`${row.expanded ? "Collapse" : "Expand"} ${row.item.title}`}
@@ -1364,31 +1425,40 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
                   </button>
                   <button
                     type="button"
-                    className="min-w-0 flex-1 px-2 py-2 text-left hover:bg-muted/60"
+                    className="min-w-0 flex-1 rounded-md px-2 py-1.5 text-left hover:bg-muted/60"
                     onClick={() => {
                       setSelected({ kind: row.item.kind, id: row.item.id })
                       setDependencyReport(undefined)
                     }}
                   >
                     <div className="flex min-w-0 items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate font-medium">
+                      <KindIcon kind={row.item.kind} className="text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium">
                         {row.item.title}
                       </span>
                       <StateBadge item={row.item} />
                     </div>
-                    <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                    <div className="mt-0.5 flex min-w-0 items-center gap-2 pl-6 text-xs text-muted-foreground">
                       <span className="shrink-0">{kindLabel(row.item.kind)}</span>
                       <span className="min-w-0 truncate">{row.item.subtitle}</span>
                       {row.childCount !== undefined && row.expandable && (
-                        <span className="shrink-0">{row.childCount}</span>
+                        <span className="shrink-0 rounded-md border border-border bg-background px-1.5 py-0 text-[10px] text-muted-foreground">
+                          {row.childCount}
+                        </span>
                       )}
                     </div>
                   </button>
                 </div>
               ))}
               {visibleTreeRows.length === 0 && (
-                <div className="px-2 py-6 text-center text-xs text-muted-foreground">
-                  No loaded registrations match the current filter.
+                <div className="flex flex-col items-center justify-center rounded-lg border border-border bg-muted/30 px-4 py-8 text-center">
+                  <div className="flex size-10 items-center justify-center rounded-xl border border-border bg-background">
+                    <Search className="size-5 text-muted-foreground" />
+                  </div>
+                  <p className="mt-3 text-sm font-medium">No matches</p>
+                  <p className="mt-1 max-w-[16rem] text-xs text-muted-foreground">
+                    No loaded registrations match the current filter.
+                  </p>
                 </div>
               )}
             </div>
@@ -1400,18 +1470,23 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
             {selectedItem ? (
               <>
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold">
-                      {selectedItem.title}
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-xl border border-border bg-muted/60">
+                      <KindIcon kind={selectedItem.kind} className="size-5 text-primary" />
                     </div>
-                    <div className="mt-1 truncate text-xs text-muted-foreground">
-                      {selectedItem.subtitle}
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold">
+                        {selectedItem.title}
+                      </div>
+                      <div className="mt-1 truncate text-xs text-muted-foreground">
+                        {selectedItem.subtitle}
+                      </div>
                     </div>
                   </div>
                   <StateBadge item={selectedItem} />
                 </div>
                 {selectedItem.editable.reasons.length > 0 && (
-                  <div className="mt-3 flex gap-2 border border-amber-300 bg-amber-50 px-2 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+                  <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/70 dark:bg-amber-950/40 dark:text-amber-200">
                     <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
                     <span>{selectedItem.editable.reasons.join(", ")}</span>
                   </div>
@@ -1496,8 +1571,9 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
                   </Button>
                   {selectedItem.kind !== "package" && (
                     <Button
-                      variant="destructive"
+                      variant="outline"
                       size="sm"
+                      className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                       onClick={() => deleteSelected(selectedItem)}
                     >
                       <Trash2 />
@@ -1507,8 +1583,14 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
                 </div>
               </>
             ) : (
-              <div className="text-sm text-muted-foreground">
-                No registration selected.
+              <div className="flex flex-col items-center justify-center rounded-lg border border-border bg-muted/30 px-4 py-6 text-center">
+                <div className="flex size-10 items-center justify-center rounded-xl border border-border bg-background">
+                  <PlugZap className="size-5 text-muted-foreground" />
+                </div>
+                <p className="mt-3 text-sm font-medium">No registration selected</p>
+                <p className="mt-1 max-w-[16rem] text-xs text-muted-foreground">
+                  Select a component from the list to view details, edit, or unregister it.
+                </p>
               </div>
             )}
           </div>
@@ -1525,7 +1607,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
                     </TabsTrigger>
                   </TabsList>
                   <TabsContent value="details" className="pt-3">
-                    <dl className="border px-3 text-xs">
+                    <dl className="rounded-lg border px-3 text-xs">
                       <DetailRow label="Id" value={selectedItem.id} />
                       <DetailRow label="Kind" value={selectedItem.kind} />
                       <DetailRow label="Managed" value={selectedItem.managed} />
@@ -1700,7 +1782,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
               retrying.
             </DialogDescription>
           </DialogHeader>
-          <div className="max-h-64 overflow-auto border border-destructive/30 bg-destructive/5 p-3 font-mono text-[11px] break-words whitespace-pre-wrap text-destructive">
+          <div className="max-h-64 overflow-auto rounded-lg border border-destructive/20 bg-destructive/10 p-3 font-mono text-[11px] break-words whitespace-pre-wrap text-destructive">
             {errorDialog?.message}
           </div>
           <DialogFooter showCloseButton />
@@ -1737,7 +1819,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
             </div>
 
             {inspection?.warnings.length ? (
-              <div className="grid gap-1 border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+              <div className="grid gap-1 rounded-lg border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-700/70 dark:bg-amber-950/40 dark:text-amber-200">
                 {inspection.warnings.map((warning) => (
                   <div key={warning} className="flex gap-2">
                     <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
@@ -1864,7 +1946,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
 
             <div className="grid gap-2">
               <Label>Types</Label>
-              <div className="max-h-40 overflow-auto border p-2">
+              <div className="max-h-40 overflow-auto rounded-lg border border-border bg-background p-2">
                 {(inspection?.discoveredTypes ?? []).length === 0 ? (
                   <p className="py-3 text-center text-xs text-muted-foreground">
                     Inspect an assembly to select registerable types.
@@ -1876,15 +1958,16 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
                         key={type.fullName}
                         type="button"
                         className={cn(
-                          "flex items-center gap-2 border px-2 py-1.5 text-left text-xs",
-                          selectedTypeNames.includes(type.fullName) &&
-                            "border-primary bg-primary/5",
+                          "flex items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors",
+                          selectedTypeNames.includes(type.fullName)
+                            ? "border-primary bg-primary/5"
+                            : "border-border bg-background hover:bg-muted/60",
                         )}
                         onClick={() => toggleDiscoveredType(type.fullName)}
                       >
-                        <span className="flex size-4 items-center justify-center border">
+                        <span className="flex size-4 items-center justify-center rounded border border-border bg-background">
                           {selectedTypeNames.includes(type.fullName) && (
-                            <Check className="size-3" />
+                            <Check className="size-3 text-primary" />
                           )}
                         </span>
                         <span className="min-w-0 flex-1 truncate">
@@ -2141,7 +2224,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
                 <Label htmlFor="plugin-step-config">Unsecure Configuration</Label>
                 <textarea
                   id="plugin-step-config"
-                  className="min-h-24 border bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  className="min-h-24 rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                   value={stepForm.configuration}
                   onChange={(event) =>
                     setStepForm((current) => ({
@@ -2155,7 +2238,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
                 <Label htmlFor="plugin-step-secure-config">Secure Configuration</Label>
                 <textarea
                   id="plugin-step-secure-config"
-                  className="min-h-24 border bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  className="min-h-24 rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                   value={stepForm.secureConfiguration}
                   onChange={(event) =>
                     setStepForm((current) => ({

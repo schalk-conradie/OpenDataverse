@@ -822,24 +822,25 @@ function App() {
         </DialogContent>
       </Dialog>
 
-      <main className="grid h-screen min-h-0 grid-cols-[280px_minmax(0,1fr)] bg-muted/30 text-sm text-foreground">
-        <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r bg-sidebar">
-          <header className="flex h-16 items-center gap-3 border-b px-4">
-            <div className="flex size-9 items-center justify-center border bg-background">
-              <DatabaseZap className="size-5 text-primary" />
+      <main className="grid h-screen min-h-0 grid-cols-[260px_minmax(0,1fr)] bg-background text-sm text-foreground">
+        <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar">
+          <header className="flex h-14 items-center gap-3 border-b border-sidebar-border px-4">
+            <div className="flex size-8 items-center justify-center rounded-lg border border-border bg-background shadow-sm">
+              <DatabaseZap className="size-4 text-primary" />
             </div>
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
-                <h1 className="truncate text-base font-semibold">
+                <h1 className="truncate text-sm font-semibold tracking-tight">
                   OpenDataverse
                 </h1>
                 {availableUpdate && (
-                  <button
-                    className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full bg-primary px-2 text-[11px] font-medium leading-none text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 disabled:cursor-default disabled:opacity-80"
+                  <Button
+                    className="h-5 gap-1 rounded-full px-2 text-[11px]"
                     type="button"
                     title={`Install OpenDataverse ${availableUpdate.version}`}
                     onClick={installUpdate}
                     disabled={installingUpdate}
+                    size="xs"
                   >
                     {installingUpdate ? (
                       <Loader2 className="size-3 animate-spin" />
@@ -851,18 +852,18 @@ function App() {
                         ? `${updateProgress.percentage}%`
                         : "Update"}
                     </span>
-                  </button>
+                  </Button>
                 )}
               </div>
-              <div className="mt-0.5 truncate text-xs text-muted-foreground">
+              <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
                 {appNightlyLabel}
               </div>
             </div>
           </header>
 
-          <section className="grid gap-3 border-b p-4">
+          <section className="grid gap-3 border-b border-sidebar-border p-4">
             <div className="flex items-center justify-between gap-2">
-              <Label className="text-xs text-muted-foreground">
+              <Label className="text-xs font-medium text-muted-foreground">
                 Environment
               </Label>
               <div className="flex items-center gap-1">
@@ -897,10 +898,30 @@ function App() {
               </SelectContent>
             </Select>
             {activeEnvironment && (
-              <div className="min-w-0 text-xs text-muted-foreground">
-                <div className="truncate">{activeEnvironment.url}</div>
+              <div className="min-w-0 rounded-md border border-sidebar-border bg-background p-2.5 text-xs">
+                <div className="truncate font-mono text-[11px] text-muted-foreground">
+                  {activeEnvironment.url}
+                </div>
                 <div className="mt-2 flex items-center gap-2">
-                  <Badge variant="outline" className="capitalize">
+                  <Badge
+                    variant="outline"
+                    className="h-4 gap-1 px-1.5 text-[11px] capitalize"
+                  >
+                    <span
+                      className={cn(
+                        "size-1.5 rounded-full",
+                        activeEnvironment.authState === "connected" &&
+                          "bg-emerald-500",
+                        activeEnvironment.authState === "connecting" &&
+                          "bg-amber-500",
+                        activeEnvironment.authState === "expired" &&
+                          "bg-destructive",
+                        activeEnvironment.authState === "error" &&
+                          "bg-destructive",
+                        activeEnvironment.authState === "disconnected" &&
+                          "bg-muted-foreground",
+                      )}
+                    />
                     {activeEnvironment.authState}
                   </Badge>
                   {activeEnvironmentNeedsReconnect && (
@@ -921,33 +942,35 @@ function App() {
             )}
           </section>
 
-          <section className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
-            <div className="px-2 py-2 text-xs font-medium text-muted-foreground">
+          <section className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3">
+            <div className="px-2 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
               Tools
             </div>
-            <div className="grid gap-1">
+            <div className="grid gap-0.5">
               {visibleTools.map((tool) => (
                 <ContextMenu key={tool.id}>
                   <ContextMenuTrigger asChild>
                     <button
                       className={cn(
-                        "flex w-full min-w-0 items-center gap-3 border border-transparent px-2 py-2 text-left transition-colors hover:border-border hover:bg-background",
+                        "group flex w-full min-w-0 items-center gap-3 rounded-lg border border-transparent px-2.5 py-2 text-left transition-all hover:border-border hover:bg-background focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40",
                         tool.status === "planned" && "opacity-60",
                       )}
                       type="button"
                       onClick={() => handleOpenTool(tool.id)}
                     >
-                      <tool.icon className="size-4 text-muted-foreground" />
+                      <div className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors group-hover:text-primary group-hover:border-primary/20">
+                        <tool.icon className="size-3.5" />
+                      </div>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">
+                        <span className="block truncate text-xs font-medium">
                           {tool.title}
                         </span>
-                        <span className="block truncate text-xs text-muted-foreground">
+                        <span className="block truncate text-[11px] text-muted-foreground">
                           {tool.description}
                         </span>
                       </span>
                       {tool.status === "planned" && (
-                        <Badge variant="secondary" className="shrink-0">
+                        <Badge variant="secondary" className="shrink-0 h-4 px-1.5 text-[10px]">
                           Planned
                         </Badge>
                       )}
@@ -968,12 +991,12 @@ function App() {
             </div>
           </section>
 
-          <footer className="border-t p-3">
+          <footer className="border-t border-sidebar-border p-3">
             <SettingsDialog appVersion={runningAppVersion} />
             {lastMessage && (
               <>
                 <Separator className="my-3" />
-                <p className="line-clamp-2 text-xs text-muted-foreground">
+                <p className="line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
                   {lastMessage}
                 </p>
               </>
@@ -981,8 +1004,8 @@ function App() {
           </footer>
         </aside>
 
-        <section className="flex min-w-0 min-h-0 flex-col">
-          <div className="flex h-10 items-end overflow-x-auto border-b bg-background px-2">
+        <section className="flex min-w-0 min-h-0 flex-col bg-muted/30">
+          <div className="flex h-10 items-end overflow-x-auto border-b border-border bg-background px-2">
             {openWindows.map((window) => {
               const tool = getToolDefinition(window.toolId)
               const windowEnvironment = getEnvironmentById(
@@ -995,23 +1018,27 @@ function App() {
                 <button
                   key={window.id}
                   className={cn(
-                    "flex h-9 max-w-64 items-center gap-2 border border-b-0 px-3 text-left text-xs",
+                    "group/tab relative flex h-9 max-w-64 items-center gap-2 rounded-t-md border border-b-0 px-3 text-left text-xs transition-all",
                     active
-                      ? "bg-muted text-foreground"
-                      : "bg-background text-muted-foreground hover:bg-muted/60",
+                      ? "z-10 bg-muted text-foreground"
+                      : "bg-background text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                   )}
                   type="button"
                   onClick={() => activateWindow(window.id)}
                 >
-                  <tool.icon className="size-3.5 shrink-0" />
+                  {active && (
+                    <span className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-primary" />
+                  )}
+                  <tool.icon className="size-3.5 shrink-0 text-muted-foreground group-hover/tab:text-foreground" />
                   <span className="min-w-0 flex-1 truncate">
                     {window.title}
                     {windowEnvironment ? ` - ${windowEnvironment.name}` : ""}
                   </span>
                   <span
-                    className="flex size-5 shrink-0 items-center justify-center hover:text-foreground"
+                    className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-muted-foreground/20 hover:text-foreground"
                     role="button"
                     tabIndex={0}
+                    aria-label="Close tab"
                     onClick={(event) => {
                       event.stopPropagation()
                       closeWindow(window.id)
@@ -1043,8 +1070,16 @@ function App() {
               renderToolWindow(activeWindow)}
 
             {loadState !== "loading" && !activeWindow && (
-              <div className="flex h-full items-center justify-center bg-background text-sm text-muted-foreground">
-                Select a tool from the sidebar.
+              <div className="flex h-full flex-col items-center justify-center gap-4 bg-background text-sm text-muted-foreground">
+                <div className="flex size-12 items-center justify-center rounded-2xl border border-border bg-muted">
+                  <DatabaseZap className="size-6 text-muted-foreground" />
+                </div>
+                <div className="text-center">
+                  <p className="font-medium text-foreground">No tool open</p>
+                  <p className="mt-1 text-xs">
+                    Select a tool from the sidebar to start working.
+                  </p>
+                </div>
               </div>
             )}
           </div>

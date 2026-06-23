@@ -20,8 +20,8 @@ import {
   FileSymlink,
   Folder,
   FolderOpen,
-  ImageIcon,
   FolderSync,
+  ImageIcon,
   Loader2,
   Play,
   RefreshCw,
@@ -58,7 +58,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import {
   Table,
@@ -208,6 +207,28 @@ function typeBadge(resource: WebResource) {
   }
 
   return labels[resource.type]
+}
+
+function resourceIcon(resource: WebResource) {
+  if (resource.type === "image") {
+    return ImageIcon
+  }
+
+  return FileCode2
+}
+
+function statusDotColor(authState: DataverseEnvironment["authState"]) {
+  switch (authState) {
+    case "connected":
+      return "bg-emerald-500"
+    case "connecting":
+      return "bg-sky-500"
+    case "error":
+    case "expired":
+      return "bg-destructive"
+    default:
+      return "bg-muted-foreground"
+  }
 }
 
 function splitResourceName(name: string) {
@@ -433,10 +454,12 @@ function AuthDialog({
 
         {authDialog.browserAuth ? (
           <div className="grid gap-4">
-            <div className="border bg-muted p-3">
-              <div className="text-xs text-muted-foreground">Redirect URL</div>
+            <div className="rounded-lg border border-border bg-muted/40 p-3">
+              <div className="text-xs font-medium text-muted-foreground">
+                Redirect URL
+              </div>
               <div className="mt-2 flex items-center justify-between gap-3">
-                <span className="truncate font-mono text-sm tracking-normal">
+                <span className="truncate font-mono text-xs tracking-normal">
                   {authDialog.browserAuth.redirectUri}
                 </span>
                 <Button
@@ -444,7 +467,7 @@ function AuthDialog({
                   size="sm"
                   onClick={() => void copyRedirectUri()}
                 >
-                  <Copy />
+                  <Copy className="size-3.5" />
                   Copy
                 </Button>
               </div>
@@ -469,9 +492,9 @@ function AuthDialog({
         )}
 
         {authDialog.error && (
-          <p className="border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+          <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
             {authDialog.error}
-          </p>
+          </div>
         )}
 
         <DialogFooter>
@@ -479,7 +502,7 @@ function AuthDialog({
             Close
           </Button>
           <Button disabled>
-            {authDialog.waiting && <Loader2 className="animate-spin" />}
+            {authDialog.waiting && <Loader2 className="size-4 animate-spin" />}
             {authDialog.waiting ? "Waiting For Sign-In" : "Sign-In Stopped"}
           </Button>
         </DialogFooter>
@@ -652,7 +675,7 @@ function ImportWebResourcesDialog({
 
           <div className="space-y-1">
             <Label>Source</Label>
-            <div className="truncate border bg-muted px-3 py-2 font-mono text-xs text-muted-foreground">
+            <div className="truncate rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs text-muted-foreground">
               {formatSelectedSource(form.sourcePaths)}
             </div>
           </div>
@@ -831,7 +854,7 @@ function ResourceViewerDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="grid h-[min(900px,calc(100vh-3rem))] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:w-[calc(100vw-4rem)] sm:max-w-[calc(100vw-4rem)] 2xl:w-[1480px] 2xl:max-w-[1480px]">
-        <DialogHeader className="border-b px-4 py-3 pr-12">
+        <DialogHeader className="border-b border-border px-4 py-3 pr-12">
           <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
               <DialogTitle className="truncate font-mono text-sm">
@@ -860,7 +883,7 @@ function ResourceViewerDialog({
                 {dirty && (
                   <Badge
                     variant="outline"
-                    className="border-amber-300 bg-amber-50 text-amber-700"
+                    className="border-amber-400/70 bg-amber-50/80 text-amber-700"
                   >
                     Unsaved
                   </Badge>
@@ -877,7 +900,7 @@ function ResourceViewerDialog({
               <Label
                 htmlFor="resource-editor-edit-mode"
                 className={cn(
-                  "flex h-7 items-center gap-2 border px-2 text-xs text-muted-foreground",
+                  "flex h-7 items-center gap-2 rounded-md border border-border bg-background px-2 text-xs text-muted-foreground",
                   canEdit && "text-foreground",
                 )}
               >
@@ -896,7 +919,7 @@ function ResourceViewerDialog({
                 onClick={() => void copyContent()}
                 disabled={!draftContent || isBinaryContent}
               >
-                <Copy />
+                <Copy className="size-3.5" />
                 Copy
               </Button>
               <Button
@@ -905,7 +928,7 @@ function ResourceViewerDialog({
                 onClick={revertDraft}
                 disabled={!dirty || isSaving}
               >
-                <RotateCcw />
+                <RotateCcw className="size-3.5" />
                 Revert
               </Button>
               <Button
@@ -914,7 +937,7 @@ function ResourceViewerDialog({
                 onClick={() => handleOpenChange(false)}
                 disabled={isSaving}
               >
-                <X />
+                <X className="size-3.5" />
                 Close
               </Button>
               <Button
@@ -924,9 +947,9 @@ function ResourceViewerDialog({
                 disabled={!canEdit || !dirty || isSaving}
               >
                 {savingAction === "save" ? (
-                  <Loader2 className="animate-spin" />
+                  <Loader2 className="size-3.5 animate-spin" />
                 ) : (
-                  <Save />
+                  <Save className="size-3.5" />
                 )}
                 Save
               </Button>
@@ -936,9 +959,9 @@ function ResourceViewerDialog({
                 disabled={!canEdit || isSaving}
               >
                 {savingAction === "publish" ? (
-                  <Loader2 className="animate-spin" />
+                  <Loader2 className="size-3.5 animate-spin" />
                 ) : (
-                  <Upload />
+                  <Upload className="size-3.5" />
                 )}
                 Save & Publish
               </Button>
@@ -949,13 +972,13 @@ function ResourceViewerDialog({
         <div className="grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)]">
           <div>
             {Boolean(error) && (
-              <div className="m-4 border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+              <div className="m-4 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
                 {error instanceof Error ? error.message : String(error)}
               </div>
             )}
 
             {actionErrorMessage && (
-              <div className="m-4 border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+              <div className="m-4 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
                 {actionErrorMessage}
               </div>
             )}
@@ -971,12 +994,12 @@ function ResourceViewerDialog({
               {!error && (!loading || content) && (
                 <div className="min-h-0">
                   {imagePreviewSrc ? (
-                    <div className="flex h-full min-h-0 items-center justify-center bg-muted/30 p-6">
+                    <div className="flex h-full min-h-0 items-center justify-center bg-muted/20 p-6">
                       <div className="flex max-h-full max-w-full flex-col items-center gap-3">
                         <img
                           src={imagePreviewSrc}
                           alt={content?.name ?? "Web resource image"}
-                          className="max-h-[calc(100vh-14rem)] max-w-full border bg-background object-contain"
+                          className="max-h-[calc(100vh-14rem)] max-w-full rounded-lg border border-border bg-background object-contain shadow-sm"
                         />
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <ImageIcon className="size-3.5" />
@@ -1457,14 +1480,14 @@ export function WebResourceManagementModule({
 
   if (!environment) {
     return (
-      <section className="flex h-full min-h-0 flex-col items-center justify-center gap-3 border-l bg-background p-8 text-center">
-        <div className="flex size-12 items-center justify-center border bg-muted">
+      <section className="flex h-full min-h-0 flex-col items-center justify-center gap-4 border-l border-border bg-background p-8 text-center">
+        <div className="flex size-12 items-center justify-center rounded-xl border border-border bg-muted/60">
           <FolderSync className="size-5 text-muted-foreground" />
         </div>
         <div>
-          <h2 className="text-base font-medium">No Environment</h2>
+          <h2 className="text-base font-medium">No environment selected</h2>
           <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-            Add or select a Dataverse environment to open this tool window.
+            Add or select a Dataverse environment to manage web resources.
           </p>
         </div>
       </section>
@@ -1472,7 +1495,7 @@ export function WebResourceManagementModule({
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col border-l bg-background">
+    <section className="flex h-full min-h-0 flex-col border-l border-border bg-background">
       <AuthDialog
         authDialog={authDialog}
         onOpenChange={(open) =>
@@ -1514,27 +1537,24 @@ export function WebResourceManagementModule({
         submitLabel="Upload"
       />
 
-      <header className="flex min-h-16 items-center justify-between gap-4 border-b px-4">
+      <header className="flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border bg-background px-4">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <h2 className="truncate text-base font-medium">
               Webresource Management
             </h2>
             <Badge variant="outline">{environment.name}</Badge>
-            <Badge
-              className={cn(
-                "capitalize",
-                environment.authState === "connected" &&
-                  "border-emerald-300 bg-emerald-50 text-emerald-700",
-                environment.authState === "connecting" &&
-                  "border-sky-300 bg-sky-50 text-sky-700",
-                environment.authState === "error" &&
-                  "border-red-300 bg-red-50 text-red-700",
-              )}
-              variant="outline"
-            >
-              {environment.authState}
-            </Badge>
+            <div className="inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1">
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  statusDotColor(environment.authState),
+                )}
+              />
+              <span className="text-xs font-medium capitalize text-foreground/80">
+                {environment.authState}
+              </span>
+            </div>
           </div>
           <p className="mt-1 truncate text-xs text-muted-foreground">
             {environment.url}
@@ -1548,9 +1568,9 @@ export function WebResourceManagementModule({
             disabled={authDialog.waiting}
           >
             {authDialog.waiting ? (
-              <Loader2 className="animate-spin" />
+              <Loader2 className="size-3.5 animate-spin" />
             ) : (
-              <Play />
+              <Play className="size-3.5" />
             )}
             Connect
           </Button>
@@ -1573,14 +1593,19 @@ export function WebResourceManagementModule({
             }}
             disabled={resourceQuery.isFetching}
           >
-            <RefreshCw className={cn(resourceQuery.isFetching && "animate-spin")} />
+            <RefreshCw
+              className={cn(
+                "size-3.5",
+                resourceQuery.isFetching && "animate-spin",
+              )}
+            />
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={() => setImportDialogOpen(true)}
           >
-            <Upload />
+            <Upload className="size-3.5" />
             Import
           </Button>
           <Button
@@ -1589,9 +1614,9 @@ export function WebResourceManagementModule({
             disabled={bindings.length === 0 || publishingIds.size > 0}
           >
             {publishingIds.size > 0 ? (
-              <Loader2 className="animate-spin" />
+              <Loader2 className="size-3.5 animate-spin" />
             ) : (
-              <Play />
+              <Play className="size-3.5" />
             )}
             Publish
           </Button>
@@ -1599,7 +1624,7 @@ export function WebResourceManagementModule({
       </header>
 
       <Tabs defaultValue="resources" className="flex min-h-0 flex-1 flex-col">
-        <div className="flex items-center justify-between border-b px-4 py-2">
+        <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
           <TabsList>
             <TabsTrigger value="resources">Resources</TabsTrigger>
             <TabsTrigger value="bindings">Bindings</TabsTrigger>
@@ -1613,7 +1638,7 @@ export function WebResourceManagementModule({
                 onClick={() => setExpandedFolderIds(new Set(folderIds))}
                 disabled={folderIds.length === 0}
               >
-                <FolderOpen />
+                <FolderOpen className="size-3.5" />
                 Expand
               </Button>
               <Button
@@ -1622,7 +1647,7 @@ export function WebResourceManagementModule({
                 onClick={() => setExpandedFolderIds(new Set())}
                 disabled={folderIds.length === 0}
               >
-                <Folder />
+                <Folder className="size-3.5" />
                 Collapse
               </Button>
             </div>
@@ -1634,9 +1659,9 @@ export function WebResourceManagementModule({
               />
             </Label>
             <div className="relative">
-              <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
-                className="h-8 w-64 pl-7"
+                className="h-8 w-64 rounded-md pl-8 text-xs"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search resources"
@@ -1645,16 +1670,19 @@ export function WebResourceManagementModule({
           </div>
         </div>
 
-        <TabsContent value="resources" className="min-h-0 flex-1 overflow-hidden p-0">
+        <TabsContent
+          value="resources"
+          className="min-h-0 flex-1 overflow-hidden p-0"
+        >
           {resourceQuery.error && (
-            <div className="border-b border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+            <div className="border-b border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
               {resourceQuery.error instanceof Error
                 ? resourceQuery.error.message
                 : String(resourceQuery.error)}
             </div>
           )}
 
-          <div className="h-full min-h-0 overflow-auto">
+          <div className="h-full min-h-0 overflow-auto p-3">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -1669,7 +1697,7 @@ export function WebResourceManagementModule({
                 {resourceQuery.isLoading && (
                   <TableRow>
                     <TableCell colSpan={5} className="h-28 text-center">
-                      <span className="inline-flex items-center gap-2 text-muted-foreground">
+                      <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
                         <Loader2 className="size-4 animate-spin" />
                         Loading web resources
                       </span>
@@ -1689,7 +1717,7 @@ export function WebResourceManagementModule({
                             <TableRow
                               aria-expanded={expanded}
                               className={cn(
-                                "bg-muted/20 font-medium",
+                                "bg-muted/30 font-medium",
                                 !searchActive && "cursor-pointer",
                               )}
                               onClick={() => {
@@ -1720,13 +1748,13 @@ export function WebResourceManagementModule({
                                     disabled={searchActive}
                                   >
                                     {expanded ? (
-                                      <ChevronDown />
+                                      <ChevronDown className="size-3.5" />
                                     ) : (
-                                      <ChevronRight />
+                                      <ChevronRight className="size-3.5" />
                                     )}
                                   </Button>
                                   {expanded ? (
-                                    <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                                    <FolderOpen className="size-4 shrink-0 text-primary" />
                                   ) : (
                                     <Folder className="size-4 shrink-0 text-muted-foreground" />
                                   )}
@@ -1743,11 +1771,11 @@ export function WebResourceManagementModule({
                               </TableCell>
                               <TableCell>
                                 {row.folder.boundCount > 0 ? (
-                                  <span className="text-muted-foreground">
+                                  <span className="text-xs text-muted-foreground">
                                     {row.folder.boundCount} bound
                                   </span>
                                 ) : (
-                                  <span className="text-muted-foreground">
+                                  <span className="text-xs text-muted-foreground">
                                     Unbound
                                   </span>
                                 )}
@@ -1772,13 +1800,14 @@ export function WebResourceManagementModule({
                       (item) => item.webResourceId === resource.id,
                     )
                     const selected = selectedResourceId === resource.id
+                    const ResourceIcon = resourceIcon(resource)
 
                     return (
                       <TableRow
                         key={resource.id}
                         className={cn(
                           "cursor-pointer",
-                          selected && "bg-muted/80 hover:bg-muted",
+                          selected && "bg-primary/5 hover:bg-primary/5",
                         )}
                         onClick={() => openResourceViewer(resource)}
                       >
@@ -1790,7 +1819,7 @@ export function WebResourceManagementModule({
                             }}
                             title={resource.name}
                           >
-                            <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
+                            <ResourceIcon className="size-4 shrink-0 text-muted-foreground" />
                             <span className="truncate font-mono text-xs">
                               {row.file.name}
                             </span>
@@ -1805,19 +1834,19 @@ export function WebResourceManagementModule({
                         <TableCell>
                           {binding ? (
                             <Badge
-                              className="border-emerald-300 bg-emerald-50 text-emerald-700"
+                              className="border-emerald-400/50 bg-emerald-50/70 text-emerald-700"
                               variant="outline"
                             >
                               Bound
                             </Badge>
                           ) : (
-                            <span className="text-muted-foreground">
+                            <span className="text-xs text-muted-foreground">
                               Unbound
                             </span>
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
+                          <div className="flex justify-end gap-1.5">
                             <Button
                               variant="ghost"
                               size="icon-sm"
@@ -1827,11 +1856,11 @@ export function WebResourceManagementModule({
                                 openResourceViewer(resource)
                               }}
                             >
-                              <Code2 />
+                              <Code2 className="size-3.5" />
                             </Button>
                             {binding ? (
                               <Button
-                                variant="destructive"
+                                variant="outline"
                                 size="sm"
                                 aria-label={`Unbind ${resource.name}`}
                                 onClick={(event) => {
@@ -1840,7 +1869,7 @@ export function WebResourceManagementModule({
                                 }}
                                 disabled={publishingIds.has(binding.id)}
                               >
-                                <Unlink />
+                                <Unlink className="size-3.5" />
                                 Unbind
                               </Button>
                             ) : (
@@ -1852,7 +1881,7 @@ export function WebResourceManagementModule({
                                   void bindResource(resource)
                                 }}
                               >
-                                <FileSymlink />
+                                <FileSymlink className="size-3.5" />
                                 Bind
                               </Button>
                             )}
@@ -1864,11 +1893,26 @@ export function WebResourceManagementModule({
 
                 {!resourceQuery.isLoading && resources.length === 0 && (
                   <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="h-28 text-center text-muted-foreground"
-                    >
-                      No web resources loaded
+                    <TableCell colSpan={5} className="h-40 text-center">
+                      <div className="flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                        <div className="flex size-10 items-center justify-center rounded-full border border-border bg-muted/60">
+                          <Search className="size-4" />
+                        </div>
+                        <div className="text-sm">
+                          No web resources found
+                          {query.trim() ? " for this search" : ""}
+                        </div>
+                        {!query.trim() && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void resourceQuery.refetch()}
+                          >
+                            <RefreshCw className="size-3.5" />
+                            Refresh
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 )}
@@ -1877,7 +1921,10 @@ export function WebResourceManagementModule({
           </div>
         </TabsContent>
 
-        <TabsContent value="bindings" className="min-h-0 flex-1 overflow-auto p-0">
+        <TabsContent
+          value="bindings"
+          className="min-h-0 flex-1 overflow-auto p-3"
+        >
           <Table>
             <TableHeader>
               <TableRow>
@@ -1907,7 +1954,7 @@ export function WebResourceManagementModule({
                     />
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
+                    <div className="flex justify-end gap-1.5">
                       <Button
                         variant="outline"
                         size="sm"
@@ -1915,19 +1962,19 @@ export function WebResourceManagementModule({
                         disabled={publishingIds.has(binding.id)}
                       >
                         {publishingIds.has(binding.id) ? (
-                          <Loader2 className="animate-spin" />
+                          <Loader2 className="size-3.5 animate-spin" />
                         ) : (
-                          <Play />
+                          <Play className="size-3.5" />
                         )}
                         Publish
                       </Button>
                       <Button
-                        variant="destructive"
+                        variant="outline"
                         size="sm"
                         onClick={() => unbindResource(binding)}
                         disabled={publishingIds.has(binding.id)}
                       >
-                        <Unlink />
+                        <Unlink className="size-3.5" />
                         Unbind
                       </Button>
                     </div>
@@ -1936,11 +1983,19 @@ export function WebResourceManagementModule({
               ))}
               {bindings.length === 0 && (
                 <TableRow>
-                  <TableCell
-                    colSpan={5}
-                    className="h-28 text-center text-muted-foreground"
-                  >
-                    No bindings for {environment.name}
+                  <TableCell colSpan={5} className="h-40 text-center">
+                    <div className="flex flex-col items-center justify-center gap-3 text-muted-foreground">
+                      <div className="flex size-10 items-center justify-center rounded-full border border-border bg-muted/60">
+                        <FileSymlink className="size-4" />
+                      </div>
+                      <div className="text-sm">
+                        No local files bound to {environment.name}
+                      </div>
+                      <p className="max-w-xs text-xs">
+                        Bind a web resource to a local file to enable auto-publish
+                        on save.
+                      </p>
+                    </div>
                   </TableCell>
                 </TableRow>
               )}
@@ -1948,22 +2003,28 @@ export function WebResourceManagementModule({
           </Table>
         </TabsContent>
 
-        <TabsContent value="activity" className="min-h-0 flex-1 overflow-auto p-4">
-          <div className="max-w-3xl border">
+        <TabsContent
+          value="activity"
+          className="min-h-0 flex-1 overflow-auto p-4"
+        >
+          <div className="max-w-3xl space-y-0 rounded-lg border border-border">
             {webResourceEvents.map((event, index) => (
-              <div key={event.id}>
-                <div className="grid grid-cols-[72px_1fr] gap-4 p-3 text-sm">
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {event.time}
-                  </span>
-                  <div>
-                    <div className="font-medium">{event.title}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {event.detail}
-                    </div>
+              <div
+                key={event.id}
+                className={cn(
+                  "grid grid-cols-[72px_1fr] gap-4 p-3 text-sm",
+                  index !== webResourceEvents.length - 1 && "border-b border-border",
+                )}
+              >
+                <span className="font-mono text-xs text-muted-foreground">
+                  {event.time}
+                </span>
+                <div>
+                  <div className="font-medium">{event.title}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {event.detail}
                   </div>
                 </div>
-                {index < webResourceEvents.length - 1 && <Separator />}
               </div>
             ))}
           </div>

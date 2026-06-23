@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import type { ClipboardEvent as ReactClipboardEvent, FormEvent } from "react"
 import { convertFileSrc } from "@tauri-apps/api/core"
 import {
+  AlertCircle,
+  AlertTriangle,
   BotMessageSquare,
   Brain,
-  Circle,
   Cpu,
   FileText,
   FolderOpen,
@@ -12,8 +13,10 @@ import {
   ImagePlus,
   Loader2,
   MessageSquarePlus,
+  MessageSquareText,
   Paperclip,
   SendHorizontal,
+  Wrench,
   X,
 } from "lucide-react"
 import ReactMarkdown, { type Components } from "react-markdown"
@@ -164,7 +167,7 @@ const markdownComponents: Components = {
   },
   blockquote({ children }) {
     return (
-      <blockquote className="my-2 border-l-2 border-muted-foreground/30 pl-3 text-muted-foreground">
+      <blockquote className="my-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-muted-foreground">
         {children}
       </blockquote>
     )
@@ -173,7 +176,7 @@ const markdownComponents: Components = {
     return (
       <code
         className={cn(
-          "rounded bg-muted px-1 py-0.5 font-mono text-[0.86em] tracking-normal",
+          "rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.86em] tracking-normal",
           className,
         )}
       >
@@ -182,16 +185,16 @@ const markdownComponents: Components = {
     )
   },
   h1({ children }) {
-    return <h3 className="mb-2 mt-3 text-base font-semibold">{children}</h3>
+    return <h3 className="mb-2 mt-4 text-base font-semibold leading-tight">{children}</h3>
   },
   h2({ children }) {
-    return <h3 className="mb-2 mt-3 text-sm font-semibold">{children}</h3>
+    return <h3 className="mb-2 mt-4 text-sm font-semibold leading-tight">{children}</h3>
   },
   h3({ children }) {
-    return <h4 className="mb-1.5 mt-2.5 text-sm font-semibold">{children}</h4>
+    return <h4 className="mb-1.5 mt-3 text-sm font-semibold leading-tight">{children}</h4>
   },
   h4({ children }) {
-    return <h5 className="mb-1.5 mt-2 text-sm font-medium">{children}</h5>
+    return <h5 className="mb-1.5 mt-2.5 text-sm font-medium leading-tight">{children}</h5>
   },
   h5({ children }) {
     return <h5 className="mb-1 mt-2 text-xs font-medium">{children}</h5>
@@ -228,18 +231,18 @@ const markdownComponents: Components = {
     return <ol className="my-2 ml-5 list-decimal space-y-1">{children}</ol>
   },
   p({ children }) {
-    return <p className="mb-2 last:mb-0">{children}</p>
+    return <p className="mb-2.5 last:mb-0">{children}</p>
   },
   pre({ children }) {
     return (
-      <pre className="my-3 overflow-x-auto border bg-muted/50 p-3 text-xs leading-5 [&_code]:bg-transparent [&_code]:p-0">
+      <pre className="my-3 overflow-x-auto rounded-lg border bg-muted/50 p-3 text-xs leading-5 [&_code]:bg-transparent [&_code]:p-0">
         {children}
       </pre>
     )
   },
   table({ children }) {
     return (
-      <div className="my-3 overflow-x-auto">
+      <div className="my-3 overflow-x-auto rounded-lg border">
         <table className="min-w-full border-collapse text-left text-xs">
           {children}
         </table>
@@ -250,11 +253,11 @@ const markdownComponents: Components = {
     return <tbody className="divide-y divide-border">{children}</tbody>
   },
   td({ children }) {
-    return <td className="border border-border px-2 py-1.5">{children}</td>
+    return <td className="border border-border px-2.5 py-1.5">{children}</td>
   },
   th({ children }) {
     return (
-      <th className="border border-border bg-muted/70 px-2 py-1.5 font-medium">
+      <th className="border border-border bg-muted/70 px-2.5 py-1.5 font-medium">
         {children}
       </th>
     )
@@ -440,27 +443,22 @@ function upsertMessage(messages: AiChatMessage[], message: AiChatMessage) {
   )
 }
 
-function authBadgeClass(environment?: DataverseEnvironment) {
+function statusDotColor(environment?: DataverseEnvironment) {
   if (!environment) {
-    return "border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-200"
+    return "bg-muted-foreground"
   }
 
-  if (environment.authState === "connected") {
-    return "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200"
+  switch (environment.authState) {
+    case "connected":
+      return "bg-emerald-500"
+    case "connecting":
+      return "bg-sky-500"
+    case "error":
+    case "expired":
+      return "bg-destructive"
+    default:
+      return "bg-amber-500"
   }
-
-  if (environment.authState === "connecting") {
-    return "border-sky-300 bg-sky-50 text-sky-700 dark:border-sky-700 dark:bg-sky-950/40 dark:text-sky-200"
-  }
-
-  if (
-    environment.authState === "error" ||
-    environment.authState === "expired"
-  ) {
-    return "border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-950/40 dark:text-red-200"
-  }
-
-  return "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
 }
 
 function statusLabel(environment?: DataverseEnvironment) {
@@ -631,7 +629,7 @@ function AttachmentList({
           <div
             key={attachment.id}
             className={cn(
-              "group flex max-w-72 items-center gap-2 border bg-muted/40 px-2 py-1 text-xs",
+              "group flex max-w-72 items-center gap-2 rounded-lg border bg-muted/40 px-2 py-1.5 text-xs",
               attachment.status === "skipped" &&
                 "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100",
             )}
@@ -640,11 +638,11 @@ function AttachmentList({
             {previewSrc ? (
               <img
                 alt=""
-                className="size-9 shrink-0 border object-cover"
+                className="size-9 shrink-0 rounded-md border object-cover"
                 src={previewSrc}
               />
             ) : (
-              <span className="flex size-6 shrink-0 items-center justify-center border bg-background text-muted-foreground">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
                 {attachmentIcon(attachment)}
               </span>
             )}
@@ -659,7 +657,7 @@ function AttachmentList({
             {onRemove && (
               <button
                 type="button"
-                className="ml-auto flex size-5 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                className="ml-auto flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
                 aria-label={`Remove ${attachment.name}`}
                 title={`Remove ${attachment.name}`}
                 onClick={() => onRemove(attachment.path)}
@@ -715,16 +713,19 @@ function MessageBubble({ message }: { message: AiChatMessage }) {
           : "used"
 
     return (
-      <div className="flex justify-center">
-        <div className="max-w-[80%] border bg-muted/50 px-2 py-1 text-[11px] text-muted-foreground">
+      <div className="flex justify-center py-1">
+        <div className="flex max-w-[85%] items-center gap-2 rounded-full border bg-muted/50 px-3 py-1.5 text-[11px] text-muted-foreground">
           {message.status === "streaming" && (
-            <Loader2 className="mr-1 inline size-3 animate-spin" />
+            <Loader2 className="size-3 animate-spin" />
           )}
+          <Wrench className="size-3" />
           <span className="font-medium text-foreground">
             {message.toolName ?? "tool"}
           </span>
-          <span className="mx-1">{statusLabel}</span>
-          <span className="font-mono tracking-normal">{message.content}</span>
+          <span className="mx-0.5">{statusLabel}</span>
+          <span className="truncate font-mono tracking-normal">
+            {message.content}
+          </span>
         </div>
       </div>
     )
@@ -734,13 +735,33 @@ function MessageBubble({ message }: { message: AiChatMessage }) {
   const attachments = getMessageAttachments(message)
 
   return (
-    <div className={cn("flex", fromUser ? "justify-end" : "justify-start")}>
+    <div
+      className={cn(
+        "flex gap-3",
+        fromUser ? "flex-row-reverse justify-start" : "justify-start",
+      )}
+    >
       <div
         className={cn(
-          "max-w-[min(760px,82%)] border px-3 py-2",
+          "flex size-7 shrink-0 items-center justify-center rounded-full border",
           fromUser
-            ? "bg-primary text-primary-foreground"
-            : "bg-background text-foreground",
+            ? "border-primary/20 bg-primary text-primary-foreground"
+            : "border-border bg-muted text-muted-foreground",
+        )}
+        aria-hidden="true"
+      >
+        {fromUser ? (
+          <span className="text-[10px] font-semibold">You</span>
+        ) : (
+          <BotMessageSquare className="size-3.5" />
+        )}
+      </div>
+      <div
+        className={cn(
+          "max-w-[min(680px,80%)] rounded-2xl border px-4 py-3 shadow-sm",
+          fromUser
+            ? "rounded-tr-sm bg-primary text-primary-foreground"
+            : "rounded-tl-sm bg-background text-foreground",
           message.status === "error" &&
             "border-destructive/40 bg-destructive/10 text-destructive",
         )}
@@ -1334,20 +1355,33 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
   return (
     <section className="flex h-full min-h-0 flex-col border-l bg-background">
       <header className="flex min-h-16 items-center justify-between gap-4 border-b px-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h2 className="truncate text-base font-medium">{moduleTitle}</h2>
-            {environment && <Badge variant="outline">{environment.name}</Badge>}
-            <Badge
-              className={cn("capitalize", authBadgeClass(environment))}
-              variant="outline"
-            >
-              {statusLabel(environment)}
-            </Badge>
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/50">
+            <BotMessageSquare className="size-4 text-primary" />
           </div>
-          <p className="mt-1 truncate text-xs text-muted-foreground">
-            {environment?.url ?? "Select environment"}
-          </p>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="truncate text-sm font-medium">{moduleTitle}</h2>
+              {environment && (
+                <Badge variant="outline" className="text-xs font-normal">
+                  {environment.name}
+                </Badge>
+              )}
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span
+                  className={cn(
+                    "size-2 rounded-full",
+                    statusDotColor(environment),
+                  )}
+                  aria-hidden="true"
+                />
+                <span className="capitalize">{statusLabel(environment)}</span>
+              </div>
+            </div>
+            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+              {environment?.url ?? "Select environment"}
+            </p>
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <DropdownMenu
@@ -1377,13 +1411,16 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
               <DropdownMenuLabel>Saved Chats</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {scopedChatHistory.length === 0 ? (
-                <DropdownMenuItem disabled>No saved chats</DropdownMenuItem>
+                <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+                  <MessageSquareText className="mx-auto mb-2 size-5 text-muted-foreground/60" />
+                  No saved chats yet
+                </div>
               ) : (
                 scopedChatHistory.map((summary) => (
                   <ContextMenu key={summary.id}>
                     <ContextMenuTrigger asChild>
                       <DropdownMenuItem
-                        className="group/chat-history-row items-start pr-1"
+                        className="group/chat-history-row items-start rounded-md pr-1"
                         onSelect={(event) => {
                           const target = event.target as HTMLElement
                           if (target.closest("[data-chat-history-delete]")) {
@@ -1409,7 +1446,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
                         <button
                           type="button"
                           data-chat-history-delete
-                          className="ml-2 flex size-6 shrink-0 items-center justify-center opacity-0 outline-none transition hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring group-hover/chat-history-row:opacity-100"
+                          className="ml-2 flex size-6 shrink-0 items-center justify-center rounded-md opacity-0 outline-none transition hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring group-hover/chat-history-row:opacity-100"
                           aria-label={`Delete ${summary.title}`}
                           disabled={running}
                           onPointerDown={(event) => {
@@ -1426,7 +1463,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
                         </button>
                       </DropdownMenuItem>
                     </ContextMenuTrigger>
-                    <ContextMenuContent>
+                    <ContextMenuContent className="w-40">
                       <ContextMenuItem
                         onSelect={() => startRenameChat(summary)}
                         disabled={running}
@@ -1500,29 +1537,30 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
       </header>
 
       {isExperimentalAgent && (
-        <div className="border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs leading-5 text-destructive">
-          Unsafe module. It can make Dataverse changes, and serious harm could
-          come to an environment.
+        <div className="flex items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs text-destructive">
+          <AlertTriangle className="size-3.5" />
+          <span>
+            Unsafe module. It can make Dataverse changes, and serious harm could
+            come to an environment.
+          </span>
         </div>
       )}
 
-      <div className="flex min-h-10 items-center gap-2 overflow-x-auto border-b px-4 py-2 text-xs">
-        <Badge className={authBadgeClass(environment)} variant="outline">
-          <Circle className="size-2 fill-current" />
-          {statusLabel(environment)}
-        </Badge>
-        {running && (
-          <Badge variant="outline">
-            <Loader2 className="animate-spin" />
-            Running
-          </Badge>
-        )}
-        {lastTool && (
-          <Badge variant="secondary">
-            <BotMessageSquare />
-            {lastTool.toolName ?? "tool"}
-          </Badge>
-        )}
+      <div className="flex min-h-10 items-center gap-3 overflow-x-auto border-b px-4 py-2 text-xs">
+        <div className="flex shrink-0 items-center gap-2">
+          {running && (
+            <Badge variant="outline" className="gap-1.5 font-normal">
+              <Loader2 className="size-3 animate-spin" />
+              Running
+            </Badge>
+          )}
+          {lastTool && (
+            <Badge variant="secondary" className="gap-1.5 font-normal">
+              <Wrench className="size-3" />
+              {lastTool.toolName ?? "tool"}
+            </Badge>
+          )}
+        </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <Select
             value={aiState.provider}
@@ -1580,15 +1618,15 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <div className="mx-auto flex max-w-5xl flex-col gap-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+        <div className="mx-auto flex max-w-3xl flex-col gap-5">
           {messages.length === 0 && (
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="mb-4 grid gap-3 sm:grid-cols-2">
               {prompts.map((prompt) => (
                 <button
                   key={prompt}
                   type="button"
-                  className="min-h-14 border bg-muted/30 px-3 py-2 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+                  className="min-h-[4.5rem] rounded-lg border bg-muted/30 px-4 py-3 text-left text-sm leading-relaxed transition-colors hover:border-primary/30 hover:bg-primary/5 disabled:pointer-events-none disabled:opacity-50"
                   onClick={() => void submitMessage(undefined, prompt)}
                   disabled={!environment || running}
                 >
@@ -1603,16 +1641,17 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
           ))}
 
           {error && (
-            <div className="border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
+            <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <span className="min-w-0 flex-1">{error}</span>
             </div>
           )}
           <div ref={messagesEndRef} />
         </div>
       </div>
 
-      <form className="border-t p-3" onSubmit={submitMessage}>
-        <div className="mx-auto flex max-w-5xl flex-col gap-2">
+      <form className="border-t bg-background p-3" onSubmit={submitMessage}>
+        <div className="mx-auto flex max-w-3xl flex-col gap-2">
           {pendingAttachments?.attachments.length ? (
             <AttachmentList
               attachments={pendingAttachments.attachments}
@@ -1626,6 +1665,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
                 type="button"
                 variant="outline"
                 size="icon-sm"
+                className="rounded-md"
                 aria-label="Attach image"
                 title="Attach image"
                 disabled={!environment || running}
@@ -1637,6 +1677,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
                 type="button"
                 variant="outline"
                 size="icon-sm"
+                className="rounded-md"
                 aria-label="Attach file"
                 title="Attach file"
                 disabled={!environment || running}
@@ -1648,6 +1689,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
                 type="button"
                 variant="outline"
                 size="icon-sm"
+                className="rounded-md"
                 aria-label="Attach folder"
                 title="Attach folder"
                 disabled={!environment || running}
@@ -1656,31 +1698,34 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
                 <FolderOpen />
               </Button>
             </div>
-            <textarea
-              className="min-h-16 flex-1 resize-none border bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
-              value={composerValue}
-              onChange={(event) =>
-                persistAiState({ composerValue: event.target.value })
-              }
-              onPaste={handleComposerPaste}
-              placeholder={
-                environment
-                  ? isExperimentalAgent
-                    ? "Ask the agent to inspect or change Dataverse"
-                    : "Ask about Dataverse"
-                  : "Select environment"
-              }
-              disabled={!environment || running}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault()
-                  void submitMessage()
+            <div className="relative flex-1">
+              <textarea
+                className="min-h-[4.5rem] w-full resize-none rounded-xl border bg-background px-3.5 py-3 text-sm leading-relaxed outline-none transition-colors placeholder:text-muted-foreground focus:border-ring focus:ring-1 focus:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
+                value={composerValue}
+                onChange={(event) =>
+                  persistAiState({ composerValue: event.target.value })
                 }
-              }}
-            />
+                onPaste={handleComposerPaste}
+                placeholder={
+                  environment
+                    ? isExperimentalAgent
+                      ? "Ask the agent to inspect or change Dataverse"
+                      : "Ask about Dataverse"
+                    : "Select environment"
+                }
+                disabled={!environment || running}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault()
+                    void submitMessage()
+                  }
+                }}
+              />
+            </div>
             <Button
               type="submit"
               size="icon-lg"
+              className="rounded-full"
               aria-label="Send"
               disabled={!canSend}
             >
@@ -1691,6 +1736,9 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
               )}
             </Button>
           </div>
+          <p className="text-center text-[11px] text-muted-foreground/70">
+            Shift + Enter for a new line
+          </p>
         </div>
       </form>
     </section>

@@ -11,6 +11,19 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.49",
+    date: "2026-06-24",
+    title: "Visual refresh across modules",
+    changes: [
+      "Refined global design tokens with a restrained OKLCH palette, warmer tinted neutrals, and consistent rounded surfaces.",
+      "Overhauled the app shell, Webresource Management, AI Chat, Solution Explorer, and Plugin Registration modules for a calmer, more considered interface.",
+      "Replaced harsh status badges, side-stripe borders, and aggressive destructive actions with subtler status pills and outline actions.",
+      "Improved empty states and loading/error surfaces with icon wells and clearer copy.",
+      "Added browser-preview mock coverage for Solution Explorer and Plugin Registration so the Browser plugin can validate these modules outside Tauri.",
+      "Documented the design system in DESIGN.md and added agent maintainability guidelines in AGENTS.md.",
+    ],
+  },
+  {
     version: "0.1.48",
     date: "2026-06-23",
     title: "Environment management cleanup",
