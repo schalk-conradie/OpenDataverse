@@ -19,6 +19,7 @@ import {
   FileCode2,
   FileSymlink,
   Folder,
+  FolderPlus,
   FolderOpen,
   FolderSync,
   ImageIcon,
@@ -70,6 +71,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   completeBrowserAuth,
+  createWebResourceInSolution,
   getWebResourceContent,
   importWebResourcesInSolution,
   listWebResources,
@@ -131,6 +133,10 @@ type ImportWebResourcesForm = {
 type WebResourceFolderUpload = {
   targetRoot: string
   sourcePaths: string[]
+}
+
+type WebResourceFolderCreate = {
+  parentPath: string
 }
 
 type AuthDialogState = {
@@ -195,6 +201,9 @@ type WatchedBinding = {
 type AutoPublishTimer = ReturnType<typeof globalThis.setTimeout>
 
 const webResourceImportSolutionFilter: SolutionManagedFilter = "unmanaged"
+const folderMarkerFileName = ".folder.xml"
+const folderMarkerContent =
+  "<!-- OpenDataverse folder marker. Add web resources to this path. -->"
 
 function typeBadge(resource: WebResource) {
   const labels: Record<WebResource["type"], string> = {
@@ -237,6 +246,45 @@ function splitResourceName(name: string) {
   return parts.length > 0 ? parts : [name]
 }
 
+function normalizeWebResourcePath(value: string) {
+  return value
+    .trim()
+    .replace(/\\/g, "/")
+    .split("/")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("/")
+}
+
+function isFolderMarkerResourceName(name: string) {
+  return normalizeWebResourcePath(name).endsWith(`/${folderMarkerFileName}`)
+}
+
+function validateFolderName(value: string) {
+  const folderName = value.trim()
+
+  if (!folderName) {
+    return "Folder name is required."
+  }
+
+  if (folderName.includes("/") || folderName.includes("\\")) {
+    return "Folder name cannot contain slashes."
+  }
+
+  if (
+    /\s/.test(folderName) ||
+    Array.from(folderName).some((char) => {
+      const codePoint = char.codePointAt(0) ?? 0
+
+      return codePoint < 32 || codePoint === 127
+    })
+  ) {
+    return "Folder name cannot contain whitespace or control characters."
+  }
+
+  return undefined
+}
+
 function sortResourceTree(nodes: ResourceTreeNode[]) {
   nodes.sort((left, right) => {
     if (left.type !== right.type) {
@@ -275,11 +323,14 @@ function buildResourceTree(
     const parts = splitResourceName(resource.name)
     const fileName = parts.at(-1) ?? resource.name
     const isBound = boundResourceIds.has(resource.id)
+    const isFolderMarker = isFolderMarkerResourceName(resource.name)
     let parent = root
     const pathParts: string[] = []
 
-    root.resourceCount += 1
-    if (isBound) {
+    if (!isFolderMarker) {
+      root.resourceCount += 1
+    }
+    if (isBound && !isFolderMarker) {
       root.boundCount += 1
     }
 
@@ -302,11 +353,17 @@ function buildResourceTree(
         parent.children.push(folder)
       }
 
-      folder.resourceCount += 1
-      if (isBound) {
+      if (!isFolderMarker) {
+        folder.resourceCount += 1
+      }
+      if (isBound && !isFolderMarker) {
         folder.boundCount += 1
       }
       parent = folder
+    }
+
+    if (isFolderMarker) {
+      continue
     }
 
     parent.children.push({
@@ -333,6 +390,19 @@ function collectFolderIds(nodes: ResourceTreeNode[]) {
   }
 
   return ids
+}
+
+function collectFolderPaths(nodes: ResourceTreeNode[]) {
+  const paths: string[] = []
+
+  for (const node of nodes) {
+    if (node.type === "folder") {
+      paths.push(node.path)
+      paths.push(...collectFolderPaths(node.children))
+    }
+  }
+
+  return paths
 }
 
 function flattenResourceTree(
@@ -755,6 +825,209 @@ function ImportWebResourcesDialog({
   )
 }
 
+function AddFolderDialog({
+  open,
+  onOpenChange,
+  environment,
+  solutions,
+  solutionsLoading,
+  parentPath,
+  existingFolderPaths,
+  onFolderCreated,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  environment: DataverseEnvironment
+  solutions: SolutionSummary[]
+  solutionsLoading: boolean
+  parentPath: string
+  existingFolderPaths: Set<string>
+  onFolderCreated: (folderPath: string) => void
+}) {
+  const queryClient = useQueryClient()
+  const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
+  const [folderName, setFolderName] = useState("")
+  const [solutionUniqueName, setSolutionUniqueName] = useState("")
+  const [validationMessage, setValidationMessage] = useState<string>()
+  const selectedSolution =
+    solutions.find((solution) => solution.uniqueName === solutionUniqueName) ??
+    solutions[0]
+  const normalizedParentPath = normalizeWebResourcePath(parentPath)
+  const normalizedFolderName = normalizeWebResourcePath(folderName)
+  const folderPath = normalizeWebResourcePath(
+    normalizedParentPath
+      ? `${normalizedParentPath}/${normalizedFolderName}`
+      : normalizedFolderName,
+  )
+  const markerName = folderPath
+    ? `${folderPath}/${folderMarkerFileName}`
+    : folderMarkerFileName
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      createWebResourceInSolution(environment, {
+        solutionUniqueName: selectedSolution?.uniqueName ?? "",
+        name: markerName,
+        displayName: folderName.trim(),
+        description: "OpenDataverse folder marker",
+        type: "xml",
+        content: folderMarkerContent,
+      }),
+    onSuccess: async (result) => {
+      setLastMessage(
+        selectedSolution
+          ? `Created folder ${folderPath} in ${selectedSolution.uniqueName}.`
+          : result.message,
+      )
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["webResources", environment.id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["solutions", environment.id],
+        }),
+      ])
+      onFolderCreated(folderPath)
+      handleOpenChange(false)
+    },
+    onError: (error) => {
+      setLastMessage(error instanceof Error ? error.message : "Create folder failed")
+    },
+  })
+
+  function resetForm() {
+    setFolderName("")
+    setSolutionUniqueName("")
+    setValidationMessage(undefined)
+    mutation.reset()
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      resetForm()
+    }
+
+    onOpenChange(nextOpen)
+  }
+
+  function submitFolder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    const validationError = validateFolderName(folderName)
+    if (validationError) {
+      setValidationMessage(validationError)
+      return
+    }
+
+    if (!selectedSolution) {
+      setValidationMessage("Select an unmanaged solution before creating a folder.")
+      return
+    }
+
+    if (existingFolderPaths.has(folderPath)) {
+      setValidationMessage(`Folder already exists: ${folderPath}`)
+      return
+    }
+
+    setValidationMessage(undefined)
+    mutation.mutate()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add Folder</DialogTitle>
+          <DialogDescription>
+            {normalizedParentPath
+              ? `Create a folder under ${normalizedParentPath}.`
+              : "Create a folder at the web resource root."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <form className="space-y-4" onSubmit={submitFolder}>
+          <div className="space-y-1">
+            <Label htmlFor="web-resource-folder-name">Folder Name</Label>
+            <Input
+              id="web-resource-folder-name"
+              placeholder="AccountsView"
+              value={folderName}
+              onChange={(event) => {
+                setFolderName(event.target.value)
+                setValidationMessage(undefined)
+              }}
+              required
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="web-resource-folder-solution">Solution</Label>
+            <Select
+              value={selectedSolution?.uniqueName}
+              onValueChange={setSolutionUniqueName}
+              disabled={solutionsLoading || solutions.length === 0}
+            >
+              <SelectTrigger id="web-resource-folder-solution" className="w-full">
+                <SelectValue
+                  placeholder={
+                    solutionsLoading ? "Loading solutions" : "Select solution"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {solutions.map((solution) => (
+                  <SelectItem key={solution.id} value={solution.uniqueName}>
+                    {solution.friendlyName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1">
+            <Label>Web Resource Path</Label>
+            <div className="truncate rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs text-muted-foreground">
+              {folderPath || "Enter a folder name"}
+            </div>
+          </div>
+
+          {validationMessage && (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
+              {validationMessage}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleOpenChange(false)}
+            >
+              Close
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                mutation.isPending ||
+                !folderName.trim() ||
+                !selectedSolution ||
+                !folderPath
+              }
+            >
+              {mutation.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <FolderPlus className="size-4" />
+              )}
+              Add Folder
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function ResourceViewerDialog({
   open,
   onOpenChange,
@@ -1065,6 +1338,7 @@ export function WebResourceManagementModule({
   const [resourceViewerOpen, setResourceViewerOpen] = useState(false)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
   const [folderUpload, setFolderUpload] = useState<WebResourceFolderUpload>()
+  const [folderCreate, setFolderCreate] = useState<WebResourceFolderCreate>()
   const [savingResourceAction, setSavingResourceAction] =
     useState<ResourceContentSaveAction>()
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
@@ -1153,6 +1427,10 @@ export function WebResourceManagementModule({
     [boundResourceIds, resources],
   )
   const folderIds = useMemo(() => collectFolderIds(resourceTree), [resourceTree])
+  const folderPaths = useMemo(
+    () => new Set(collectFolderPaths(resourceTree)),
+    [resourceTree],
+  )
   const searchActive = query.trim().length > 0
   const resourceTreeRows = useMemo(
     () => flattenResourceTree(resourceTree, expandedFolderIds, searchActive),
@@ -1169,6 +1447,26 @@ export function WebResourceManagementModule({
         next.add(folderId)
       }
 
+      return next
+    })
+  }
+
+  function showAddFolderDialog(parentPath = "") {
+    setFolderCreate({ parentPath })
+  }
+
+  function handleFolderCreated(folderPath: string) {
+    const folderId = `folder:${folderPath}`
+
+    setExpandedFolderIds((current) => {
+      const next = new Set(current)
+      const parts = folderPath.split("/").filter(Boolean)
+
+      for (let index = 0; index < parts.length; index += 1) {
+        next.add(`folder:${parts.slice(0, index + 1).join("/")}`)
+      }
+
+      next.add(folderId)
       return next
     })
   }
@@ -1536,6 +1834,21 @@ export function WebResourceManagementModule({
         title="Upload Web Resources To Folder"
         submitLabel="Upload"
       />
+      <AddFolderDialog
+        key={`${environment.id}:${folderCreate?.parentPath ?? ""}`}
+        open={Boolean(folderCreate)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setFolderCreate(undefined)
+          }
+        }}
+        environment={environment}
+        solutions={unmanagedSolutionsQuery.data ?? []}
+        solutionsLoading={unmanagedSolutionsQuery.isLoading}
+        parentPath={folderCreate?.parentPath ?? ""}
+        existingFolderPaths={folderPaths}
+        onFolderCreated={handleFolderCreated}
+      />
 
       <header className="flex min-h-[3.75rem] items-center justify-between gap-4 border-b border-border bg-background px-4">
         <div className="min-w-0">
@@ -1632,6 +1945,14 @@ export function WebResourceManagementModule({
           </TabsList>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => showAddFolderDialog()}
+              >
+                <FolderPlus className="size-3.5" />
+                Add Folder
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -1784,6 +2105,14 @@ export function WebResourceManagementModule({
                             </TableRow>
                           </ContextMenuTrigger>
                           <ContextMenuContent>
+                            <ContextMenuItem
+                              onSelect={() =>
+                                showAddFolderDialog(row.folder.path)
+                              }
+                            >
+                              <FolderPlus className="size-4" />
+                              Add Folder
+                            </ContextMenuItem>
                             <ContextMenuItem
                               onSelect={() => void uploadFilesToFolder(row.folder)}
                             >

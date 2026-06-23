@@ -11,6 +11,15 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.51",
+    date: "2026-06-23",
+    title: "Webresource folder creation",
+    changes: [
+      "Added an Add Folder action to Webresource Management so users can create root folders or child folders from the folder context menu.",
+      "Created folder markers as solution-scoped web resources and hid those markers from the resource tree while keeping browser-preview validation stateful.",
+    ],
+  },
+  {
     version: "0.1.50",
     date: "2026-06-23",
     title: "Application icon refresh",

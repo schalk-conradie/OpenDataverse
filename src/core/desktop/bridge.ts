@@ -58,6 +58,7 @@ declare global {
 
 const storageKey = "opendataverse.config"
 const userSettingsStorageKey = "opendataverse.user-settings"
+const browserCreatedWebResources: WebResource[] = []
 
 function isMicrosoftWebResourceName(name: string) {
   const lowerName = name.trim().toLowerCase()
@@ -281,7 +282,7 @@ export async function listWebResources(
   const { mockWebResources } = await import(
     "@/modules/webresource-management/mock-data"
   )
-  return mockWebResources.filter(
+  return [...mockWebResources, ...browserCreatedWebResources].filter(
     (resource) => includeManaged || !resource.isManaged,
   )
 }
@@ -300,7 +301,9 @@ export async function getWebResourceContent(
   const { mockWebResources } = await import(
     "@/modules/webresource-management/mock-data"
   )
-  const resource = mockWebResources.find((item) => item.id === webResourceId)
+  const resource = [...mockWebResources, ...browserCreatedWebResources].find(
+    (item) => item.id === webResourceId,
+  )
   if (resource) {
     return browserWebResourceContent(resource)
   }
@@ -516,8 +519,18 @@ export async function createWebResourceInSolution(
     })
   }
 
+  const webResourceId = `browser-${Date.now().toString(36)}`
+  browserCreatedWebResources.push({
+    id: webResourceId,
+    name: input.name,
+    type: input.type,
+    version: "Browser preview",
+    isManaged: false,
+    solution: input.solutionUniqueName,
+  })
+
   return {
-    webResourceId: `browser-${Date.now().toString(36)}`,
+    webResourceId,
     message: `Browser preview created ${input.name} in ${input.solutionUniqueName}.`,
   } satisfies SolutionWriteResult
 }
