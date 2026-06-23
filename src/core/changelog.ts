@@ -11,6 +11,23 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.54",
+    date: "2026-06-23",
+    title: "AI chat default model",
+    changes: [
+      "Changed the Codex AI chat default model from ChatGPT 5.3 Spark to GPT 5.4 mini for new conversations.",
+    ],
+  },
+  {
+    version: "0.1.53",
+    date: "2026-06-23",
+    title: "Settings changelog scrolling",
+    changes: [
+      "Constrained the Settings dialog to the viewport and made the Changelog tab scroll inside the dialog instead of extending offscreen.",
+      "Removed side-stripe styling from changelog entries to keep the Settings surface aligned with the design guidelines.",
+    ],
+  },
+  {
     version: "0.1.52",
     date: "2026-06-23",
     title: "Webresource activity history",

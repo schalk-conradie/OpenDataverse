@@ -10,7 +10,7 @@ export const providerOptions: Array<{ value: AiChatProvider; label: string }> = 
 ]
 
 export const defaultModelByProvider: Record<AiChatProvider, AiChatModel> = {
-  codex: "gpt-5.3-codex-spark",
+  codex: "gpt-5.4-mini",
   claude: "claude-sonnet-4-6",
 }
 

@@ -447,14 +447,14 @@ function SettingsDialog({ appVersion }: { appVersion: string }) {
           Settings
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="grid h-[min(680px,calc(100vh-2rem))] grid-rows-[auto_minmax(0,1fr)] overflow-hidden sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
           <DialogDescription className="sr-only">
             Configure OpenDataverse settings.
           </DialogDescription>
         </DialogHeader>
-        <Tabs defaultValue="appearance">
+        <Tabs defaultValue="appearance" className="min-h-0">
           <TabsList variant="line" className="w-full justify-start">
             <TabsTrigger value="appearance" className="flex-none px-2">
               Appearance
@@ -466,7 +466,7 @@ function SettingsDialog({ appVersion }: { appVersion: string }) {
               Changelog
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="appearance" className="pt-3">
+          <TabsContent value="appearance" className="min-h-0 pt-3">
             <div className="flex min-h-12 items-center justify-between gap-4 border bg-background px-3">
               <Label
                 htmlFor="settings-dark-mode"
@@ -481,7 +481,7 @@ function SettingsDialog({ appVersion }: { appVersion: string }) {
               />
             </div>
           </TabsContent>
-          <TabsContent value="danger-zone" className="pt-3">
+          <TabsContent value="danger-zone" className="min-h-0 pt-3">
             <div className="flex min-h-20 items-start justify-between gap-4 border border-destructive/40 bg-destructive/10 px-3 py-3">
               <div className="flex min-w-0 items-start gap-3">
                 <ShieldAlert className="mt-0.5 size-4 shrink-0 text-destructive" />
@@ -507,7 +507,7 @@ function SettingsDialog({ appVersion }: { appVersion: string }) {
           </TabsContent>
           <TabsContent
             value="changelog"
-            className="h-[min(520px,calc(100vh-14rem))] pt-3"
+            className="min-h-0 overflow-hidden pt-3"
           >
             <ChangelogContent appVersion={appVersion} />
           </TabsContent>

@@ -25,8 +25,13 @@ export function ChangelogContent({
   className,
 }: ChangelogContentProps) {
   return (
-    <div className={cn("grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3", className)}>
-      <div className="flex min-h-12 items-center justify-between gap-4 border bg-background px-3">
+    <div
+      className={cn(
+        "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3",
+        className,
+      )}
+    >
+      <div className="flex min-h-12 items-center justify-between gap-4 rounded-lg border bg-background px-3">
         <div className="min-w-0">
           <div className="text-sm font-medium">OpenDataverse {appVersion}</div>
           <div className="truncate text-xs text-muted-foreground">
@@ -38,10 +43,13 @@ export function ChangelogContent({
         </Badge>
       </div>
 
-      <ScrollArea className="min-h-0">
+      <ScrollArea className="min-h-0 overflow-hidden">
         <div className="grid gap-4 pr-3">
           {changelogEntries.map((entry, index) => (
-            <article key={entry.version} className="grid gap-2 border-l pl-3">
+            <article
+              key={entry.version}
+              className="grid gap-2 rounded-lg border border-border bg-background p-3"
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <h3 className="text-sm font-medium">{entry.title}</h3>
