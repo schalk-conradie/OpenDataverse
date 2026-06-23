@@ -16,6 +16,7 @@ export const changelogEntries: ChangelogEntry[] = [
     title: "Code quality hardening",
     changes: [
       "Added a frontend test harness with coverage for browser-preview storage recovery and AI chat model catalog defaults.",
+      "Added a pull-request quality workflow that runs coverage, linting, production build, bundle assertions, npm audit, and Rust format/check/test gates.",
       "Centralized AI chat provider and model options so the frontend selectors and Rust validation use the same catalog.",
       "Made AI sidecar requests asynchronous with response timeouts, process reset, and stderr diagnostics for failed or stalled turns.",
       "Lazy-loaded tool modules to reduce the initial web bundle and keep individual tools split into separate chunks.",

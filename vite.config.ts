@@ -1,3 +1,5 @@
+/// <reference types="vitest/config" />
+
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -36,6 +38,22 @@ function getPackageVersion() {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  test: {
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json-summary'],
+      include: [
+        'src/core/storage/safe-json.ts',
+        'src/modules/ai-chat/options.ts',
+      ],
+      thresholds: {
+        branches: 100,
+        functions: 100,
+        lines: 100,
+        statements: 100,
+      },
+    },
+  },
   define: {
     __APP_COMMIT_HASH__: JSON.stringify(getCommitHash()),
     __APP_VERSION__: JSON.stringify(getPackageVersion()),

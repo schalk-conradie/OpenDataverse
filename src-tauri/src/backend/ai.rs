@@ -1470,19 +1470,25 @@ fn ai_sidecar_stderr_tail(tail: &Arc<Mutex<VecDeque<String>>>) -> String {
         return String::new();
     };
 
+    let lines = lines
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+
     if lines.is_empty() {
         String::new()
     } else {
-        format!(
-            " Recent sidecar stderr: {}",
-            lines
-                .iter()
-                .map(|line| line.trim())
-                .filter(|line| !line.is_empty())
-                .collect::<Vec<_>>()
-                .join(" | ")
-        )
+        format!(" Recent sidecar stderr: {}", lines.join(" | "))
     }
+}
+
+fn ai_sidecar_timeout_error(tail: &Arc<Mutex<VecDeque<String>>>) -> String {
+    format!(
+        "AI sidecar timed out after {} seconds.{}",
+        AI_SIDECAR_RESPONSE_TIMEOUT.as_secs(),
+        ai_sidecar_stderr_tail(tail)
+    )
 }
 
 pub(super) fn ensure_ai_sidecar<'a>(
@@ -1588,12 +1594,9 @@ pub(super) async fn run_ai_sidecar_stream_request(
                 }),
                 Err(_) => {
                     reset_sidecar = true;
-                    let stderr_tail = ai_sidecar_stderr_tail(&process.stderr_tail);
+                    let timeout_error = ai_sidecar_timeout_error(&process.stderr_tail);
                     let _ = process.child.start_kill();
-                    Err(format!(
-                        "AI sidecar timed out after {} seconds.{stderr_tail}",
-                        AI_SIDECAR_RESPONSE_TIMEOUT.as_secs()
-                    ))
+                    Err(timeout_error)
                 }
             }
         }
@@ -2885,6 +2888,46 @@ mod tests {
             normalize_ai_reasoning_effort("claude", Some("xhigh"))
                 .expect("legacy Claude reasoning should remain readable"),
             "xhigh"
+        );
+    }
+
+    #[test]
+    fn ai_sidecar_stderr_tail_is_bounded_and_trimmed() {
+        let tail = Arc::new(Mutex::new(VecDeque::new()));
+
+        for index in 0..(AI_SIDECAR_STDERR_LINES + 2) {
+            push_ai_sidecar_stderr_tail(&tail, format!(" entry-{index:02} "));
+        }
+
+        let display = ai_sidecar_stderr_tail(&tail);
+
+        assert!(!display.contains("entry-00"));
+        assert!(!display.contains("entry-01"));
+        assert!(display.contains("entry-02"));
+        assert!(display.contains(&format!("entry-{}", AI_SIDECAR_STDERR_LINES + 1)));
+        assert!(display.starts_with(" Recent sidecar stderr: entry-02"));
+    }
+
+    #[test]
+    fn ai_sidecar_timeout_error_includes_timeout_and_stderr_tail() {
+        let tail = Arc::new(Mutex::new(VecDeque::new()));
+
+        assert_eq!(
+            ai_sidecar_timeout_error(&tail),
+            format!(
+                "AI sidecar timed out after {} seconds.",
+                AI_SIDECAR_RESPONSE_TIMEOUT.as_secs()
+            )
+        );
+
+        push_ai_sidecar_stderr_tail(&tail, "sidecar stack trace".to_string());
+
+        assert_eq!(
+            ai_sidecar_timeout_error(&tail),
+            format!(
+                "AI sidecar timed out after {} seconds. Recent sidecar stderr: sidecar stack trace",
+                AI_SIDECAR_RESPONSE_TIMEOUT.as_secs()
+            )
         );
     }
 

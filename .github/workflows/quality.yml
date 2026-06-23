@@ -1,0 +1,51 @@
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            src-sidecar/ai/package-lock.json
+
+      - name: Install Rust
+        run: rustup toolchain install 1.96.0 --profile minimal --component rustfmt
+
+      - name: Install Node dependencies
+        run: |
+          npm ci
+          npm --prefix src-sidecar/ai ci
+
+      - name: Frontend and sidecar checks
+        run: npm run verify
+
+      - name: Rust format
+        run: cargo +1.96.0 fmt --manifest-path src-tauri/Cargo.toml --check
+
+      - name: Rust check
+        run: cargo +1.96.0 check --manifest-path src-tauri/Cargo.toml
+
+      - name: Rust tests
+        run: cargo +1.96.0 test --manifest-path src-tauri/Cargo.toml

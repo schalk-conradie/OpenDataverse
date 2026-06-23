@@ -52,7 +52,7 @@ import {
   userSettingsSchema,
   type UserSettings,
 } from "@/core/dataverse/schemas"
-import { parseJsonOrUndefined } from "@/core/storage/safe-json"
+import { loadStoredJsonOrDefault } from "@/core/storage/safe-json"
 
 declare global {
   interface Window {
@@ -178,13 +178,12 @@ export async function loadAppConfig() {
     return defaultAppConfig
   }
 
-  const parsed = parseJsonOrUndefined(stored)
-  if (parsed === undefined) {
-    window.localStorage.removeItem(storageKey)
-    return defaultAppConfig
-  }
-
-  return appConfigSchema.catch(defaultAppConfig).parse(parsed)
+  return loadStoredJsonOrDefault(
+    window.localStorage,
+    storageKey,
+    (value) => appConfigSchema.catch(defaultAppConfig).parse(value),
+    defaultAppConfig,
+  )
 }
 
 export async function saveAppConfig(config: AppConfig) {
@@ -215,13 +214,12 @@ export async function loadUserSettings() {
     return defaultUserSettings
   }
 
-  const parsed = parseJsonOrUndefined(stored)
-  if (parsed === undefined) {
-    window.localStorage.removeItem(userSettingsStorageKey)
-    return defaultUserSettings
-  }
-
-  return userSettingsSchema.catch(defaultUserSettings).parse(parsed)
+  return loadStoredJsonOrDefault(
+    window.localStorage,
+    userSettingsStorageKey,
+    (value) => userSettingsSchema.catch(defaultUserSettings).parse(value),
+    defaultUserSettings,
+  )
 }
 
 export async function saveUserSettings(settings: UserSettings) {
