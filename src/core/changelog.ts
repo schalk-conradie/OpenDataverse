@@ -11,6 +11,18 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.55",
+    date: "2026-06-23",
+    title: "Code quality hardening",
+    changes: [
+      "Added a frontend test harness with coverage for browser-preview storage recovery and AI chat model catalog defaults.",
+      "Centralized AI chat provider and model options so the frontend selectors and Rust validation use the same catalog.",
+      "Made AI sidecar requests asynchronous with response timeouts, process reset, and stderr diagnostics for failed or stalled turns.",
+      "Lazy-loaded tool modules to reduce the initial web bundle and keep individual tools split into separate chunks.",
+      "Enabled strict TypeScript checking for the main app build.",
+    ],
+  },
+  {
     version: "0.1.54",
     date: "2026-06-23",
     title: "AI chat default model",

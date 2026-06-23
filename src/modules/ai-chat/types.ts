@@ -79,19 +79,7 @@ export type AiChatThreadSummary = {
 
 export type AiChatProvider = "codex" | "claude"
 
-export type AiChatModel =
-  | "gpt-5.5"
-  | "gpt-5.4"
-  | "gpt-5.4-mini"
-  | "gpt-5.3-codex-spark"
-  | "claude-fable-5"
-  | "claude-sonnet-4-6"
-  | "claude-sonnet-4-5-20250929"
-  | "claude-opus-4-8"
-  | "claude-opus-4-7"
-  | "claude-opus-4-6"
-  | "claude-opus-4-5-20251101"
-  | "claude-haiku-4-5-20251001"
+export type AiChatModel = string
 
 export type AiReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max"
 

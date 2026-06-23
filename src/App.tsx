@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useEffect,
   useMemo,
   useState,
@@ -78,13 +80,40 @@ import {
   type ToolWindow,
 } from "@/core/dataverse/schemas"
 import { cn } from "@/lib/utils"
-import { AiChatModule } from "@/modules/ai-chat/AiChatModule"
-import { FetchXmlBuilderModule } from "@/modules/fetchxml-builder/FetchXmlBuilderModule"
-import { PluginRegistrationModule } from "@/modules/plugin-registration/PluginRegistrationModule"
-import { SolutionExplorerModule } from "@/modules/solution-explorer/SolutionExplorerModule"
 import { getToolDefinition, toolRegistry } from "@/modules/tool-registry"
-import { WebResourceManagementModule } from "@/modules/webresource-management/WebResourceManagementModule"
 import { useWorkspaceStore } from "@/store/workspace-store"
+
+const AiChatModule = lazy(() =>
+  import("@/modules/ai-chat/AiChatModule").then((module) => ({
+    default: module.AiChatModule,
+  })),
+)
+const FetchXmlBuilderModule = lazy(() =>
+  import("@/modules/fetchxml-builder/FetchXmlBuilderModule").then((module) => ({
+    default: module.FetchXmlBuilderModule,
+  })),
+)
+const PluginRegistrationModule = lazy(() =>
+  import("@/modules/plugin-registration/PluginRegistrationModule").then(
+    (module) => ({
+      default: module.PluginRegistrationModule,
+    }),
+  ),
+)
+const SolutionExplorerModule = lazy(() =>
+  import("@/modules/solution-explorer/SolutionExplorerModule").then(
+    (module) => ({
+      default: module.SolutionExplorerModule,
+    }),
+  ),
+)
+const WebResourceManagementModule = lazy(() =>
+  import("@/modules/webresource-management/WebResourceManagementModule").then(
+    (module) => ({
+      default: module.WebResourceManagementModule,
+    }),
+  ),
+)
 
 type EnvironmentFormDialogProps = {
   mode: "add" | "edit"
@@ -517,7 +546,16 @@ function SettingsDialog({ appVersion }: { appVersion: string }) {
   )
 }
 
-function renderToolWindow(window: ToolWindow) {
+function ToolWindowLoading() {
+  return (
+    <div className="flex h-full items-center justify-center gap-2 bg-background text-sm text-muted-foreground">
+      <Loader2 className="size-4 animate-spin" />
+      Loading
+    </div>
+  )
+}
+
+function renderToolWindowContent(window: ToolWindow) {
   if (window.toolId === "autopublisher") {
     return <WebResourceManagementModule window={window} />
   }
@@ -552,6 +590,14 @@ function renderToolWindow(window: ToolWindow) {
         <p className="mt-1 text-sm text-muted-foreground">Planned</p>
       </div>
     </section>
+  )
+}
+
+function renderToolWindow(window: ToolWindow) {
+  return (
+    <Suspense fallback={<ToolWindowLoading />}>
+      {renderToolWindowContent(window)}
+    </Suspense>
   )
 }
 
