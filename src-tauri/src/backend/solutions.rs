@@ -1,4 +1,6 @@
-use super::web_resources::{is_microsoft_web_resource_name, map_resource_type, resource_type_code};
+use super::web_resources::{
+    is_microsoft_web_resource_name, map_resource_type, resource_type_code, web_resource_type_filter,
+};
 use super::*;
 use std::{collections::HashSet, path::Component};
 
@@ -922,22 +924,22 @@ pub(super) async fn list_solution_web_resource_candidates(
         .collect::<HashSet<_>>();
 
     let values = dataverse_get_collection_values(
-    &app,
-    &environment,
-    "/webresourceset",
-    vec![
-      (
-        "$select".to_string(),
-        "webresourceid,name,displayname,webresourcetype,ismanaged,modifiedon".to_string(),
-      ),
-      (
-        "$filter".to_string(),
-        "ismanaged eq false and (webresourcetype eq 1 or webresourcetype eq 2 or webresourcetype eq 3 or webresourcetype eq 4 or webresourcetype eq 11 or webresourcetype eq 12)".to_string(),
-      ),
-      ("$orderby".to_string(), "name asc".to_string()),
-    ],
-  )
-  .await?;
+        &app,
+        &environment,
+        "/webresourceset",
+        vec![
+            (
+                "$select".to_string(),
+                "webresourceid,name,displayname,webresourcetype,ismanaged,modifiedon".to_string(),
+            ),
+            (
+                "$filter".to_string(),
+                format!("ismanaged eq false and ({})", web_resource_type_filter()),
+            ),
+            ("$orderby".to_string(), "name asc".to_string()),
+        ],
+    )
+    .await?;
 
     Ok(values
         .iter()

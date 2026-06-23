@@ -11,6 +11,15 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.47",
+    date: "2026-06-23",
+    title: "Webresource folder uploads",
+    changes: [
+      "Added a right-click folder action in Webresource Management for uploading one or more selected files directly into that web resource folder.",
+      "Prefilled the upload target root from the selected folder so existing Dataverse folder paths can be reused without manually opening the general import flow.",
+    ],
+  },
+  {
     version: "0.1.46",
     date: "2026-06-22",
     title: "Browser preview mock coverage",

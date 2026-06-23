@@ -142,7 +142,7 @@ pub(super) fn map_resource_language(resource_type: Option<i32>, name: &str) -> S
     .to_string()
 }
 
-fn web_resource_type_filter() -> String {
+pub(super) fn web_resource_type_filter() -> String {
     [
         "webresourcetype eq 1",
         "webresourcetype eq 2",

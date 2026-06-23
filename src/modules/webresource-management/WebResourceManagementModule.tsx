@@ -36,6 +36,12 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -121,6 +127,11 @@ type ImportWebResourcesForm = {
   solutionUniqueName: string
   targetRoot: string
   description: string
+}
+
+type WebResourceFolderUpload = {
+  targetRoot: string
+  sourcePaths: string[]
 }
 
 type AuthDialogState = {
@@ -483,19 +494,27 @@ function ImportWebResourcesDialog({
   environment,
   solutions,
   solutionsLoading,
+  initialSourcePaths = [],
+  initialTargetRoot,
+  title = "Import Web Resources",
+  submitLabel = "Import",
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   environment: DataverseEnvironment
   solutions: SolutionSummary[]
   solutionsLoading: boolean
+  initialSourcePaths?: string[]
+  initialTargetRoot?: string
+  title?: string
+  submitLabel?: string
 }) {
   const queryClient = useQueryClient()
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
   const [form, setForm] = useState<ImportWebResourcesForm>({
-    sourcePaths: [],
+    sourcePaths: initialSourcePaths,
     solutionUniqueName: "",
-    targetRoot: "",
+    targetRoot: initialTargetRoot ?? "",
     description: "",
   })
   const selectedSolution =
@@ -531,9 +550,9 @@ function ImportWebResourcesDialog({
 
   function resetForm() {
     setForm({
-      sourcePaths: [],
+      sourcePaths: initialSourcePaths,
       solutionUniqueName: "",
-      targetRoot: "",
+      targetRoot: initialTargetRoot ?? "",
       description: "",
     })
     mutation.reset()
@@ -607,7 +626,7 @@ function ImportWebResourcesDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Import Web Resources</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{environment.name}</DialogDescription>
         </DialogHeader>
 
@@ -704,7 +723,7 @@ function ImportWebResourcesDialog({
               ) : (
                 <Upload className="size-4" />
               )}
-              Import
+              {submitLabel}
             </Button>
           </DialogFooter>
         </form>
@@ -1022,6 +1041,7 @@ export function WebResourceManagementModule({
   const [selectedResourceId, setSelectedResourceId] = useState<string>()
   const [resourceViewerOpen, setResourceViewerOpen] = useState(false)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [folderUpload, setFolderUpload] = useState<WebResourceFolderUpload>()
   const [savingResourceAction, setSavingResourceAction] =
     useState<ResourceContentSaveAction>()
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
@@ -1214,6 +1234,19 @@ export function WebResourceManagementModule({
   function openResourceViewer(resource: WebResource) {
     setSelectedResourceId(resource.id)
     setResourceViewerOpen(true)
+  }
+
+  async function uploadFilesToFolder(folder: ResourceTreeFolder) {
+    const sourcePaths = await chooseWebResourceImportFiles()
+
+    if (sourcePaths.length === 0) {
+      return
+    }
+
+    setFolderUpload({
+      targetRoot: folder.path,
+      sourcePaths,
+    })
   }
 
   const publishBinding = useCallback(async (
@@ -1464,6 +1497,22 @@ export function WebResourceManagementModule({
         solutions={unmanagedSolutionsQuery.data ?? []}
         solutionsLoading={unmanagedSolutionsQuery.isLoading}
       />
+      <ImportWebResourcesDialog
+        key={`${environment.id}:${folderUpload?.targetRoot ?? ""}:${folderUpload?.sourcePaths.join("|") ?? ""}`}
+        open={Boolean(folderUpload)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setFolderUpload(undefined)
+          }
+        }}
+        environment={environment}
+        solutions={unmanagedSolutionsQuery.data ?? []}
+        solutionsLoading={unmanagedSolutionsQuery.isLoading}
+        initialSourcePaths={folderUpload?.sourcePaths}
+        initialTargetRoot={folderUpload?.targetRoot}
+        title="Upload Web Resources To Folder"
+        submitLabel="Upload"
+      />
 
       <header className="flex min-h-16 items-center justify-between gap-4 border-b px-4">
         <div className="min-w-0">
@@ -1635,71 +1684,86 @@ export function WebResourceManagementModule({
                         searchActive || expandedFolderIds.has(row.folder.id)
 
                       return (
-                        <TableRow
-                          key={row.folder.id}
-                          aria-expanded={expanded}
-                          className={cn(
-                            "bg-muted/20 font-medium",
-                            !searchActive && "cursor-pointer",
-                          )}
-                          onClick={() => {
-                            if (!searchActive) {
-                              toggleFolder(row.folder.id)
-                            }
-                          }}
-                        >
-                          <TableCell className="max-w-96">
-                            <div
-                              className="flex min-w-0 items-center gap-1.5"
-                              style={{
-                                paddingLeft: `${row.depth * 1.25}rem`,
-                              }}
-                              title={row.folder.path}
-                            >
-                              <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                aria-expanded={expanded}
-                                aria-label={`${
-                                  expanded ? "Collapse" : "Expand"
-                                } ${row.folder.path}`}
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  toggleFolder(row.folder.id)
-                                }}
-                                disabled={searchActive}
-                              >
-                                {expanded ? <ChevronDown /> : <ChevronRight />}
-                              </Button>
-                              {expanded ? (
-                                <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
-                              ) : (
-                                <Folder className="size-4 shrink-0 text-muted-foreground" />
+                        <ContextMenu key={row.folder.id}>
+                          <ContextMenuTrigger asChild>
+                            <TableRow
+                              aria-expanded={expanded}
+                              className={cn(
+                                "bg-muted/20 font-medium",
+                                !searchActive && "cursor-pointer",
                               )}
-                              <span className="truncate font-mono text-xs">
-                                {row.folder.name}
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline">Folder</Badge>
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {formatResourceCount(row.folder.resourceCount)}
-                          </TableCell>
-                          <TableCell>
-                            {row.folder.boundCount > 0 ? (
-                              <span className="text-muted-foreground">
-                                {row.folder.boundCount} bound
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground">
-                                Unbound
-                              </span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right" />
-                        </TableRow>
+                              onClick={() => {
+                                if (!searchActive) {
+                                  toggleFolder(row.folder.id)
+                                }
+                              }}
+                            >
+                              <TableCell className="max-w-96">
+                                <div
+                                  className="flex min-w-0 items-center gap-1.5"
+                                  style={{
+                                    paddingLeft: `${row.depth * 1.25}rem`,
+                                  }}
+                                  title={row.folder.path}
+                                >
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-xs"
+                                    aria-expanded={expanded}
+                                    aria-label={`${
+                                      expanded ? "Collapse" : "Expand"
+                                    } ${row.folder.path}`}
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      toggleFolder(row.folder.id)
+                                    }}
+                                    disabled={searchActive}
+                                  >
+                                    {expanded ? (
+                                      <ChevronDown />
+                                    ) : (
+                                      <ChevronRight />
+                                    )}
+                                  </Button>
+                                  {expanded ? (
+                                    <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                                  ) : (
+                                    <Folder className="size-4 shrink-0 text-muted-foreground" />
+                                  )}
+                                  <span className="truncate font-mono text-xs">
+                                    {row.folder.name}
+                                  </span>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline">Folder</Badge>
+                              </TableCell>
+                              <TableCell className="text-muted-foreground">
+                                {formatResourceCount(row.folder.resourceCount)}
+                              </TableCell>
+                              <TableCell>
+                                {row.folder.boundCount > 0 ? (
+                                  <span className="text-muted-foreground">
+                                    {row.folder.boundCount} bound
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">
+                                    Unbound
+                                  </span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right" />
+                            </TableRow>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent>
+                            <ContextMenuItem
+                              onSelect={() => void uploadFilesToFolder(row.folder)}
+                            >
+                              <Upload className="size-4" />
+                              Upload Files To Folder
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        </ContextMenu>
                       )
                     }
 
