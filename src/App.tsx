@@ -294,23 +294,12 @@ function ManageEnvironmentsDialog() {
           </Button>
         </DialogTrigger>
         <DialogContent className="sm:max-w-3xl">
-          <div className="flex items-start justify-between gap-4">
-            <DialogHeader>
-              <DialogTitle>Manage Environments</DialogTitle>
-              <DialogDescription className="sr-only">
-                Edit, reconnect, or delete saved Dataverse environments.
-              </DialogDescription>
-            </DialogHeader>
-            <EnvironmentFormDialog
-              mode="add"
-              trigger={
-                <Button type="button" size="sm">
-                  <Plus />
-                  Add
-                </Button>
-              }
-            />
-          </div>
+          <DialogHeader>
+            <DialogTitle>Manage Environments</DialogTitle>
+            <DialogDescription>
+              Edit, reconnect, or delete saved Dataverse environments.
+            </DialogDescription>
+          </DialogHeader>
 
           {config.environments.length === 0 ? (
             <div className="border bg-background p-6 text-center text-xs text-muted-foreground">

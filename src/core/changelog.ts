@@ -11,6 +11,14 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.48",
+    date: "2026-06-23",
+    title: "Environment management cleanup",
+    changes: [
+      "Removed the duplicate Add button from the Manage Environments dialog so new environments are added from the main sidebar control without overlapping the dialog close button.",
+    ],
+  },
+  {
     version: "0.1.47",
     date: "2026-06-23",
     title: "Webresource folder uploads",
