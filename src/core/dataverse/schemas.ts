@@ -83,6 +83,12 @@ export type WebResource = {
   version: string
   isManaged: boolean
   solution: string
+  modifiedOn?: string
+  modifiedBy?: {
+    id?: string
+    name: string
+    domainName?: string
+  }
 }
 
 export type WebResourceContent = {
@@ -93,6 +99,31 @@ export type WebResourceContent = {
   content: string
   contentEncoding: "text" | "base64"
   mimeType?: string
+}
+
+export type DeleteWebResourcesResult = {
+  deleted: number
+  message: string
+}
+
+export type DownloadWebResourcesResult = {
+  downloaded: number
+  targetPath: string
+  message: string
+}
+
+export type WebResourceActivity = {
+  id: string
+  webResourceId?: string
+  webResourceName: string
+  occurredOn: string
+  actorName: string
+  actorDomain?: string
+  action: string
+  operation: string
+  kind: "change" | "publish" | "create" | "delete"
+  changedAttributes: string[]
+  detail: string
 }
 
 export type FetchXmlEntitySummary = {

@@ -9,19 +9,22 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { dirname, normalize } from "@tauri-apps/api/path"
 import { watch, type UnwatchFn, type WatchEvent } from "@tauri-apps/plugin-fs"
-import { openUrl } from "@tauri-apps/plugin-opener"
 import Editor from "@monaco-editor/react"
 import {
+  AlertCircle,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Code2,
   Copy,
+  Download,
   FileCode2,
   FileSymlink,
   Folder,
   FolderPlus,
   FolderOpen,
   FolderSync,
+  History,
   ImageIcon,
   Loader2,
   Play,
@@ -29,6 +32,7 @@ import {
   RotateCcw,
   Save,
   Search,
+  Trash2,
   Unlink,
   Upload,
   X,
@@ -70,37 +74,39 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
-  completeBrowserAuth,
   createWebResourceInSolution,
+  deleteWebResources,
+  downloadWebResources,
   getWebResourceContent,
   importWebResourcesInSolution,
+  listWebResourceActivity,
   listWebResources,
   listSolutions,
-  startBrowserAuth,
   publishWebResource,
   saveWebResourceContent,
   type SolutionManagedFilter,
 } from "@/core/desktop/bridge"
 import {
   chooseLocalFile,
+  chooseWebResourceDownloadFile,
+  chooseWebResourceDownloadFolder,
   chooseWebResourceImportFiles,
   chooseWebResourceImportFolder,
 } from "@/core/desktop/file-dialog"
 import {
   getBindingsForEnvironment,
   getEnvironmentById,
-  type BrowserAuthStart,
   type DataverseEnvironment,
   type SolutionSummary,
   type ToolWindow,
   type WebResource,
+  type WebResourceActivity,
   type WebResourceBinding,
   type WebResourceContent,
 } from "@/core/dataverse/schemas"
 import { isTauriRuntime } from "@/core/desktop/bridge"
 import { cn } from "@/lib/utils"
 import { useWorkspaceStore } from "@/store/workspace-store"
-import { webResourceEvents } from "./activity-events"
 import {
   configureWebResourceIntellisense,
   editorLanguageForWebResource,
@@ -139,13 +145,6 @@ type WebResourceFolderCreate = {
   parentPath: string
 }
 
-type AuthDialogState = {
-  open: boolean
-  browserAuth?: BrowserAuthStart
-  error?: string
-  waiting: boolean
-}
-
 type ResourceViewerDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -169,6 +168,7 @@ type ResourceTreeFolder = {
   children: ResourceTreeNode[]
   resourceCount: number
   boundCount: number
+  markerResource?: WebResource
 }
 
 type ResourceTreeFile = {
@@ -200,6 +200,37 @@ type WatchedBinding = {
 
 type AutoPublishTimer = ReturnType<typeof globalThis.setTimeout>
 
+type DeleteWebResourceTarget = {
+  kind: "root" | "folder" | "file"
+  label: string
+  resources: WebResource[]
+}
+
+type DownloadJobStatus = "running" | "completed" | "failed"
+
+type DownloadJobItemStatus = "pending" | "running" | "completed" | "failed"
+
+type DownloadJobItem = {
+  id: string
+  name: string
+  status: DownloadJobItemStatus
+  error?: string
+}
+
+type DownloadJob = {
+  id: string
+  label: string
+  targetPath: string
+  total: number
+  completed: number
+  status: DownloadJobStatus
+  items: DownloadJobItem[]
+  startedAt: number
+  completedAt?: number
+  current?: string
+  error?: string
+}
+
 const webResourceImportSolutionFilter: SolutionManagedFilter = "unmanaged"
 const folderMarkerFileName = ".folder.xml"
 const folderMarkerContent =
@@ -216,6 +247,45 @@ function typeBadge(resource: WebResource) {
   }
 
   return labels[resource.type]
+}
+
+function formatActivityTime(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date)
+}
+
+function activityKindPill(activity: WebResourceActivity) {
+  const styles: Record<WebResourceActivity["kind"], string> = {
+    change: "border-slate-300/60 bg-slate-50/70 text-slate-700",
+    publish: "border-emerald-400/50 bg-emerald-50/70 text-emerald-700",
+    create: "border-emerald-400/50 bg-emerald-50/70 text-emerald-700",
+    delete: "border-destructive/30 bg-destructive/10 text-destructive",
+  }
+
+  return (
+    <span
+      className={cn(
+        "inline-flex h-5 items-center gap-1.5 rounded-md border px-2 text-xs font-medium",
+        styles[activity.kind],
+      )}
+    >
+      <span className="size-1.5 rounded-full bg-current" />
+      {activity.kind === "publish"
+        ? "Publish"
+        : activity.kind === "create"
+          ? "Create"
+          : activity.kind === "delete"
+            ? "Delete"
+            : "Change"}
+    </span>
+  )
 }
 
 function resourceIcon(resource: WebResource) {
@@ -260,6 +330,10 @@ function isFolderMarkerResourceName(name: string) {
   return normalizeWebResourcePath(name).endsWith(`/${folderMarkerFileName}`)
 }
 
+function isRootFolder(folder: ResourceTreeFolder) {
+  return !folder.path.includes("/")
+}
+
 function validateFolderName(value: string) {
   const folderName = value.trim()
 
@@ -280,6 +354,19 @@ function validateFolderName(value: string) {
     })
   ) {
     return "Folder name cannot contain whitespace or control characters."
+  }
+
+  return undefined
+}
+
+function validateRootName(value: string) {
+  const folderValidation = validateFolderName(value)
+  if (folderValidation) {
+    return folderValidation.replace("Folder", "Root").replace("folder", "root")
+  }
+
+  if (!value.trim().includes("_")) {
+    return "Root name must contain an underscore."
   }
 
   return undefined
@@ -363,6 +450,7 @@ function buildResourceTree(
     }
 
     if (isFolderMarker) {
+      parent.markerResource = resource
       continue
     }
 
@@ -405,6 +493,38 @@ function collectFolderPaths(nodes: ResourceTreeNode[]) {
   return paths
 }
 
+function collectFolderResources(folder: ResourceTreeFolder) {
+  const resources: WebResource[] = []
+
+  if (folder.markerResource) {
+    resources.push(folder.markerResource)
+  }
+
+  for (const child of folder.children) {
+    if (child.type === "file") {
+      resources.push(child.resource)
+    } else {
+      resources.push(...collectFolderResources(child))
+    }
+  }
+
+  return resources
+}
+
+function collectFolderFileResources(folder: ResourceTreeFolder) {
+  const resources: WebResource[] = []
+
+  for (const child of folder.children) {
+    if (child.type === "file") {
+      resources.push(child.resource)
+    } else {
+      resources.push(...collectFolderFileResources(child))
+    }
+  }
+
+  return resources
+}
+
 function flattenResourceTree(
   nodes: ResourceTreeNode[],
   expandedFolderIds: Set<string>,
@@ -437,6 +557,54 @@ function flattenResourceTree(
 
 function formatResourceCount(count: number) {
   return count === 1 ? "1 item" : `${count} items`
+}
+
+function formatDownloadDuration(
+  startedAt: number,
+  completedAt: number | undefined,
+  now: number,
+) {
+  const elapsedSeconds = Math.max(
+    0,
+    Math.floor(((completedAt ?? now) - startedAt) / 1000),
+  )
+
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s`
+  }
+
+  const minutes = Math.floor(elapsedSeconds / 60)
+  const seconds = elapsedSeconds % 60
+
+  if (minutes < 60) {
+    return `${minutes}m ${seconds}s`
+  }
+
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ${minutes % 60}m`
+}
+
+function createDownloadJob(
+  label: string,
+  targetPath: string,
+  resources: WebResource[],
+): DownloadJob {
+  const startedAt = Date.now()
+
+  return {
+    id: `download:${startedAt}:${Math.random().toString(36).slice(2)}`,
+    label,
+    targetPath,
+    total: resources.length,
+    completed: 0,
+    status: "running",
+    startedAt,
+    items: resources.map((resource) => ({
+      id: resource.id,
+      name: resource.name,
+      status: "pending",
+    })),
+  }
 }
 
 function defaultWebResourceRoot(solution?: SolutionSummary) {
@@ -496,91 +664,6 @@ async function createWatchedBindings(bindings: WebResourceBinding[]) {
   return bindingsByDirectory
 }
 
-function AuthDialog({
-  authDialog,
-  onOpenChange,
-}: {
-  authDialog: AuthDialogState
-  onOpenChange: (open: boolean) => void
-}) {
-  async function copyRedirectUri() {
-    if (!authDialog.browserAuth) {
-      return
-    }
-
-    await navigator.clipboard.writeText(authDialog.browserAuth.redirectUri)
-  }
-
-  return (
-    <Dialog open={authDialog.open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Connect To Dataverse</DialogTitle>
-          <DialogDescription>
-            Finish Microsoft sign-in in your browser. OpenDataverse is waiting
-            on the local redirect URL.
-          </DialogDescription>
-        </DialogHeader>
-
-        {authDialog.browserAuth ? (
-          <div className="grid gap-4">
-            <div className="rounded-lg border border-border bg-muted/40 p-3">
-              <div className="text-xs font-medium text-muted-foreground">
-                Redirect URL
-              </div>
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <span className="truncate font-mono text-xs tracking-normal">
-                  {authDialog.browserAuth.redirectUri}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void copyRedirectUri()}
-                >
-                  <Copy className="size-3.5" />
-                  Copy
-                </Button>
-              </div>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              A browser window should open automatically. After sign-in, the
-              redirect page can be closed.
-            </p>
-            <Button
-              variant="outline"
-              onClick={() => void openUrl(authDialog.browserAuth!.authUrl)}
-              disabled={!isTauriRuntime()}
-            >
-              Open Sign-In
-            </Button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            Preparing sign-in
-          </div>
-        )}
-
-        {authDialog.error && (
-          <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
-            {authDialog.error}
-          </div>
-        )}
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Close
-          </Button>
-          <Button disabled>
-            {authDialog.waiting && <Loader2 className="size-4 animate-spin" />}
-            {authDialog.waiting ? "Waiting For Sign-In" : "Sign-In Stopped"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 function ImportWebResourcesDialog({
   open,
   onOpenChange,
@@ -631,6 +714,9 @@ function ImportWebResourcesDialog({
         }),
         queryClient.invalidateQueries({
           queryKey: ["solutions", environment.id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["webResourceActivity", environment.id],
         }),
       ])
       onOpenChange(false)
@@ -854,11 +940,17 @@ function AddFolderDialog({
     solutions[0]
   const normalizedParentPath = normalizeWebResourcePath(parentPath)
   const normalizedFolderName = normalizeWebResourcePath(folderName)
+  const creatingRoot = !normalizedParentPath
   const folderPath = normalizeWebResourcePath(
     normalizedParentPath
       ? `${normalizedParentPath}/${normalizedFolderName}`
       : normalizedFolderName,
   )
+  const displayFolderPath = folderPath
+    ? creatingRoot
+      ? `${folderPath}/`
+      : folderPath
+    : ""
   const markerName = folderPath
     ? `${folderPath}/${folderMarkerFileName}`
     : folderMarkerFileName
@@ -876,7 +968,7 @@ function AddFolderDialog({
     onSuccess: async (result) => {
       setLastMessage(
         selectedSolution
-          ? `Created folder ${folderPath} in ${selectedSolution.uniqueName}.`
+          ? `Created ${creatingRoot ? "root" : "folder"} ${displayFolderPath} in ${selectedSolution.uniqueName}.`
           : result.message,
       )
       await Promise.all([
@@ -885,6 +977,9 @@ function AddFolderDialog({
         }),
         queryClient.invalidateQueries({
           queryKey: ["solutions", environment.id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["webResourceActivity", environment.id],
         }),
       ])
       onFolderCreated(folderPath)
@@ -913,19 +1008,27 @@ function AddFolderDialog({
   function submitFolder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
 
-    const validationError = validateFolderName(folderName)
+    const validationError = creatingRoot
+      ? validateRootName(folderName)
+      : validateFolderName(folderName)
     if (validationError) {
       setValidationMessage(validationError)
       return
     }
 
     if (!selectedSolution) {
-      setValidationMessage("Select an unmanaged solution before creating a folder.")
+      setValidationMessage(
+        creatingRoot
+          ? "Select an unmanaged solution before creating a root."
+          : "Select an unmanaged solution before creating a folder.",
+      )
       return
     }
 
     if (existingFolderPaths.has(folderPath)) {
-      setValidationMessage(`Folder already exists: ${folderPath}`)
+      setValidationMessage(
+        `${creatingRoot ? "Root" : "Folder"} already exists: ${displayFolderPath}`,
+      )
       return
     }
 
@@ -937,20 +1040,22 @@ function AddFolderDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add Folder</DialogTitle>
+          <DialogTitle>{creatingRoot ? "Add Root" : "Add Folder"}</DialogTitle>
           <DialogDescription>
             {normalizedParentPath
               ? `Create a folder under ${normalizedParentPath}.`
-              : "Create a folder at the web resource root."}
+              : "Create a publisher-style root such as sc_/ for new web resources."}
           </DialogDescription>
         </DialogHeader>
 
         <form className="space-y-4" onSubmit={submitFolder}>
           <div className="space-y-1">
-            <Label htmlFor="web-resource-folder-name">Folder Name</Label>
+            <Label htmlFor="web-resource-folder-name">
+              {creatingRoot ? "Root Name" : "Folder Name"}
+            </Label>
             <Input
               id="web-resource-folder-name"
-              placeholder="AccountsView"
+              placeholder={creatingRoot ? "sc_" : "AccountsView"}
               value={folderName}
               onChange={(event) => {
                 setFolderName(event.target.value)
@@ -987,7 +1092,8 @@ function AddFolderDialog({
           <div className="space-y-1">
             <Label>Web Resource Path</Label>
             <div className="truncate rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs text-muted-foreground">
-              {folderPath || "Enter a folder name"}
+              {displayFolderPath ||
+                (creatingRoot ? "Enter a root name" : "Enter a folder name")}
             </div>
           </div>
 
@@ -1019,12 +1125,273 @@ function AddFolderDialog({
               ) : (
                 <FolderPlus className="size-4" />
               )}
-              Add Folder
+              {creatingRoot ? "Add Root" : "Add Folder"}
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function DeleteWebResourceDialog({
+  open,
+  onOpenChange,
+  target,
+  deleting,
+  boundResourceIds,
+  onConfirm,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  target?: DeleteWebResourceTarget
+  deleting: boolean
+  boundResourceIds: Set<string>
+  onConfirm: () => void
+}) {
+  const managedCount =
+    target?.resources.filter((resource) => resource.isManaged).length ?? 0
+  const boundCount =
+    target?.resources.filter((resource) => boundResourceIds.has(resource.id))
+      .length ?? 0
+  const deleteDisabled =
+    deleting || !target || target.resources.length === 0 || managedCount > 0
+  const targetLabel =
+    target?.kind === "root"
+      ? "root"
+      : target?.kind === "folder"
+        ? "folder"
+        : "file"
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Delete {targetLabel}</DialogTitle>
+          <DialogDescription>
+            This removes web resources from Dataverse. This action cannot be
+            undone from OpenDataverse.
+          </DialogDescription>
+        </DialogHeader>
+
+        {target && (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-border bg-muted/30 p-3">
+              <div className="text-sm font-medium">{target.label}</div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {target.resources.length} web resource
+                {target.resources.length === 1 ? "" : "s"} selected for delete
+              </div>
+            </div>
+
+            {managedCount > 0 && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">
+                {managedCount} managed web resource
+                {managedCount === 1 ? "" : "s"} cannot be deleted from this
+                flow.
+              </div>
+            )}
+
+            {boundCount > 0 && managedCount === 0 && (
+              <div className="rounded-lg border border-amber-300 bg-amber-50/70 p-3 text-xs text-amber-800">
+                {boundCount} local binding{boundCount === 1 ? "" : "s"} will
+                be removed after delete.
+              </div>
+            )}
+
+            {target.resources.some((resource) => resource.isManaged) ? null : (
+              <div className="max-h-44 overflow-auto rounded-lg border border-border">
+                {target.resources.slice(0, 12).map((resource) => (
+                  <div
+                    key={resource.id}
+                    className="border-b border-border px-3 py-2 last:border-b-0"
+                  >
+                    <div className="truncate font-mono text-xs">
+                      {resource.name}
+                    </div>
+                  </div>
+                ))}
+                {target.resources.length > 12 && (
+                  <div className="px-3 py-2 text-xs text-muted-foreground">
+                    and {target.resources.length - 12} more
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
+            Close
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="text-destructive hover:bg-destructive/10"
+            disabled={deleteDisabled}
+            onClick={onConfirm}
+          >
+            {deleting ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Trash2 className="size-4" />
+            )}
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DownloadStatusPanel({
+  job,
+  now,
+  onDismiss,
+}: {
+  job: DownloadJob
+  now: number
+  onDismiss: () => void
+}) {
+  const progress =
+    job.total === 0 ? 0 : Math.round((job.completed / job.total) * 100)
+  const failedCount = job.items.filter((item) => item.status === "failed").length
+  const duration = formatDownloadDuration(job.startedAt, job.completedAt, now)
+  const statusLabel =
+    job.status === "running"
+      ? "Downloading"
+      : job.status === "completed"
+        ? "Complete"
+        : "Failed"
+  const statusClass =
+    job.status === "running"
+      ? "border-primary/30 bg-primary/5 text-primary"
+      : job.status === "completed"
+        ? "border-emerald-400/50 bg-emerald-50/70 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-950/30 dark:text-emerald-300"
+        : "border-destructive/30 bg-destructive/10 text-destructive"
+  const progressClass =
+    job.status === "failed" ? "bg-destructive" : "bg-primary"
+
+  function itemIcon(item: DownloadJobItem) {
+    if (item.status === "completed") {
+      return <CheckCircle2 className="size-3.5 text-emerald-600" />
+    }
+
+    if (item.status === "failed") {
+      return <AlertCircle className="size-3.5 text-destructive" />
+    }
+
+    if (item.status === "running") {
+      return <Loader2 className="size-3.5 animate-spin text-primary" />
+    }
+
+    return <span className="size-2 rounded-full bg-slate-300" />
+  }
+
+  return (
+    <div
+      className="mb-3 rounded-xl border border-border bg-muted/30 p-3"
+      aria-live="polite"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Download className="size-4 shrink-0 text-muted-foreground" />
+            <span className="truncate text-sm font-medium">{job.label}</span>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium",
+                statusClass,
+              )}
+            >
+              <span className="size-1.5 rounded-full bg-current" />
+              {statusLabel}
+            </span>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>
+              {job.completed} of {job.total} downloaded
+            </span>
+            {failedCount > 0 && (
+              <span className="text-destructive">{failedCount} failed</span>
+            )}
+            <span>
+              {job.status === "running" ? "Elapsed" : "Finished in"} {duration}
+            </span>
+            <span
+              className="max-w-full truncate font-mono"
+              title={job.targetPath}
+            >
+              {job.targetPath}
+            </span>
+          </div>
+        </div>
+
+        {job.status !== "running" && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Dismiss download status"
+            onClick={onDismiss}
+          >
+            <X className="size-3.5" />
+          </Button>
+        )}
+      </div>
+
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+        <div
+          className={cn(
+            "h-full rounded-full transition-[width] duration-200",
+            progressClass,
+          )}
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+
+      {job.status === "running" && job.current && (
+        <div className="mt-2 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <Loader2 className="size-3.5 shrink-0 animate-spin" />
+          <span className="truncate font-mono">{job.current}</span>
+        </div>
+      )}
+
+      {job.error && (
+        <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
+          {job.error}
+        </div>
+      )}
+
+      <div className="mt-3 max-h-40 overflow-auto rounded-lg border border-border bg-background">
+        {job.items.map((item) => (
+          <div
+            key={item.id}
+            className="flex min-w-0 items-start gap-2 border-b border-border px-3 py-2 last:border-b-0"
+          >
+            <div className="mt-0.5 flex size-4 shrink-0 items-center justify-center">
+              {itemIcon(item)}
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-mono text-xs">{item.name}</div>
+              {item.error && (
+                <div className="mt-0.5 text-xs text-destructive">
+                  {item.error}
+                </div>
+              )}
+            </div>
+            <div className="shrink-0 text-xs capitalize text-muted-foreground">
+              {item.status}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -1341,27 +1708,23 @@ export function WebResourceManagementModule({
   const [folderCreate, setFolderCreate] = useState<WebResourceFolderCreate>()
   const [savingResourceAction, setSavingResourceAction] =
     useState<ResourceContentSaveAction>()
+  const [deleteTarget, setDeleteTarget] = useState<DeleteWebResourceTarget>()
+  const [downloadJob, setDownloadJob] = useState<DownloadJob>()
+  const [downloadNow, setDownloadNow] = useState(() => Date.now())
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
     () => new Set(),
   )
   const [publishingIds, setPublishingIds] = useState<Set<string>>(new Set())
-  const [authDialog, setAuthDialog] = useState<AuthDialogState>({
-    open: false,
-    waiting: false,
-  })
   const config = useWorkspaceStore((state) => state.config)
   const addBinding = useWorkspaceStore((state) => state.addBinding)
   const updateBinding = useWorkspaceStore((state) => state.updateBinding)
   const removeBinding = useWorkspaceStore((state) => state.removeBinding)
-  const checkConnection = useWorkspaceStore((state) => state.connectEnvironment)
-  const setEnvironmentAuthState = useWorkspaceStore(
-    (state) => state.setEnvironmentAuthState,
-  )
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
   const queryClient = useQueryClient()
   const environment =
     getEnvironmentById(config, window.environmentId) ??
     getEnvironmentById(config, config.currentEnvironmentId)
+  const downloadRunning = downloadJob?.status === "running"
   const bindings = useMemo(
     () => getBindingsForEnvironment(config, environment?.id),
     [config, environment?.id],
@@ -1379,6 +1742,13 @@ export function WebResourceManagementModule({
     queryFn: () => listWebResources(environment as DataverseEnvironment, includeManaged),
   })
   const refetchResources = resourceQuery.refetch
+  const activityQuery = useQuery({
+    queryKey: ["webResourceActivity", environment?.id],
+    enabled: Boolean(environment),
+    queryFn: () =>
+      listWebResourceActivity(environment as DataverseEnvironment),
+  })
+  const refetchActivity = activityQuery.refetch
   const unmanagedSolutionsQuery = useQuery({
     queryKey: ["solutions", environment?.id, webResourceImportSolutionFilter],
     enabled: Boolean(environment),
@@ -1422,6 +1792,43 @@ export function WebResourceManagementModule({
     () => new Set(bindings.map((binding) => binding.webResourceId)),
     [bindings],
   )
+  const deleteMutation = useMutation({
+    mutationFn: (target: DeleteWebResourceTarget) =>
+      deleteWebResources(
+        environment as DataverseEnvironment,
+        target.resources.map((resource) => resource.id),
+      ),
+    onSuccess: async (result, target) => {
+      const deletedResourceIds = new Set(
+        target.resources.map((resource) => resource.id),
+      )
+
+      for (const binding of bindings) {
+        if (deletedResourceIds.has(binding.webResourceId)) {
+          removeBinding(binding.id)
+        }
+      }
+
+      if (selectedResourceId && deletedResourceIds.has(selectedResourceId)) {
+        setSelectedResourceId(undefined)
+        setResourceViewerOpen(false)
+      }
+
+      setLastMessage(result.message)
+      setDeleteTarget(undefined)
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["webResources", environment?.id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["webResourceActivity", environment?.id],
+        }),
+      ])
+    },
+    onError: (error) => {
+      setLastMessage(error instanceof Error ? error.message : "Delete failed")
+    },
+  })
   const resourceTree = useMemo(
     () => buildResourceTree(resources, boundResourceIds),
     [boundResourceIds, resources],
@@ -1453,6 +1860,191 @@ export function WebResourceManagementModule({
 
   function showAddFolderDialog(parentPath = "") {
     setFolderCreate({ parentPath })
+  }
+
+  function showDeleteFolderDialog(folder: ResourceTreeFolder) {
+    const folderResources = collectFolderResources(folder)
+    const dedupedResources = Array.from(
+      new Map(folderResources.map((resource) => [resource.id, resource])).values(),
+    )
+
+    setDeleteTarget({
+      kind: isRootFolder(folder) ? "root" : "folder",
+      label: isRootFolder(folder) ? `${folder.path}/` : folder.path,
+      resources: dedupedResources,
+    })
+  }
+
+  function showDeleteFileDialog(resource: WebResource) {
+    setDeleteTarget({
+      kind: "file",
+      label: resource.name,
+      resources: [resource],
+    })
+  }
+
+  function confirmDeleteTarget() {
+    if (!deleteTarget || deleteMutation.isPending) {
+      return
+    }
+
+    deleteMutation.mutate(deleteTarget)
+  }
+
+  function updateDownloadJob(
+    jobId: string,
+    updater: (job: DownloadJob) => DownloadJob,
+  ) {
+    setDownloadJob((current) => {
+      if (!current || current.id !== jobId) {
+        return current
+      }
+
+      return updater(current)
+    })
+  }
+
+  async function runDownloadJob({
+    label,
+    targetPath,
+    resources: resourcesToDownload,
+    preservePaths,
+    completeMessage,
+  }: {
+    label: string
+    targetPath: string
+    resources: WebResource[]
+    preservePaths: boolean
+    completeMessage: string
+  }) {
+    if (!environment) {
+      return
+    }
+
+    const job = createDownloadJob(label, targetPath, resourcesToDownload)
+    setDownloadJob(job)
+    setDownloadNow(job.startedAt)
+
+    for (const resource of resourcesToDownload) {
+      updateDownloadJob(job.id, (current) => ({
+        ...current,
+        current: resource.name,
+        error: undefined,
+        items: current.items.map((item) =>
+          item.id === resource.id
+            ? { ...item, status: "running", error: undefined }
+            : item,
+        ),
+      }))
+
+      try {
+        await downloadWebResources(environment, {
+          webResourceIds: [resource.id],
+          targetPath,
+          preservePaths,
+        })
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : String(error ?? "Download failed")
+        const completedAt = Date.now()
+
+        updateDownloadJob(job.id, (current) => ({
+          ...current,
+          status: "failed",
+          completedAt,
+          current: undefined,
+          error: message,
+          items: current.items.map((item) =>
+            item.id === resource.id
+              ? { ...item, status: "failed", error: message }
+              : item.status === "running"
+                ? { ...item, status: "pending" }
+                : item,
+          ),
+        }))
+        setLastMessage(message)
+        return
+      }
+
+      updateDownloadJob(job.id, (current) => ({
+        ...current,
+        completed: Math.min(current.total, current.completed + 1),
+        items: current.items.map((item) =>
+          item.id === resource.id
+            ? { ...item, status: "completed", error: undefined }
+            : item,
+        ),
+      }))
+    }
+
+    updateDownloadJob(job.id, (current) => ({
+      ...current,
+      status: "completed",
+      completedAt: Date.now(),
+      current: undefined,
+      completed: current.total,
+    }))
+    setLastMessage(completeMessage)
+  }
+
+  async function downloadFolder(folder: ResourceTreeFolder) {
+    if (!environment) {
+      return
+    }
+
+    if (downloadRunning) {
+      setLastMessage("A download is already running.")
+      return
+    }
+
+    const resourcesToDownload = collectFolderFileResources(folder)
+    if (resourcesToDownload.length === 0) {
+      setLastMessage(`No files to download from ${folder.path}.`)
+      return
+    }
+
+    const targetPath = await chooseWebResourceDownloadFolder()
+    if (!targetPath) {
+      return
+    }
+
+    const label = isRootFolder(folder) ? `${folder.path}/` : folder.path
+    const folderKind = isRootFolder(folder) ? "root" : "folder"
+    const fileLabel = resourcesToDownload.length === 1 ? "file" : "files"
+
+    await runDownloadJob({
+      label: `Download ${folderKind} ${label}`,
+      targetPath,
+      resources: resourcesToDownload,
+      preservePaths: true,
+      completeMessage: `Downloaded ${resourcesToDownload.length} ${fileLabel} from ${label}.`,
+    })
+  }
+
+  async function downloadFile(resource: WebResource) {
+    if (!environment) {
+      return
+    }
+
+    if (downloadRunning) {
+      setLastMessage("A download is already running.")
+      return
+    }
+
+    const targetPath = await chooseWebResourceDownloadFile(resource.name)
+    if (!targetPath) {
+      return
+    }
+
+    await runDownloadJob({
+      label: `Download ${resource.name}`,
+      targetPath,
+      resources: [resource],
+      preservePaths: false,
+      completeMessage: `Downloaded ${resource.name}.`,
+    })
   }
 
   function handleFolderCreated(folderPath: string) {
@@ -1488,38 +2080,6 @@ export function WebResourceManagementModule({
       return next
     })
   }, [])
-
-  async function startAuthFlow(environment: DataverseEnvironment) {
-    setAuthDialog({ open: true, waiting: true })
-    setEnvironmentAuthState(environment.id, "connecting", "Starting sign-in")
-
-    try {
-      const browserAuth = await startBrowserAuth(environment)
-      setAuthDialog({ open: true, waiting: true, browserAuth })
-
-      if (isTauriRuntime()) {
-        await openUrl(browserAuth.authUrl)
-      }
-
-      const session = await completeBrowserAuth(
-        environment,
-        browserAuth.sessionId,
-      )
-      setEnvironmentAuthState(environment.id, "connected", session.message)
-      setAuthDialog({ open: false, waiting: false })
-      await refetchResources()
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : String(error ?? "Sign-in failed")
-      setEnvironmentAuthState(environment.id, "error", message)
-      setAuthDialog((current) => ({
-        ...current,
-        open: true,
-        waiting: false,
-        error: message,
-      }))
-    }
-  }
 
   async function bindResource(resource: WebResource) {
     if (!environment) {
@@ -1599,7 +2159,7 @@ export function WebResourceManagementModule({
           ? `Auto-published ${binding.webResourceName}`
           : result.message,
       )
-      await refetchResources()
+      await Promise.all([refetchResources(), refetchActivity()])
     } catch (error) {
       setLastMessage(
         error instanceof Error
@@ -1611,6 +2171,7 @@ export function WebResourceManagementModule({
     }
   }, [
     environment,
+    refetchActivity,
     refetchResources,
     resources,
     setBindingPublishing,
@@ -1663,7 +2224,7 @@ export function WebResourceManagementModule({
         updatedContent,
       )
       setLastMessage(result.message)
-      await refetchResources()
+      await Promise.all([refetchResources(), refetchActivity()])
     } catch (error) {
       setLastMessage(
         error instanceof Error
@@ -1686,6 +2247,16 @@ export function WebResourceManagementModule({
       autoPublishTimers.clear()
     }
   }, [])
+
+  useEffect(() => {
+    if (!downloadRunning) {
+      return
+    }
+
+    const timer = globalThis.setInterval(() => setDownloadNow(Date.now()), 1000)
+
+    return () => globalThis.clearInterval(timer)
+  }, [downloadJob?.id, downloadRunning])
 
   useEffect(() => {
     if (!environment || !isTauriRuntime() || autoPublishBindings.length === 0) {
@@ -1794,12 +2365,6 @@ export function WebResourceManagementModule({
 
   return (
     <section className="flex h-full min-h-0 flex-col border-l border-border bg-background">
-      <AuthDialog
-        authDialog={authDialog}
-        onOpenChange={(open) =>
-          setAuthDialog((current) => ({ ...current, open }))
-        }
-      />
       <ResourceViewerDialog
         open={resourceViewerOpen}
         onOpenChange={setResourceViewerOpen}
@@ -1809,6 +2374,19 @@ export function WebResourceManagementModule({
         loading={resourceContentQuery.isFetching}
         savingAction={savingResourceAction}
         onSave={saveResourceContent}
+      />
+      <DeleteWebResourceDialog
+        open={Boolean(deleteTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(undefined)
+            deleteMutation.reset()
+          }
+        }}
+        target={deleteTarget}
+        deleting={deleteMutation.isPending}
+        boundResourceIds={boundResourceIds}
+        onConfirm={confirmDeleteTarget}
       />
       <ImportWebResourcesDialog
         key={environment.id}
@@ -1876,26 +2454,6 @@ export function WebResourceManagementModule({
         <div className="flex shrink-0 items-center gap-2">
           <Button
             variant="outline"
-            size="sm"
-            onClick={() => void startAuthFlow(environment)}
-            disabled={authDialog.waiting}
-          >
-            {authDialog.waiting ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Play className="size-3.5" />
-            )}
-            Connect
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void checkConnection(environment.id)}
-          >
-            Check
-          </Button>
-          <Button
-            variant="outline"
             size="icon-sm"
             aria-label="Refresh"
             onClick={() => {
@@ -1951,7 +2509,7 @@ export function WebResourceManagementModule({
                 onClick={() => showAddFolderDialog()}
               >
                 <FolderPlus className="size-3.5" />
-                Add Folder
+                Add Root
               </Button>
               <Button
                 variant="outline"
@@ -2004,6 +2562,14 @@ export function WebResourceManagementModule({
           )}
 
           <div className="h-full min-h-0 overflow-auto p-3">
+            {downloadJob && (
+              <DownloadStatusPanel
+                job={downloadJob}
+                now={downloadNow}
+                onDismiss={() => setDownloadJob(undefined)}
+              />
+            )}
+
             <Table>
               <TableHeader>
                 <TableRow>
@@ -2031,6 +2597,8 @@ export function WebResourceManagementModule({
                     if (row.type === "folder") {
                       const expanded =
                         searchActive || expandedFolderIds.has(row.folder.id)
+                      const downloadableResourceCount =
+                        collectFolderFileResources(row.folder).length
 
                       return (
                         <ContextMenu key={row.folder.id}>
@@ -2114,10 +2682,29 @@ export function WebResourceManagementModule({
                               Add Folder
                             </ContextMenuItem>
                             <ContextMenuItem
-                              onSelect={() => void uploadFilesToFolder(row.folder)}
+                              onSelect={() =>
+                                void uploadFilesToFolder(row.folder)
+                              }
                             >
                               <Upload className="size-4" />
                               Upload Files To Folder
+                            </ContextMenuItem>
+                            <ContextMenuItem
+                              disabled={
+                                downloadableResourceCount === 0 || downloadRunning
+                              }
+                              onSelect={() => void downloadFolder(row.folder)}
+                            >
+                              <Download className="size-4" />
+                              Download{" "}
+                              {isRootFolder(row.folder) ? "Root" : "Folder"}
+                            </ContextMenuItem>
+                            <ContextMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onSelect={() => showDeleteFolderDialog(row.folder)}
+                            >
+                              <Trash2 className="size-4" />
+                              Delete {isRootFolder(row.folder) ? "Root" : "Folder"}
                             </ContextMenuItem>
                           </ContextMenuContent>
                         </ContextMenu>
@@ -2132,91 +2719,146 @@ export function WebResourceManagementModule({
                     const ResourceIcon = resourceIcon(resource)
 
                     return (
-                      <TableRow
-                        key={resource.id}
-                        className={cn(
-                          "cursor-pointer",
-                          selected && "bg-primary/5 hover:bg-primary/5",
-                        )}
-                        onClick={() => openResourceViewer(resource)}
-                      >
-                        <TableCell className="max-w-96">
-                          <div
-                            className="flex min-w-0 items-center gap-1.5"
-                            style={{
-                              paddingLeft: `${row.depth * 1.25 + 1.75}rem`,
-                            }}
-                            title={resource.name}
-                          >
-                            <ResourceIcon className="size-4 shrink-0 text-muted-foreground" />
-                            <span className="truncate font-mono text-xs">
-                              {row.file.name}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="secondary">
-                            {typeBadge(resource)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{resource.version || "-"}</TableCell>
-                        <TableCell>
-                          {binding ? (
-                            <Badge
-                              className="border-emerald-400/50 bg-emerald-50/70 text-emerald-700"
-                              variant="outline"
-                            >
-                              Bound
-                            </Badge>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">
-                              Unbound
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1.5">
-                            <Button
-                              variant="ghost"
-                              size="icon-sm"
-                              aria-label={`View ${resource.name}`}
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                openResourceViewer(resource)
-                              }}
-                            >
-                              <Code2 className="size-3.5" />
-                            </Button>
-                            {binding ? (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                aria-label={`Unbind ${resource.name}`}
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  unbindResource(binding)
-                                }}
-                                disabled={publishingIds.has(binding.id)}
-                              >
-                                <Unlink className="size-3.5" />
-                                Unbind
-                              </Button>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  void bindResource(resource)
-                                }}
-                              >
-                                <FileSymlink className="size-3.5" />
-                                Bind
-                              </Button>
+                      <ContextMenu key={resource.id}>
+                        <ContextMenuTrigger asChild>
+                          <TableRow
+                            className={cn(
+                              "cursor-pointer",
+                              selected && "bg-primary/5 hover:bg-primary/5",
                             )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                            onClick={() => openResourceViewer(resource)}
+                          >
+                            <TableCell className="max-w-96">
+                              <div
+                                className="flex min-w-0 items-center gap-1.5"
+                                style={{
+                                  paddingLeft: `${row.depth * 1.25 + 1.75}rem`,
+                                }}
+                                title={resource.name}
+                              >
+                                <ResourceIcon className="size-4 shrink-0 text-muted-foreground" />
+                                <span className="truncate font-mono text-xs">
+                                  {row.file.name}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="secondary">
+                                {typeBadge(resource)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>{resource.version || "-"}</TableCell>
+                            <TableCell>
+                              {binding ? (
+                                <Badge
+                                  className="border-emerald-400/50 bg-emerald-50/70 text-emerald-700"
+                                  variant="outline"
+                                >
+                                  Bound
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  Unbound
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-1.5">
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  aria-label={`View ${resource.name}`}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    openResourceViewer(resource)
+                                  }}
+                                >
+                                  <Code2 className="size-3.5" />
+                                </Button>
+                                {binding ? (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    aria-label={`Unbind ${resource.name}`}
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      unbindResource(binding)
+                                    }}
+                                    disabled={publishingIds.has(binding.id)}
+                                  >
+                                    <Unlink className="size-3.5" />
+                                    Unbind
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={(event) => {
+                                      event.stopPropagation()
+                                      void bindResource(resource)
+                                    }}
+                                  >
+                                    <FileSymlink className="size-3.5" />
+                                    Bind
+                                  </Button>
+                                )}
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-destructive hover:bg-destructive/10"
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    showDeleteFileDialog(resource)
+                                  }}
+                                  disabled={resource.isManaged}
+                                >
+                                  <Trash2 className="size-3.5" />
+                                  Delete
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent>
+                          <ContextMenuItem
+                            onSelect={() => openResourceViewer(resource)}
+                          >
+                            <Code2 className="size-4" />
+                            View File
+                          </ContextMenuItem>
+                          {binding ? (
+                            <ContextMenuItem
+                              disabled={publishingIds.has(binding.id)}
+                              onSelect={() => unbindResource(binding)}
+                            >
+                              <Unlink className="size-4" />
+                              Unbind
+                            </ContextMenuItem>
+                          ) : (
+                            <ContextMenuItem
+                              onSelect={() => void bindResource(resource)}
+                            >
+                              <FileSymlink className="size-4" />
+                              Bind
+                            </ContextMenuItem>
+                          )}
+                          <ContextMenuItem
+                            disabled={downloadRunning}
+                            onSelect={() => void downloadFile(resource)}
+                          >
+                            <Download className="size-4" />
+                            Download File
+                          </ContextMenuItem>
+                          <ContextMenuItem
+                            disabled={resource.isManaged}
+                            className="text-destructive focus:text-destructive"
+                            onSelect={() => showDeleteFileDialog(resource)}
+                          >
+                            <Trash2 className="size-4" />
+                            Delete File
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
                     )
                   })}
 
@@ -2336,26 +2978,120 @@ export function WebResourceManagementModule({
           value="activity"
           className="min-h-0 flex-1 overflow-auto p-4"
         >
-          <div className="max-w-3xl space-y-0 rounded-lg border border-border">
-            {webResourceEvents.map((event, index) => (
-              <div
-                key={event.id}
-                className={cn(
-                  "grid grid-cols-[72px_1fr] gap-4 p-3 text-sm",
-                  index !== webResourceEvents.length - 1 && "border-b border-border",
-                )}
-              >
-                <span className="font-mono text-xs text-muted-foreground">
-                  {event.time}
-                </span>
-                <div>
-                  <div className="font-medium">{event.title}</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {event.detail}
-                  </div>
-                </div>
+          <div className="max-w-4xl space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold">Dataverse activity</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Latest audited web resource changes and publish events when
+                  Dataverse records them.
+                </p>
               </div>
-            ))}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void refetchActivity()}
+                disabled={activityQuery.isFetching}
+              >
+                {activityQuery.isFetching ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-3.5" />
+                )}
+                Refresh
+              </Button>
+            </div>
+
+            {activityQuery.isLoading && (
+              <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/30 p-6 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Loading Dataverse audit history
+              </div>
+            )}
+
+            {activityQuery.isError && (
+              <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-6 text-sm text-destructive">
+                <div className="flex items-center gap-2 font-medium">
+                  <AlertCircle className="size-4" />
+                  Audit history unavailable
+                </div>
+                <p className="mt-1 max-w-2xl text-xs">
+                  {activityQuery.error instanceof Error
+                    ? activityQuery.error.message
+                    : "Dataverse did not return web resource audit history for this environment."}
+                </p>
+              </div>
+            )}
+
+            {!activityQuery.isLoading &&
+              !activityQuery.isError &&
+              (activityQuery.data?.length ?? 0) === 0 && (
+                <div className="rounded-xl border border-border bg-muted/30 p-6">
+                  <div className="mx-auto flex size-11 items-center justify-center rounded-xl border border-border bg-background">
+                    <History className="size-4 text-muted-foreground" />
+                  </div>
+                  <div className="mt-3 text-center text-sm font-medium">
+                    No audited web resource activity
+                  </div>
+                  <p className="mx-auto mt-1 max-w-md text-center text-xs text-muted-foreground">
+                    Turn on Dataverse auditing for the web resource table and
+                    its columns to capture change history.
+                  </p>
+                </div>
+              )}
+
+            {!activityQuery.isError && (activityQuery.data?.length ?? 0) > 0 && (
+              <div className="overflow-hidden rounded-lg border border-border">
+                {(activityQuery.data ?? []).map((activity, index) => (
+                  <article
+                    key={activity.id}
+                    className={cn(
+                      "grid gap-3 p-3 text-sm md:grid-cols-[180px_minmax(0,1fr)]",
+                      index !== (activityQuery.data?.length ?? 0) - 1 &&
+                        "border-b border-border",
+                    )}
+                  >
+                    <div className="space-y-1">
+                      <div className="font-mono text-xs text-muted-foreground">
+                        {formatActivityTime(activity.occurredOn)}
+                      </div>
+                      {activityKindPill(activity)}
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="truncate font-mono text-xs">
+                          {activity.webResourceName}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {activity.action}
+                        </span>
+                      </div>
+                      <div className="text-sm font-medium">
+                        {activity.detail}
+                      </div>
+                      <div className="flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                        <span>By {activity.actorName}</span>
+                        {activity.actorDomain && (
+                          <span className="font-mono">
+                            {activity.actorDomain}
+                          </span>
+                        )}
+                        <span>{activity.operation}</span>
+                      </div>
+                      {activity.changedAttributes.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {activity.changedAttributes.slice(0, 6).map((field) => (
+                            <Badge key={field} variant="outline">
+                              {field}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
           </div>
         </TabsContent>
       </Tabs>

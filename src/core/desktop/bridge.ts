@@ -7,6 +7,8 @@ import {
   type AppConfig,
   type DataverseEnvironment,
   type CreatePluginTypeInput,
+  type DeleteWebResourcesResult,
+  type DownloadWebResourcesResult,
   type PublishResult,
   type PluginAssemblyInspection,
   type PluginAssemblySummary,
@@ -36,6 +38,7 @@ import {
   type SolutionWriteResult,
   type WebResourceImportResult,
   type WebResource,
+  type WebResourceActivity,
   type WebResourceBinding,
   type WebResourceContent,
   defaultAppConfig,
@@ -59,6 +62,7 @@ declare global {
 const storageKey = "opendataverse.config"
 const userSettingsStorageKey = "opendataverse.user-settings"
 const browserCreatedWebResources: WebResource[] = []
+const browserDeletedWebResourceIds = new Set<string>()
 
 function isMicrosoftWebResourceName(name: string) {
   const lowerName = name.trim().toLowerCase()
@@ -283,7 +287,9 @@ export async function listWebResources(
     "@/modules/webresource-management/mock-data"
   )
   return [...mockWebResources, ...browserCreatedWebResources].filter(
-    (resource) => includeManaged || !resource.isManaged,
+    (resource) =>
+      !browserDeletedWebResourceIds.has(resource.id) &&
+      (includeManaged || !resource.isManaged),
   )
 }
 
@@ -324,6 +330,76 @@ export async function getWebResourceContent(
     contentEncoding: "text",
     mimeType: "application/javascript",
   } satisfies WebResourceContent
+}
+
+export async function listWebResourceActivity(
+  environment: DataverseEnvironment,
+) {
+  if (isTauriRuntime()) {
+    return invoke<WebResourceActivity[]>("list_web_resource_activity", {
+      environment,
+    })
+  }
+
+  const { mockWebResourceActivity } = await import(
+    "@/modules/webresource-management/mock-data"
+  )
+  return mockWebResourceActivity
+}
+
+export async function deleteWebResources(
+  environment: DataverseEnvironment,
+  webResourceIds: string[],
+) {
+  if (isTauriRuntime()) {
+    return invoke<DeleteWebResourcesResult>("delete_web_resources", {
+      environment,
+      webResourceIds,
+    })
+  }
+
+  for (const webResourceId of webResourceIds) {
+    browserDeletedWebResourceIds.add(webResourceId)
+    const createdIndex = browserCreatedWebResources.findIndex(
+      (resource) => resource.id === webResourceId,
+    )
+    if (createdIndex >= 0) {
+      browserCreatedWebResources.splice(createdIndex, 1)
+    }
+  }
+
+  return {
+    deleted: webResourceIds.length,
+    message: `Browser preview deleted ${webResourceIds.length} web resource${
+      webResourceIds.length === 1 ? "" : "s"
+    }.`,
+  } satisfies DeleteWebResourcesResult
+}
+
+export async function downloadWebResources(
+  environment: DataverseEnvironment,
+  input: {
+    webResourceIds: string[]
+    targetPath: string
+    preservePaths: boolean
+  },
+) {
+  if (isTauriRuntime()) {
+    return invoke<DownloadWebResourcesResult>("download_web_resources", {
+      environment,
+      webResourceIds: input.webResourceIds,
+      targetPath: input.targetPath,
+      preservePaths: input.preservePaths,
+    })
+  }
+
+  return {
+    downloaded: input.webResourceIds.length,
+    targetPath: input.targetPath,
+    message: `Browser preview downloaded ${input.webResourceIds.length} web resource${
+      input.webResourceIds.length === 1 ? "" : "s"
+    }.`,
+  } satisfies DownloadWebResourcesResult
 }
 
 export async function publishWebResource(
@@ -527,6 +603,10 @@ export async function createWebResourceInSolution(
     version: "Browser preview",
     isManaged: false,
     solution: input.solutionUniqueName,
+    modifiedOn: new Date().toISOString(),
+    modifiedBy: {
+      name: "Browser preview user",
+    },
   })
 
   return {

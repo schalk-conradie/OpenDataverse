@@ -16,6 +16,12 @@ pub(super) struct WebResourceApiItem {
     version: Option<i64>,
     #[serde(rename = "ismanaged")]
     is_managed: bool,
+    #[serde(rename = "modifiedon")]
+    modified_on: Option<String>,
+    #[serde(rename = "_modifiedby_value")]
+    modified_by_id: Option<String>,
+    #[serde(rename = "modifiedby")]
+    modified_by: Option<WebResourceUserApiItem>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -28,6 +34,16 @@ pub(super) struct WebResourceContentApiItem {
     content: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct WebResourceUserApiItem {
+    #[serde(rename = "systemuserid")]
+    id: Option<String>,
+    #[serde(rename = "fullname")]
+    full_name: Option<String>,
+    #[serde(rename = "domainname")]
+    domain_name: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct WebResource {
@@ -38,6 +54,10 @@ pub(super) struct WebResource {
     version: String,
     is_managed: bool,
     solution: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modified_on: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modified_by: Option<WebResourceUser>,
 }
 
 #[derive(Debug, Serialize)]
@@ -60,6 +80,216 @@ pub(super) struct PublishResult {
     web_resource_id: String,
     web_resource_name: String,
     message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct DeleteWebResourcesResult {
+    deleted: usize,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct DownloadWebResourcesResult {
+    downloaded: usize,
+    target_path: String,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct WebResourceUser {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    domain_name: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct WebResourceActivity {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    web_resource_id: Option<String>,
+    web_resource_name: String,
+    occurred_on: String,
+    actor_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actor_domain: Option<String>,
+    action: String,
+    operation: String,
+    kind: String,
+    changed_attributes: Vec<String>,
+    detail: String,
+}
+
+fn user_from_api(
+    value: Option<WebResourceUserApiItem>,
+    fallback_id: Option<String>,
+) -> Option<WebResourceUser> {
+    let user = value?;
+    let name = user.full_name?.trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+
+    Some(WebResourceUser {
+        id: user.id.or(fallback_id),
+        name,
+        domain_name: user.domain_name,
+    })
+}
+
+fn annotation_key(key: &str) -> String {
+    format!("{key}@OData.Community.Display.V1.FormattedValue")
+}
+
+fn formatted_value(value: &Value, key: &str) -> Option<String> {
+    json_string(value, &annotation_key(key))
+}
+
+fn operation_label(value: Option<i64>) -> String {
+    match value {
+        Some(1) => "Create",
+        Some(2) => "Update",
+        Some(3) => "Delete",
+        Some(4) => "Access",
+        _ => "Activity",
+    }
+    .to_string()
+}
+
+fn audit_kind(action: &str, operation: &str) -> String {
+    let action = action.to_lowercase();
+    let operation = operation.to_lowercase();
+
+    if action.contains("publish") || operation.contains("publish") {
+        "publish"
+    } else if operation.contains("create") {
+        "create"
+    } else if operation.contains("delete") {
+        "delete"
+    } else {
+        "change"
+    }
+    .to_string()
+}
+
+fn readable_attribute_name(name: &str) -> String {
+    match name {
+        "content" | "content_binary" | "contentfileref" => "Content".to_string(),
+        "contentjson" | "contentjsonfileref" => "Content JSON".to_string(),
+        "description" => "Description".to_string(),
+        "displayname" => "Display name".to_string(),
+        "ishidden" => "Hidden".to_string(),
+        "ismanaged" => "Managed state".to_string(),
+        "name" => "Name".to_string(),
+        "versionnumber" => "Version number".to_string(),
+        "webresourcetype" => "Type".to_string(),
+        "_modifiedby_value" | "modifiedby" => "Modified by".to_string(),
+        "_createdby_value" | "createdby" => "Created by".to_string(),
+        _ => name
+            .trim_matches('_')
+            .replace("_value", "")
+            .split('_')
+            .filter(|part| !part.is_empty())
+            .map(|part| {
+                let mut chars = part.chars();
+                match chars.next() {
+                    Some(first) => {
+                        format!("{}{}", first.to_uppercase(), chars.as_str())
+                    }
+                    None => String::new(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    }
+}
+
+fn audit_detail_attribute_names(detail: &Value) -> Vec<String> {
+    let mut names = Vec::new();
+    let Some(audit_detail) = detail.get("AuditDetail") else {
+        return names;
+    };
+
+    for record_key in ["OldValue", "NewValue"] {
+        let Some(record) = audit_detail.get(record_key).and_then(Value::as_object) else {
+            continue;
+        };
+
+        for key in record.keys() {
+            if key.starts_with('@') || key.contains('@') {
+                continue;
+            }
+
+            let associated_navigation_key =
+                format!("{key}@Microsoft.Dynamics.CRM.associatednavigationproperty");
+            let logical_name = record
+                .get(&associated_navigation_key)
+                .and_then(Value::as_str)
+                .unwrap_or(key);
+            let readable = readable_attribute_name(logical_name);
+            if !names.iter().any(|item| item == &readable) {
+                names.push(readable);
+            }
+        }
+    }
+
+    names
+}
+
+async fn retrieve_audit_changed_attributes(
+    app: &AppHandle,
+    environment: &DataverseEnvironment,
+    audit_id: &str,
+) -> Vec<String> {
+    let path = format!("/audits({audit_id})/Microsoft.Dynamics.CRM.RetrieveAuditDetails");
+    let Ok(body) = dataverse_get_with_headers(
+        app,
+        environment,
+        &path,
+        &[],
+        &[("Prefer", "odata.include-annotations=\"*\"".to_string())],
+    )
+    .await
+    else {
+        return Vec::new();
+    };
+
+    serde_json::from_str::<Value>(&body)
+        .map(|value| audit_detail_attribute_names(&value))
+        .unwrap_or_default()
+}
+
+fn audit_detail_text(kind: &str, changed_attributes: &[String]) -> String {
+    match kind {
+        "publish" => "Published web resource".to_string(),
+        "create" => "Created web resource".to_string(),
+        "delete" => "Deleted web resource".to_string(),
+        _ if changed_attributes.is_empty() => "Changed web resource".to_string(),
+        _ if changed_attributes.len() == 1 => {
+            format!("Changed {}", changed_attributes[0])
+        }
+        _ => {
+            let visible = changed_attributes
+                .iter()
+                .take(4)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            if changed_attributes.len() > 4 {
+                format!(
+                    "Changed {visible}, and {} more",
+                    changed_attributes.len() - 4
+                )
+            } else {
+                format!("Changed {visible}")
+            }
+        }
+    }
 }
 pub(super) fn map_resource_type(value: Option<i32>) -> String {
     match value {
@@ -194,6 +424,43 @@ fn web_resource_content_from_api(
     })
 }
 
+fn web_resource_bytes_from_api(resource: &WebResourceContentApiItem) -> Result<Vec<u8>, String> {
+    let encoded = resource.content.as_deref().unwrap_or_default();
+
+    if encoded.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    BASE64
+        .decode(encoded)
+        .map_err(|error| format!("Decode web resource content: {error}"))
+}
+
+fn safe_web_resource_relative_path(name: &str) -> Result<PathBuf, String> {
+    let normalized_name = name.trim().replace('\\', "/");
+    let normalized = normalized_name
+        .split('/')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+
+    if normalized.is_empty() {
+        return Err("Web resource name did not include a file path.".to_string());
+    }
+
+    let mut path = PathBuf::new();
+    for part in normalized {
+        if part == "." || part == ".." || part.contains(std::path::MAIN_SEPARATOR) {
+            return Err(format!(
+                "Web resource path contains an unsafe segment: {name}"
+            ));
+        }
+        path.push(part);
+    }
+
+    Ok(path)
+}
+
 #[tauri::command]
 pub(super) async fn list_web_resources(
     app: AppHandle,
@@ -212,7 +479,11 @@ pub(super) async fn list_web_resources(
         &[
             (
                 "$select",
-                "webresourceid,name,webresourcetype,versionnumber,ismanaged",
+                "webresourceid,name,webresourcetype,versionnumber,ismanaged,modifiedon,_modifiedby_value",
+            ),
+            (
+                "$expand",
+                "modifiedby($select=systemuserid,fullname,domainname)",
             ),
             ("$filter", &filter),
             ("$orderby", "name asc"),
@@ -236,8 +507,89 @@ pub(super) async fn list_web_resources(
                 .unwrap_or_default(),
             is_managed: resource.is_managed,
             solution: "Dataverse".to_string(),
+            modified_on: resource.modified_on,
+            modified_by: user_from_api(resource.modified_by, resource.modified_by_id),
         })
         .collect())
+}
+
+#[tauri::command]
+pub(super) async fn list_web_resource_activity(
+    app: AppHandle,
+    environment: DataverseEnvironment,
+) -> Result<Vec<WebResourceActivity>, String> {
+    let body = dataverse_get_with_headers(
+        &app,
+        &environment,
+        "/audits",
+        &[
+            (
+                "$select",
+                "auditid,createdon,operation,action,objecttypecode,_objectid_value,_userid_value",
+            ),
+            ("$filter", "objecttypecode eq 'webresource'"),
+            ("$orderby", "createdon desc"),
+            ("$top", "30"),
+            (
+                "$expand",
+                "userid($select=systemuserid,fullname,domainname)",
+            ),
+        ],
+        &[("Prefer", "odata.include-annotations=\"*\"".to_string())],
+    )
+    .await?;
+    let response: Value = serde_json::from_str(&body)
+        .map_err(|error| format!("Parse web resource activity response: {error}"))?;
+    let values = response
+        .get("value")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let mut activities = Vec::new();
+
+    for value in values {
+        let Some(id) = json_string(&value, "auditid") else {
+            continue;
+        };
+        let Some(occurred_on) = json_string(&value, "createdon") else {
+            continue;
+        };
+
+        let operation = formatted_value(&value, "operation")
+            .or_else(|| json_i64(&value, "operation").map(|value| operation_label(Some(value))))
+            .unwrap_or_else(|| "Activity".to_string());
+        let action = formatted_value(&value, "action").unwrap_or_else(|| operation.clone());
+        let kind = audit_kind(&action, &operation);
+        let changed_attributes = retrieve_audit_changed_attributes(&app, &environment, &id).await;
+        let user = value.get("userid");
+        let actor_name = user
+            .and_then(|item| json_string(item, "fullname"))
+            .or_else(|| formatted_value(&value, "_userid_value"))
+            .unwrap_or_else(|| "Unknown user".to_string());
+        let actor_domain = user.and_then(|item| json_string(item, "domainname"));
+        let web_resource_id = json_string(&value, "_objectid_value");
+        let web_resource_name = formatted_value(&value, "_objectid_value")
+            .or_else(|| web_resource_id.clone())
+            .unwrap_or_else(|| "Web resource".to_string());
+        let detail = audit_detail_text(&kind, &changed_attributes);
+
+        activities.push(WebResourceActivity {
+            id,
+            web_resource_id,
+            web_resource_name,
+            occurred_on,
+            actor_name,
+            actor_domain,
+            action,
+            operation,
+            kind,
+            changed_attributes,
+            detail,
+        });
+    }
+
+    Ok(activities)
 }
 
 #[tauri::command]
@@ -257,6 +609,99 @@ pub(super) async fn get_web_resource_content(
     let resource: WebResourceContentApiItem = serde_json::from_str(&body)
         .map_err(|error| format!("Parse web resource content response: {error}"))?;
     web_resource_content_from_api(resource)
+}
+
+#[tauri::command]
+pub(super) async fn download_web_resources(
+    app: AppHandle,
+    environment: DataverseEnvironment,
+    web_resource_ids: Vec<String>,
+    target_path: String,
+    preserve_paths: bool,
+) -> Result<DownloadWebResourcesResult, String> {
+    let target_path = PathBuf::from(target_path);
+    let mut downloaded = 0usize;
+
+    if preserve_paths {
+        fs::create_dir_all(&target_path).map_err(|error| {
+            format!(
+                "Could not create download folder {}: {error}",
+                target_path.display()
+            )
+        })?;
+    } else if web_resource_ids.len() != 1 {
+        return Err("Single-file downloads require exactly one web resource.".to_string());
+    }
+
+    for web_resource_id in web_resource_ids.iter().filter(|id| !id.trim().is_empty()) {
+        let body = dataverse_get(
+            &app,
+            &environment,
+            &format!("/webresourceset({web_resource_id})"),
+            &[("$select", "webresourceid,name,webresourcetype,content")],
+        )
+        .await?;
+
+        let resource: WebResourceContentApiItem = serde_json::from_str(&body)
+            .map_err(|error| format!("Parse web resource content response: {error}"))?;
+        let bytes = web_resource_bytes_from_api(&resource)?;
+        let output_path = if preserve_paths {
+            target_path.join(safe_web_resource_relative_path(&resource.name)?)
+        } else {
+            target_path.clone()
+        };
+
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "Could not create download folder {}: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+
+        fs::write(&output_path, bytes)
+            .map_err(|error| format!("Could not write {}: {error}", output_path.display()))?;
+        downloaded += 1;
+    }
+
+    let target_path = target_path.display().to_string();
+    Ok(DownloadWebResourcesResult {
+        downloaded,
+        target_path: target_path.clone(),
+        message: format!(
+            "Downloaded {downloaded} web resource{} to {target_path}.",
+            if downloaded == 1 { "" } else { "s" }
+        ),
+    })
+}
+
+#[tauri::command]
+pub(super) async fn delete_web_resources(
+    app: AppHandle,
+    environment: DataverseEnvironment,
+    web_resource_ids: Vec<String>,
+) -> Result<DeleteWebResourcesResult, String> {
+    let mut deleted = 0usize;
+
+    for web_resource_id in web_resource_ids.iter().filter(|id| !id.trim().is_empty()) {
+        dataverse_empty_request(
+            &app,
+            &environment,
+            reqwest::Method::DELETE,
+            &format!("/webresourceset({web_resource_id})"),
+        )
+        .await?;
+        deleted += 1;
+    }
+
+    Ok(DeleteWebResourcesResult {
+        deleted,
+        message: format!(
+            "Deleted {deleted} web resource{}.",
+            if deleted == 1 { "" } else { "s" }
+        ),
+    })
 }
 
 #[cfg(test)]

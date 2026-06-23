@@ -490,18 +490,31 @@ async fn dataverse_get(
     path: &str,
     query: &[(&str, &str)],
 ) -> Result<String, String> {
+    dataverse_get_with_headers(app, environment, path, query, &[]).await
+}
+
+async fn dataverse_get_with_headers(
+    app: &AppHandle,
+    environment: &DataverseEnvironment,
+    path: &str,
+    query: &[(&str, &str)],
+    headers: &[(&str, String)],
+) -> Result<String, String> {
     let access_token = access_token_for(app, environment).await?;
     let client = Client::new();
-    let response = client
+    let mut request = client
         .get(api_url(&environment.url, path))
         .bearer_auth(access_token)
         .header("Accept", "application/json")
         .header("OData-MaxVersion", "4.0")
         .header("OData-Version", "4.0")
-        .query(query)
-        .send()
-        .await
-        .map_err(|error| error.to_string())?;
+        .query(query);
+
+    for (name, value) in headers {
+        request = request.header(*name, value);
+    }
+
+    let response = request.send().await.map_err(|error| error.to_string())?;
 
     let status = response.status();
     let body = response.text().await.map_err(|error| error.to_string())?;
@@ -815,7 +828,10 @@ pub(crate) fn run() {
             auth::complete_browser_auth,
             auth::check_dataverse_connection,
             web_resources::list_web_resources,
+            web_resources::list_web_resource_activity,
             web_resources::get_web_resource_content,
+            web_resources::download_web_resources,
+            web_resources::delete_web_resources,
             web_resources::save_web_resource_content,
             web_resources::publish_web_resource,
             solutions::list_solutions,

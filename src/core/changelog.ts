@@ -11,6 +11,21 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.52",
+    date: "2026-06-23",
+    title: "Webresource activity history",
+    changes: [
+      "Replaced the hard-coded Webresource Management activity list with Dataverse audit history for web resource changes and publish events when Dataverse records them.",
+      "Resolved audit actors through Dataverse system users and added browser-preview mock activity so the history surface can be validated outside Tauri.",
+      "Removed duplicate Connect and Check actions from Webresource Management because environment connection is handled from the shared environment controls.",
+      "Renamed the toolbar folder action to Add Root so users can create root paths like sc_/ before adding nested folders from the tree.",
+      "Added confirmation-based delete actions for web resource roots, folders, and files.",
+      "Required root names to include an underscore and added a file right-click menu with Delete File.",
+      "Added right-click downloads for web resource files, folders, and roots.",
+      "Added visible Webresource Management download progress with elapsed time, current file, completed files, and failure details.",
+    ],
+  },
+  {
     version: "0.1.51",
     date: "2026-06-23",
     title: "Webresource folder creation",

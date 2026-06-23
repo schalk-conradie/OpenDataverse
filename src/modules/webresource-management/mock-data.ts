@@ -1,4 +1,7 @@
-import type { WebResource } from "@/core/dataverse/schemas"
+import type {
+  WebResource,
+  WebResourceActivity,
+} from "@/core/dataverse/schemas"
 
 export const mockWebResources: WebResource[] = [
   {
@@ -8,6 +11,12 @@ export const mockWebResources: WebResource[] = [
     version: "1.4.2",
     isManaged: false,
     solution: "CoreCustomizations",
+    modifiedOn: "2026-06-23T10:18:00Z",
+    modifiedBy: {
+      id: "browser-user-1",
+      name: "Maya Nkosi",
+      domainName: "CONTOSO\\maya.nkosi",
+    },
   },
   {
     id: "3f3c9f6a-1111-4d58-b77d-100000000002",
@@ -16,6 +25,12 @@ export const mockWebResources: WebResource[] = [
     version: "1.1.8",
     isManaged: false,
     solution: "CoreCustomizations",
+    modifiedOn: "2026-06-23T08:44:00Z",
+    modifiedBy: {
+      id: "browser-user-2",
+      name: "Jordan Lee",
+      domainName: "CONTOSO\\jordan.lee",
+    },
   },
   {
     id: "3f3c9f6a-1111-4d58-b77d-100000000003",
@@ -24,6 +39,12 @@ export const mockWebResources: WebResource[] = [
     version: "2.0.1",
     isManaged: false,
     solution: "PortalUi",
+    modifiedOn: "2026-06-22T15:32:00Z",
+    modifiedBy: {
+      id: "browser-user-1",
+      name: "Maya Nkosi",
+      domainName: "CONTOSO\\maya.nkosi",
+    },
   },
   {
     id: "3f3c9f6a-1111-4d58-b77d-100000000004",
@@ -32,6 +53,12 @@ export const mockWebResources: WebResource[] = [
     version: "1.0.9",
     isManaged: false,
     solution: "PortalUi",
+    modifiedOn: "2026-06-21T13:05:00Z",
+    modifiedBy: {
+      id: "browser-user-3",
+      name: "Priya Shah",
+      domainName: "CONTOSO\\priya.shah",
+    },
   },
   {
     id: "3f3c9f6a-1111-4d58-b77d-100000000005",
@@ -80,5 +107,47 @@ export const mockWebResources: WebResource[] = [
     version: "1.0.0",
     isManaged: false,
     solution: "CoreCustomizations",
+  },
+]
+
+export const mockWebResourceActivity: WebResourceActivity[] = [
+  {
+    id: "audit-browser-2",
+    webResourceId: "3f3c9f6a-1111-4d58-b77d-100000000001",
+    webResourceName: "new_/scripts/account-form.js",
+    occurredOn: "2026-06-23T10:19:00Z",
+    actorName: "Maya Nkosi",
+    actorDomain: "CONTOSO\\maya.nkosi",
+    action: "Publish",
+    operation: "Update",
+    kind: "publish",
+    changedAttributes: [],
+    detail: "Published web resource",
+  },
+  {
+    id: "audit-browser-1",
+    webResourceId: "3f3c9f6a-1111-4d58-b77d-100000000001",
+    webResourceName: "new_/scripts/account-form.js",
+    occurredOn: "2026-06-23T10:18:00Z",
+    actorName: "Maya Nkosi",
+    actorDomain: "CONTOSO\\maya.nkosi",
+    action: "Update",
+    operation: "Update",
+    kind: "change",
+    changedAttributes: ["Content", "Version number"],
+    detail: "Changed Content and Version number",
+  },
+  {
+    id: "audit-browser-3",
+    webResourceId: "3f3c9f6a-1111-4d58-b77d-100000000003",
+    webResourceName: "new_/styles/forms.css",
+    occurredOn: "2026-06-22T15:32:00Z",
+    actorName: "Jordan Lee",
+    actorDomain: "CONTOSO\\jordan.lee",
+    action: "Update",
+    operation: "Update",
+    kind: "change",
+    changedAttributes: ["Content"],
+    detail: "Changed Content",
   },
 ]

@@ -78,6 +78,34 @@ export async function chooseWebResourceImportFolder() {
   return typeof selected === "string" ? selected : undefined
 }
 
+export async function chooseWebResourceDownloadFolder() {
+  if (!isTauriRuntime()) {
+    return "/workspace/downloads"
+  }
+
+  const selected = await open({
+    multiple: false,
+    directory: true,
+  })
+
+  return typeof selected === "string" ? selected : undefined
+}
+
+export async function chooseWebResourceDownloadFile(webResourceName: string) {
+  const fileName =
+    webResourceName.split(/[\\/]/).filter(Boolean).at(-1) ?? "webresource"
+
+  if (!isTauriRuntime()) {
+    return `/workspace/downloads/${fileName}`
+  }
+
+  const selected = await save({
+    defaultPath: fileName,
+  })
+
+  return typeof selected === "string" ? selected : undefined
+}
+
 export async function chooseAiChatImageFiles() {
   if (!isTauriRuntime()) {
     return ["/workspace/screenshots/account-form.png"]
