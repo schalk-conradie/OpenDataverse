@@ -64,6 +64,7 @@ const storageKey = "opendataverse.config"
 const userSettingsStorageKey = "opendataverse.user-settings"
 const browserCreatedWebResources: WebResource[] = []
 const browserDeletedWebResourceIds = new Set<string>()
+const browserRemovedSolutionComponentIds = new Set<string>()
 
 function isMicrosoftWebResourceName(name: string) {
   const lowerName = name.trim().toLowerCase()
@@ -503,7 +504,9 @@ export async function listSolutionComponents(
     "@/modules/solution-explorer/mock-data"
   )
   return mockSolutionComponents.filter(
-    (component) => component.solutionId === solutionId,
+    (component) =>
+      component.solutionId === solutionId &&
+      !browserRemovedSolutionComponentIds.has(component.id),
   )
 }
 
@@ -582,9 +585,37 @@ export async function addExistingWebResourceToSolution(
     })
   }
 
+  if (webResourceId === "preview-add-existing-error") {
+    throw new Error(
+      "Browser preview simulated AddSolutionComponent failure: the selected web resource is already managed by another solution layer.",
+    )
+  }
+
   return {
     webResourceId,
     message: "Browser preview added the web resource to the solution.",
+  } satisfies SolutionWriteResult
+}
+
+export async function removeSolutionComponentFromSolution(
+  environment: DataverseEnvironment,
+  solutionUniqueName: string,
+  component: SolutionComponentSummary,
+) {
+  if (isTauriRuntime()) {
+    return invoke<SolutionWriteResult>("remove_solution_component_from_solution", {
+      environment,
+      solutionUniqueName,
+      componentObjectId: component.objectId,
+      componentType: component.componentType,
+      displayName: component.displayName,
+    })
+  }
+
+  browserRemovedSolutionComponentIds.add(component.id)
+
+  return {
+    message: `Browser preview removed ${component.displayName} from ${solutionUniqueName}.`,
   } satisfies SolutionWriteResult
 }
 

@@ -644,6 +644,17 @@ async fn dataverse_get_json_value(
     serde_json::from_str(&body).map_err(|error| format!("Parse Dataverse JSON response: {error}"))
 }
 
+async fn dataverse_get_json_value_with_headers(
+    app: &AppHandle,
+    environment: &DataverseEnvironment,
+    path: &str,
+    query: &[(&str, &str)],
+    headers: &[(&str, String)],
+) -> Result<Value, String> {
+    let body = dataverse_get_with_headers(app, environment, path, query, headers).await?;
+    serde_json::from_str(&body).map_err(|error| format!("Parse Dataverse JSON response: {error}"))
+}
+
 fn normalize_dataverse_next_link(
     environment: &DataverseEnvironment,
     next_link: &str,
@@ -678,6 +689,16 @@ async fn dataverse_get_collection_values(
     path: &str,
     query: Vec<(String, String)>,
 ) -> Result<Vec<Value>, String> {
+    dataverse_get_collection_values_with_headers(app, environment, path, query, &[]).await
+}
+
+async fn dataverse_get_collection_values_with_headers(
+    app: &AppHandle,
+    environment: &DataverseEnvironment,
+    path: &str,
+    query: Vec<(String, String)>,
+    headers: &[(&str, String)],
+) -> Result<Vec<Value>, String> {
     let mut values = Vec::new();
     let mut current_path = path.to_string();
     let mut current_query = query;
@@ -687,7 +708,14 @@ async fn dataverse_get_collection_values(
             .iter()
             .map(|(key, value)| (key.as_str(), value.as_str()))
             .collect::<Vec<_>>();
-        let page = dataverse_get_json_value(app, environment, &current_path, &query_refs).await?;
+        let page = dataverse_get_json_value_with_headers(
+            app,
+            environment,
+            &current_path,
+            &query_refs,
+            headers,
+        )
+        .await?;
 
         if let Some(items) = page.get("value").and_then(Value::as_array) {
             values.extend(items.iter().cloned());
@@ -889,6 +917,7 @@ pub(crate) fn run() {
             solutions::get_solution_component_layers,
             solutions::list_solution_web_resource_candidates,
             solutions::add_existing_web_resource_to_solution,
+            solutions::remove_solution_component_from_solution,
             solutions::create_web_resource_in_solution,
             solutions::import_web_resources_in_solution,
             plugins::inspect_plugin_assembly,

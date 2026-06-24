@@ -11,6 +11,24 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.57",
+    date: "2026-06-24",
+    title: "Global error notifications",
+    changes: [
+      "Added a global notification popup with expandable error details so important failures are no longer hidden in the sidebar status text.",
+      "Changed Solution Explorer web resource create, import, and add-existing failures to keep the dialog open and show the full error inline.",
+      "Fixed Add Existing web resources in Solution Explorer by omitting table-only subcomponent flags from the Dataverse AddSolutionComponent request.",
+      "Added a browser-preview Add Existing failure case so the Solution Explorer error flow can be validated without Dataverse.",
+      "Fixed Solution Explorer component lists so long component names scroll horizontally inside the middle pane instead of spilling under adjacent panes.",
+      "Made Solution Explorer component loading resolve display names with batched detail lookups for tables, choices, apps, charts, sitemaps, custom controls, connectors, environment variables, and plug-in components instead of blocking the pane on one Dataverse request per component.",
+      "Routed every documented Dataverse solution component type through a resolver strategy and added component-layer JSON parsing so metadata-only, internal, or newly introduced component types can show a friendly name instead of a GUID label when Dataverse exposes one.",
+      "Validated Solution Explorer component resolvers against a live Dataverse environment, removed invalid canvas app and form selects, and added model-driven app, app element, and connection reference resolution.",
+      "Changed Solution Explorer to keep the inspector in a drawer on smaller windows so the component list stays usable instead of being clipped by a permanent third pane.",
+      "Added a Solution Explorer component right-click menu with a confirmed Remove from Solution action backed by Dataverse RemoveSolutionComponent using the component object ID expected by Dataverse.",
+      "Added a Webresource Management right-click Add to Solution action for attaching an existing web resource to a selected unmanaged solution.",
+    ],
+  },
+  {
     version: "0.1.56",
     date: "2026-06-24",
     title: "Appearance themes",

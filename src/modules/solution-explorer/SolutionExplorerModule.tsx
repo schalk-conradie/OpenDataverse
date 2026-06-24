@@ -13,6 +13,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Trash2,
   Upload,
 } from "lucide-react"
 
@@ -25,6 +26,7 @@ import {
   listSolutionComponents,
   listSolutions,
   listSolutionWebResourceCandidates,
+  removeSolutionComponentFromSolution,
   type SolutionManagedFilter,
 } from "@/core/desktop/bridge"
 import {
@@ -32,6 +34,7 @@ import {
   type DataverseEnvironment,
   type SolutionComponentSummary,
   type SolutionDependencyItem,
+  type SolutionDependencyReport,
   type SolutionLayer,
   type SolutionSummary,
   type ToolWindow,
@@ -41,6 +44,12 @@ import { useWorkspaceStore } from "@/store/workspace-store"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import {
   Dialog,
   DialogContent,
@@ -99,8 +108,11 @@ const groupOrder = [
   "Forms",
   "Views",
   "Processes",
+  "Charts",
   "Web Resources",
+  "Site Maps",
   "Apps",
+  "Custom Controls",
   "Environment Variables",
   "Security",
   "Developer Extensions",
@@ -317,8 +329,10 @@ function AddExistingWebResourceDialog({
 }) {
   const queryClient = useQueryClient()
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
+  const showError = useWorkspaceStore((state) => state.showError)
   const [search, setSearch] = useState("")
   const [selectedId, setSelectedId] = useState("")
+  const [errorMessage, setErrorMessage] = useState<string>()
 
   const candidatesQuery = useQuery({
     queryKey: ["solution-web-resource-candidates", environment?.id, solution?.id],
@@ -361,7 +375,9 @@ function AddExistingWebResourceDialog({
       onOpenChange(false)
     },
     onError: (error) => {
-      setLastMessage(error instanceof Error ? error.message : "Add failed")
+      setErrorMessage(
+        showError("Add Existing Web Resource failed", error, "Add failed"),
+      )
     },
   })
 
@@ -371,6 +387,8 @@ function AddExistingWebResourceDialog({
     if (!nextOpen) {
       setSearch("")
       setSelectedId("")
+      setErrorMessage(undefined)
+      mutation.reset()
     }
 
     onOpenChange(nextOpen)
@@ -439,6 +457,12 @@ function AddExistingWebResourceDialog({
               </div>
             )}
           </ScrollArea>
+
+          {errorMessage && (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 font-mono text-[11px] break-words whitespace-pre-wrap text-destructive">
+              {errorMessage}
+            </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -473,6 +497,7 @@ function CreateWebResourceDialog({
 }) {
   const queryClient = useQueryClient()
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
+  const showError = useWorkspaceStore((state) => state.showError)
   const [form, setForm] = useState<CreateWebResourceForm>({
     name: "",
     displayName: "",
@@ -480,6 +505,7 @@ function CreateWebResourceDialog({
     type: "js",
     content: "",
   })
+  const [errorMessage, setErrorMessage] = useState<string>()
 
   const mutation = useMutation({
     mutationFn: (input: CreateWebResourceForm) =>
@@ -501,7 +527,7 @@ function CreateWebResourceDialog({
       onOpenChange(false)
     },
     onError: (error) => {
-      setLastMessage(error instanceof Error ? error.message : "Create failed")
+      setErrorMessage(showError("Create Web Resource failed", error, "Create failed"))
     },
   })
 
@@ -521,6 +547,8 @@ function CreateWebResourceDialog({
         type: "js",
         content: "",
       })
+      setErrorMessage(undefined)
+      mutation.reset()
     }
 
     onOpenChange(nextOpen)
@@ -605,6 +633,12 @@ function CreateWebResourceDialog({
             />
           </div>
 
+          {errorMessage && (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 font-mono text-[11px] break-words whitespace-pre-wrap text-destructive">
+              {errorMessage}
+            </div>
+          )}
+
           <DialogFooter className="gap-2">
             <Button
               type="button"
@@ -644,11 +678,13 @@ function ImportWebResourcesDialog({
 }) {
   const queryClient = useQueryClient()
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
+  const showError = useWorkspaceStore((state) => state.showError)
   const [form, setForm] = useState<ImportWebResourcesForm>({
     sourcePaths: [],
     targetRoot: defaultWebResourceRoot(solution),
     description: "",
   })
+  const [errorMessage, setErrorMessage] = useState<string>()
 
   const mutation = useMutation({
     mutationFn: (input: ImportWebResourcesForm) =>
@@ -673,7 +709,7 @@ function ImportWebResourcesDialog({
       onOpenChange(false)
     },
     onError: (error) => {
-      setLastMessage(error instanceof Error ? error.message : "Import failed")
+      setErrorMessage(showError("Import Web Resources failed", error, "Import failed"))
     },
   })
 
@@ -688,6 +724,7 @@ function ImportWebResourcesDialog({
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
       resetForm()
+      setErrorMessage(undefined)
       mutation.reset()
     }
 
@@ -782,6 +819,12 @@ function ImportWebResourcesDialog({
             />
           </div>
 
+          {errorMessage && (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 font-mono text-[11px] break-words whitespace-pre-wrap text-destructive">
+              {errorMessage}
+            </div>
+          )}
+
           <DialogFooter className="gap-2">
             <Button
               type="button"
@@ -812,9 +855,177 @@ function ImportWebResourcesDialog({
   )
 }
 
+function SolutionInspectorPanel({
+  selectedComponent,
+  dependencies,
+  dependenciesLoading,
+  dependenciesError,
+  layers,
+  layersLoading,
+  layersError,
+  onOpenRecord,
+  className,
+}: {
+  selectedComponent?: SolutionComponentSummary
+  dependencies?: SolutionDependencyReport
+  dependenciesLoading: boolean
+  dependenciesError: boolean
+  layers: SolutionLayer[]
+  layersLoading: boolean
+  layersError: boolean
+  onOpenRecord: () => void
+  className?: string
+}) {
+  return (
+    <div
+      className={cn(
+        "grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-muted/20",
+        className,
+      )}
+    >
+      <div className="border-b bg-background p-3 pr-10">
+        <div className="flex items-center gap-2">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-muted/50">
+            <Network className="size-4 text-primary" />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-sm font-medium">Inspector</h2>
+            <p className="truncate text-[11px] text-muted-foreground">
+              {selectedComponent?.displayName ?? "No component selected"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <Tabs defaultValue="details" className="min-h-0 gap-0 overflow-hidden">
+        <TabsList variant="line" className="mx-3 mt-3">
+          <TabsTrigger value="details">Details</TabsTrigger>
+          <TabsTrigger value="dependencies">Dependencies</TabsTrigger>
+          <TabsTrigger value="layers">Layers</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="details" className="min-h-0 overflow-hidden p-3">
+          {!selectedComponent ? (
+            <div className="flex h-64 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+              <Network className="size-5 text-muted-foreground/50" />
+              Select a component to inspect its details.
+            </div>
+          ) : (
+            <ScrollArea className="h-full">
+              <dl className="overflow-hidden rounded-lg border bg-background">
+                <DetailRow label="Name" value={selectedComponent.displayName} />
+                <DetailRow label="Type" value={selectedComponent.componentTypeLabel} />
+                <DetailRow label="Group" value={selectedComponent.group} />
+                <DetailRow label="Component ID" value={selectedComponent.id} />
+                <DetailRow label="Object ID" value={selectedComponent.objectId} />
+                <DetailRow label="Logical Name" value={selectedComponent.logicalName} />
+                <DetailRow label="Schema Name" value={selectedComponent.schemaName} />
+                <DetailRow
+                  label="Managed"
+                  value={
+                    selectedComponent.isManaged === undefined
+                      ? undefined
+                      : selectedComponent.isManaged
+                  }
+                />
+                <DetailRow label="Created" value={formatDate(selectedComponent.createdOn)} />
+                <DetailRow label="Modified" value={formatDate(selectedComponent.modifiedOn)} />
+                <DetailRow
+                  label="Root Behavior"
+                  value={selectedComponent.rootComponentBehaviorLabel}
+                />
+                <DetailRow label="Version" value={selectedComponent.version} />
+              </dl>
+
+              {selectedComponent.relatedRecordUrl && (
+                <a
+                  className="mt-3 inline-flex items-center gap-1 text-xs text-primary hover:underline"
+                  href={selectedComponent.relatedRecordUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={onOpenRecord}
+                >
+                  <ExternalLink className="size-3.5" />
+                  Open record
+                </a>
+              )}
+            </ScrollArea>
+          )}
+        </TabsContent>
+
+        <TabsContent value="dependencies" className="min-h-0 overflow-hidden p-3">
+          <ScrollArea className="h-full">
+            {!selectedComponent ? (
+              <div className="flex h-64 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+                <Network className="size-5 text-muted-foreground/50" />
+                Select a component to view its dependencies.
+              </div>
+            ) : dependenciesLoading ? (
+              <div className="flex h-64 items-center justify-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Loading dependencies
+              </div>
+            ) : dependenciesError ? (
+              <div className="flex h-64 items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 text-xs text-destructive">
+                <AlertTriangle className="size-4" />
+                Could not load dependencies.
+              </div>
+            ) : (
+              <div className="space-y-5">
+                <DependencyTable
+                  title="This Depends On"
+                  items={dependencies?.required ?? []}
+                  empty="No required components returned."
+                />
+                <Separator />
+                <DependencyTable
+                  title="Used By"
+                  items={dependencies?.dependents ?? []}
+                  empty="No dependent components returned."
+                />
+                <Separator />
+                <DependencyTable
+                  title="Delete Blockers"
+                  items={dependencies?.deleteBlockers ?? []}
+                  empty="No delete blockers returned."
+                />
+              </div>
+            )}
+          </ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="layers" className="min-h-0 overflow-hidden p-3">
+          <ScrollArea className="h-full">
+            {!selectedComponent ? (
+              <div className="flex h-64 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+                <Layers className="size-5 text-muted-foreground/50" />
+                Select a component to view its layers.
+              </div>
+            ) : layersLoading ? (
+              <div className="flex h-64 items-center justify-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                Loading layers
+              </div>
+            ) : layersError ? (
+              <div className="flex h-64 items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 text-xs text-destructive">
+                <Layers className="size-4" />
+                Could not load layers.
+              </div>
+            ) : (
+              <LayersTable layers={layers} />
+            )}
+          </ScrollArea>
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
 export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
   const config = useWorkspaceStore((state) => state.config)
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
+  const showError = useWorkspaceStore((state) => state.showError)
+  const queryClient = useQueryClient()
   const [solutionSearch, setSolutionSearch] = useState("")
   const [managedFilter, setManagedFilter] = useState<ManagedFilter>("unmanaged")
   const [componentSearch, setComponentSearch] = useState("")
@@ -823,6 +1034,8 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
   const [addExistingOpen, setAddExistingOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [inspectorOpen, setInspectorOpen] = useState(false)
+  const [removeTarget, setRemoveTarget] = useState<SolutionComponentSummary>()
 
   const environment =
     getEnvironmentById(config, window.environmentId) ??
@@ -932,6 +1145,33 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
       ),
   })
 
+  const removeComponentMutation = useMutation({
+    mutationFn: (component: SolutionComponentSummary) =>
+      removeSolutionComponentFromSolution(
+        environment as DataverseEnvironment,
+        selectedSolution?.uniqueName ?? "",
+        component,
+      ),
+    onSuccess: async (result, component) => {
+      setLastMessage(result.message)
+      if (selectedComponentId === component.id) {
+        setSelectedComponentId("")
+      }
+      setRemoveTarget(undefined)
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["solution-components", environment?.id, selectedSolution?.id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["solutions", environment?.id],
+        }),
+      ])
+    },
+    onError: (error) => {
+      showError("Remove from Solution failed", error, "Remove failed")
+    },
+  })
+
   if (!environment) {
     return (
       <section className="flex h-full items-center justify-center border-l bg-background p-8 text-center text-sm text-muted-foreground">
@@ -941,12 +1181,28 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
   }
 
   const canWriteWebResources = Boolean(selectedSolution && !selectedSolution.isManaged)
+  const canRemoveComponents = canWriteWebResources
   const dependencies = dependenciesQuery.data
   const layers = layersQuery.data ?? []
 
+  function renderInspectorPanel() {
+    return (
+      <SolutionInspectorPanel
+        selectedComponent={selectedComponent}
+        dependencies={dependencies}
+        dependenciesLoading={dependenciesQuery.isLoading}
+        dependenciesError={dependenciesQuery.isError}
+        layers={layers}
+        layersLoading={layersQuery.isLoading}
+        layersError={layersQuery.isError}
+        onOpenRecord={() => setLastMessage("Opening Dataverse record")}
+      />
+    )
+  }
+
   return (
-    <section className="grid h-full min-h-0 grid-cols-1 border-l bg-background xl:grid-cols-[18rem_minmax(34rem,1fr)_26rem]">
-      <aside className="min-h-0 border-r bg-muted/20">
+    <section className="grid h-full min-h-0 min-w-0 grid-cols-[15rem_minmax(0,1fr)] overflow-hidden border-l bg-background min-[1450px]:grid-cols-[17rem_minmax(0,1fr)] min-[1780px]:grid-cols-[17rem_minmax(0,1fr)_23rem]">
+      <aside className="min-h-0 min-w-0 border-r bg-muted/20">
         <div className="space-y-3 border-b bg-background p-3">
           <div className="flex items-center gap-2">
             <div className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-muted/50">
@@ -1055,7 +1311,7 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
         </ScrollArea>
       </aside>
 
-      <main className="min-h-0 border-r bg-background">
+      <main className="min-h-0 min-w-0 overflow-hidden border-r bg-background">
         <div className="space-y-3 border-b p-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
@@ -1079,7 +1335,18 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
               </div>
             </div>
 
-            <div className="flex shrink-0 gap-2">
+            <div className="flex shrink-0 flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="min-[1780px]:hidden"
+                disabled={!selectedComponent}
+                onClick={() => setInspectorOpen(true)}
+              >
+                <Network className="size-4" />
+                Inspector
+              </Button>
               <Button
                 type="button"
                 variant="outline"
@@ -1137,7 +1404,7 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
           </div>
         </div>
 
-        <ScrollArea className="h-[calc(100%-8.75rem)]">
+        <div className="h-[calc(100%-8.75rem)] min-w-0 overflow-auto">
           {componentsQuery.isLoading ? (
             <div className="flex h-64 items-center justify-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
@@ -1154,201 +1421,159 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
               No components found.
             </div>
           ) : (
-            <div className="p-3">
-              <div className="overflow-hidden rounded-lg border">
-                <Table>
-                  <TableHeader className="sticky top-0 z-10 bg-background">
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Managed</TableHead>
-                      <TableHead>Modified</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {componentGroups.flatMap(([group, items]) => [
-                      <TableRow key={`group-${group}`} className="bg-muted/40 hover:bg-muted/40">
-                        <TableCell colSpan={4} className="font-medium">
-                          {group} <span className="text-muted-foreground">{items.length}</span>
-                        </TableCell>
-                      </TableRow>,
-                      ...items.map((component) => (
-                        <TableRow
-                          key={component.id}
-                          data-state={
-                            component.id === effectiveSelectedComponentId
-                              ? "selected"
-                              : undefined
-                          }
-                          className="cursor-pointer"
-                          onClick={() => setSelectedComponentId(component.id)}
-                        >
-                          <TableCell>
-                            <div className="max-w-[28rem] truncate font-medium">
-                              {component.displayName}
-                            </div>
-                            <div className="max-w-[28rem] truncate font-mono text-[11px] text-muted-foreground">
-                              {component.logicalName ?? component.schemaName ?? component.objectId}
-                            </div>
-                          </TableCell>
-                          <TableCell>{component.componentTypeLabel}</TableCell>
-                          <TableCell>
-                            {component.isManaged === undefined ? (
-                              <span className="text-muted-foreground">Unknown</span>
-                            ) : component.isManaged ? (
-                              "Yes"
-                            ) : (
-                              "No"
-                            )}
-                          </TableCell>
-                          <TableCell>{formatDate(component.modifiedOn)}</TableCell>
-                        </TableRow>
-                      )),
-                    ])}
-                  </TableBody>
-                </Table>
-              </div>
+            <div className="min-w-[42rem] p-3">
+              <Table className="min-w-[42rem] table-fixed">
+                <TableHeader className="sticky top-0 z-10 bg-background">
+                  <TableRow>
+                    <TableHead className="w-[48%]">Name</TableHead>
+                    <TableHead className="w-[22%]">Type</TableHead>
+                    <TableHead className="w-[12%]">Managed</TableHead>
+                    <TableHead className="w-[18%]">Modified</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {componentGroups.flatMap(([group, items]) => [
+                    <TableRow key={`group-${group}`} className="bg-muted/40 hover:bg-muted/40">
+                      <TableCell colSpan={4} className="font-medium">
+                        {group} <span className="text-muted-foreground">{items.length}</span>
+                      </TableCell>
+                    </TableRow>,
+                    ...items.map((component) => (
+                      <ContextMenu key={component.id}>
+                        <ContextMenuTrigger asChild>
+                          <TableRow
+                            data-state={
+                              component.id === effectiveSelectedComponentId
+                                ? "selected"
+                                : undefined
+                            }
+                            className="cursor-pointer"
+                            onClick={() => setSelectedComponentId(component.id)}
+                          >
+                            <TableCell className="min-w-0 whitespace-normal align-top">
+                              <div className="break-all font-medium">
+                                {component.displayName}
+                              </div>
+                              <div className="break-all font-mono text-[11px] text-muted-foreground">
+                                {component.logicalName ??
+                                  component.schemaName ??
+                                  component.objectId}
+                              </div>
+                            </TableCell>
+                            <TableCell className="whitespace-normal break-words align-top">
+                              {component.componentTypeLabel}
+                            </TableCell>
+                            <TableCell className="whitespace-normal align-top">
+                              {component.isManaged === undefined ? (
+                                <span className="text-muted-foreground">Unknown</span>
+                              ) : component.isManaged ? (
+                                "Yes"
+                              ) : (
+                                "No"
+                              )}
+                            </TableCell>
+                            <TableCell className="whitespace-normal break-words align-top">
+                              {formatDate(component.modifiedOn)}
+                            </TableCell>
+                          </TableRow>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent>
+                          <ContextMenuItem
+                            disabled={!canRemoveComponents}
+                            className="text-destructive focus:text-destructive"
+                            onSelect={() => {
+                              setSelectedComponentId(component.id)
+                              setRemoveTarget(component)
+                            }}
+                          >
+                            <Trash2 className="size-4" />
+                            Remove from Solution
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    )),
+                  ])}
+                </TableBody>
+              </Table>
             </div>
           )}
-        </ScrollArea>
+        </div>
       </main>
 
-      <aside className="min-h-0 bg-muted/20">
-        <div className="border-b bg-background p-3">
-          <div className="flex items-center gap-2">
-            <div className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-muted/50">
-              <Network className="size-4 text-primary" />
-            </div>
-            <div>
-              <h2 className="text-sm font-medium">Inspector</h2>
-              <p className="truncate text-[11px] text-muted-foreground">
-                {selectedComponent?.displayName ?? "No component selected"}
-              </p>
+      <aside className="hidden min-h-0 min-w-0 overflow-hidden min-[1780px]:block">
+        {renderInspectorPanel()}
+      </aside>
+
+      <Dialog open={inspectorOpen} onOpenChange={setInspectorOpen}>
+        <DialogContent className="top-0 right-0 bottom-0 left-auto h-full w-[min(28rem,calc(100vw-1rem))] max-w-none translate-x-0 translate-y-0 rounded-none border-y-0 border-r-0 p-0 sm:max-w-none min-[1780px]:hidden">
+          {renderInspectorPanel()}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(removeTarget)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRemoveTarget(undefined)
+            removeComponentMutation.reset()
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove from Solution</DialogTitle>
+            <DialogDescription>
+              {selectedSolution?.friendlyName ?? "Selected solution"}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 text-sm">
+            <p>
+              Remove{" "}
+              <span className="font-medium">
+                {removeTarget?.displayName ?? "this component"}
+              </span>{" "}
+              from {selectedSolution?.uniqueName ?? "the solution"}?
+            </p>
+            <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+              This removes the component from the unmanaged solution. It does
+              not delete the underlying component from Dataverse.
             </div>
           </div>
-        </div>
 
-        <Tabs defaultValue="details" className="h-[calc(100%-4.1rem)] gap-0">
-          <TabsList variant="line" className="mx-3 mt-3">
-            <TabsTrigger value="details">Details</TabsTrigger>
-            <TabsTrigger value="dependencies">Dependencies</TabsTrigger>
-            <TabsTrigger value="layers">Layers</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="details" className="min-h-0 p-3">
-            {!selectedComponent ? (
-              <div className="flex h-64 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
-                <Network className="size-5 text-muted-foreground/50" />
-                Select a component to inspect its details.
-              </div>
-            ) : (
-              <ScrollArea className="h-full">
-                <dl className="overflow-hidden rounded-lg border bg-background">
-                  <DetailRow label="Name" value={selectedComponent.displayName} />
-                  <DetailRow label="Type" value={selectedComponent.componentTypeLabel} />
-                  <DetailRow label="Group" value={selectedComponent.group} />
-                  <DetailRow label="Component ID" value={selectedComponent.id} />
-                  <DetailRow label="Object ID" value={selectedComponent.objectId} />
-                  <DetailRow label="Logical Name" value={selectedComponent.logicalName} />
-                  <DetailRow label="Schema Name" value={selectedComponent.schemaName} />
-                  <DetailRow
-                    label="Managed"
-                    value={
-                      selectedComponent.isManaged === undefined
-                        ? undefined
-                        : selectedComponent.isManaged
-                    }
-                  />
-                  <DetailRow label="Created" value={formatDate(selectedComponent.createdOn)} />
-                  <DetailRow label="Modified" value={formatDate(selectedComponent.modifiedOn)} />
-                  <DetailRow
-                    label="Root Behavior"
-                    value={selectedComponent.rootComponentBehaviorLabel}
-                  />
-                  <DetailRow label="Version" value={selectedComponent.version} />
-                </dl>
-
-                {selectedComponent.relatedRecordUrl && (
-                  <a
-                    className="mt-3 inline-flex items-center gap-1 text-xs text-primary hover:underline"
-                    href={selectedComponent.relatedRecordUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={() => setLastMessage("Opening Dataverse record")}
-                  >
-                    <ExternalLink className="size-3.5" />
-                    Open record
-                  </a>
-                )}
-              </ScrollArea>
-            )}
-          </TabsContent>
-
-          <TabsContent value="dependencies" className="min-h-0 p-3">
-            <ScrollArea className="h-full">
-              {!selectedComponent ? (
-                <div className="flex h-64 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
-                  <Network className="size-5 text-muted-foreground/50" />
-                  Select a component to view its dependencies.
-                </div>
-              ) : dependenciesQuery.isLoading ? (
-                <div className="flex h-64 items-center justify-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" />
-                  Loading dependencies
-                </div>
-              ) : dependenciesQuery.isError ? (
-                <div className="flex h-64 items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 text-xs text-destructive">
-                  <AlertTriangle className="size-4" />
-                  Could not load dependencies.
-                </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setRemoveTarget(undefined)
+                removeComponentMutation.reset()
+              }}
+              disabled={removeComponentMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="text-destructive hover:bg-destructive/10"
+              disabled={!removeTarget || removeComponentMutation.isPending}
+              onClick={() => {
+                if (removeTarget) {
+                  removeComponentMutation.mutate(removeTarget)
+                }
+              }}
+            >
+              {removeComponentMutation.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
               ) : (
-                <div className="space-y-5">
-                  <DependencyTable
-                    title="This Depends On"
-                    items={dependencies?.required ?? []}
-                    empty="No required components returned."
-                  />
-                  <Separator />
-                  <DependencyTable
-                    title="Used By"
-                    items={dependencies?.dependents ?? []}
-                    empty="No dependent components returned."
-                  />
-                  <Separator />
-                  <DependencyTable
-                    title="Delete Blockers"
-                    items={dependencies?.deleteBlockers ?? []}
-                    empty="No delete blockers returned."
-                  />
-                </div>
+                <Trash2 className="size-4" />
               )}
-            </ScrollArea>
-          </TabsContent>
-
-          <TabsContent value="layers" className="min-h-0 p-3">
-            <ScrollArea className="h-full">
-              {!selectedComponent ? (
-                <div className="flex h-64 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
-                  <Layers className="size-5 text-muted-foreground/50" />
-                  Select a component to view its layers.
-                </div>
-              ) : layersQuery.isLoading ? (
-                <div className="flex h-64 items-center justify-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" />
-                  Loading layers
-                </div>
-              ) : layersQuery.isError ? (
-                <div className="flex h-64 items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 text-xs text-destructive">
-                  <Layers className="size-4" />
-                  Could not load layers.
-                </div>
-              ) : (
-                <LayersTable layers={layers} />
-              )}
-            </ScrollArea>
-          </TabsContent>
-        </Tabs>
-      </aside>
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AddExistingWebResourceDialog
         open={addExistingOpen}

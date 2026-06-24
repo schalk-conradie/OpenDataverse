@@ -8,7 +8,10 @@ import {
   type ReactNode,
 } from "react"
 import {
+  AlertTriangle,
+  CheckCircle2,
   Download,
+  Info,
   Loader2,
   Palette,
   Pencil,
@@ -91,7 +94,10 @@ import {
 } from "@/core/dataverse/schemas"
 import { cn } from "@/lib/utils"
 import { getToolDefinition, toolRegistry } from "@/modules/tool-registry"
-import { useWorkspaceStore } from "@/store/workspace-store"
+import {
+  useWorkspaceStore,
+  type AppNotification,
+} from "@/store/workspace-store"
 
 const AiChatModule = lazy(() =>
   import("@/modules/ai-chat/AiChatModule").then((module) => ({
@@ -694,6 +700,117 @@ type PendingToolOpen = {
   newWindow?: boolean
 }
 
+function AppNotificationCenter({
+  notification,
+  onDismiss,
+}: {
+  notification?: AppNotification
+  onDismiss: (notificationId?: string) => void
+}) {
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [clickedNotificationId, setClickedNotificationId] = useState<string>()
+
+  useEffect(() => {
+    if (!notification || clickedNotificationId === notification.id) {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      onDismiss(notification.id)
+    }, 5000)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [clickedNotificationId, notification, onDismiss])
+
+  if (!notification) {
+    return null
+  }
+
+  function keepNotificationOpen() {
+    setClickedNotificationId(notification?.id)
+  }
+
+  const isError = notification.severity === "error"
+  const Icon = isError
+    ? AlertTriangle
+    : notification.severity === "success"
+      ? CheckCircle2
+      : Info
+
+  return (
+    <>
+      <div
+        className="fixed right-4 bottom-4 z-[70] w-[min(28rem,calc(100vw-2rem))] rounded-xl border border-border bg-popover p-3 text-xs text-popover-foreground shadow-2xl shadow-black/10"
+        onPointerDownCapture={keepNotificationOpen}
+      >
+        <div className="flex items-start gap-3">
+          <div
+            className={cn(
+              "mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background",
+              isError && "border-destructive/20 text-destructive",
+              notification.severity === "success" && "text-emerald-600",
+              notification.severity === "info" && "text-primary",
+            )}
+          >
+            <Icon className="size-4" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className={cn("font-medium", isError && "text-destructive")}>
+              {notification.title ??
+                (isError ? "Operation failed" : "OpenDataverse")}
+            </p>
+            <p className="mt-1 line-clamp-3 break-words text-muted-foreground">
+              {notification.message}
+            </p>
+            {isError && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="mt-2"
+                onClick={() => {
+                  keepNotificationOpen()
+                  setDetailOpen(true)
+                }}
+              >
+                Details
+              </Button>
+            )}
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Dismiss notification"
+            onClick={() => onDismiss(notification.id)}
+          >
+            <X className="size-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="size-4" />
+              {notification.title ?? "Operation failed"}
+            </DialogTitle>
+            <DialogDescription>
+              The operation did not complete. Review the details below before
+              retrying.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-72 overflow-auto rounded-lg border border-destructive/20 bg-destructive/10 p-3 font-mono text-[11px] break-words whitespace-pre-wrap text-destructive">
+            {notification.message}
+          </div>
+          <DialogFooter showCloseButton />
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
 function App() {
   const hydrate = useWorkspaceStore((state) => state.hydrate)
   const config = useWorkspaceStore((state) => state.config)
@@ -701,6 +818,7 @@ function App() {
   const openWindows = useWorkspaceStore((state) => state.openWindows)
   const activeWindowId = useWorkspaceStore((state) => state.activeWindowId)
   const lastMessage = useWorkspaceStore((state) => state.lastMessage)
+  const lastNotification = useWorkspaceStore((state) => state.lastNotification)
   const selectEnvironment = useWorkspaceStore(
     (state) => state.selectEnvironment,
   )
@@ -714,6 +832,10 @@ function App() {
   const closeWindow = useWorkspaceStore((state) => state.closeWindow)
   const activateWindow = useWorkspaceStore((state) => state.activateWindow)
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
+  const showError = useWorkspaceStore((state) => state.showError)
+  const dismissNotification = useWorkspaceStore(
+    (state) => state.dismissNotification,
+  )
   const appearanceThemeId = useWorkspaceStore(
     (state) => state.userSettings.appearance.theme,
   )
@@ -852,9 +974,7 @@ function App() {
       }
     } catch (error) {
       setInstallingUpdate(false)
-      setLastMessage(
-        error instanceof Error ? error.message : "Could not install update",
-      )
+      showError("Update failed", error, "Could not install update")
     }
   }
 
@@ -913,6 +1033,10 @@ function App() {
         appVersion={runningAppVersion}
         open={changelogOpen}
         onOpenChange={setChangelogOpen}
+      />
+      <AppNotificationCenter
+        notification={lastNotification}
+        onDismiss={dismissNotification}
       />
 
       <Dialog

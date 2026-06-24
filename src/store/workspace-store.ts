@@ -34,6 +34,16 @@ import { getToolDefinition } from "@/modules/tool-registry"
 
 type LoadState = "idle" | "loading" | "ready" | "error"
 
+export type AppNotificationSeverity = "info" | "success" | "error"
+
+export type AppNotification = {
+  id: string
+  title?: string
+  message: string
+  severity: AppNotificationSeverity
+  createdAt: string
+}
+
 type NewEnvironmentInput = {
   name: string
   url: string
@@ -45,6 +55,11 @@ type OpenToolOptions = {
   newWindow?: boolean
 }
 
+type SetLastMessageOptions = {
+  title?: string
+  severity?: AppNotificationSeverity
+}
+
 type WorkspaceStore = {
   config: AppConfig
   userSettings: UserSettings
@@ -52,6 +67,7 @@ type WorkspaceStore = {
   openWindows: ToolWindow[]
   activeWindowId?: string
   lastMessage?: string
+  lastNotification?: AppNotification
   hydrate: () => Promise<void>
   addEnvironment: (input: NewEnvironmentInput) => void
   updateEnvironment: (
@@ -67,7 +83,9 @@ type WorkspaceStore = {
     authState: DataverseEnvironment["authState"],
     message?: string,
   ) => void
-  setLastMessage: (message?: string) => void
+  setLastMessage: (message?: string, options?: SetLastMessageOptions) => void
+  showError: (title: string, error: unknown, fallback: string) => string
+  dismissNotification: (notificationId?: string) => void
   setDarkMode: (enabled: boolean) => void
   setAppearanceMode: (mode: AppearanceMode) => void
   setAppearanceTheme: (themeId: AppearanceThemeId) => void
@@ -89,6 +107,58 @@ type WorkspaceStore = {
 
 const activeConnectionChecks = new Set<string>()
 
+function makeNotification(
+  message: string,
+  options?: SetLastMessageOptions,
+): AppNotification {
+  return {
+    id: createId("notification"),
+    title: options?.title,
+    message,
+    severity: options?.severity ?? inferNotificationSeverity(message),
+    createdAt: new Date().toISOString(),
+  }
+}
+
+function inferNotificationSeverity(message: string): AppNotificationSeverity {
+  const normalized = message.toLowerCase()
+  if (
+    normalized.includes("failed") ||
+    normalized.includes("could not") ||
+    normalized.includes("error") ||
+    normalized.includes("invalid") ||
+    normalized.includes("not found") ||
+    normalized.includes("required")
+  ) {
+    return "error"
+  }
+
+  if (
+    normalized.includes("added") ||
+    normalized.includes("created") ||
+    normalized.includes("completed") ||
+    normalized.includes("updated")
+  ) {
+    return "success"
+  }
+
+  return "info"
+}
+
+function notificationState(
+  message?: string,
+  options?: SetLastMessageOptions,
+): Pick<WorkspaceStore, "lastMessage" | "lastNotification"> {
+  return {
+    lastMessage: message,
+    lastNotification: message ? makeNotification(message, options) : undefined,
+  }
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : String(error ?? fallback)
+}
+
 function createToolWindow(toolId: ToolId, environmentId?: string): ToolWindow {
   const tool = getToolDefinition(toolId)
 
@@ -107,8 +177,10 @@ function persistConfig(
 ) {
   void saveAppConfig(config).catch((error: unknown) => {
     set({
-      lastMessage:
-        error instanceof Error ? error.message : "Could not save app config",
+      ...notificationState(errorMessage(error, "Could not save app config"), {
+        title: "Save failed",
+        severity: "error",
+      }),
     })
   })
 }
@@ -119,8 +191,10 @@ function persistUserSettings(
 ) {
   void saveUserSettings(settings).catch((error: unknown) => {
     set({
-      lastMessage:
-        error instanceof Error ? error.message : "Could not save user settings",
+      ...notificationState(errorMessage(error, "Could not save user settings"), {
+        title: "Save failed",
+        severity: "error",
+      }),
     })
   })
 }
@@ -354,6 +428,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   openWindows: [],
   activeWindowId: undefined,
   lastMessage: undefined,
+  lastNotification: undefined,
 
   async hydrate() {
     set({ loadState: "loading" })
@@ -377,14 +452,17 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         openWindows: [],
         activeWindowId: undefined,
         lastMessage: undefined,
+        lastNotification: undefined,
       })
     } catch (error) {
       set({
         loadState: "error",
         config: defaultAppConfig,
         userSettings: defaultUserSettings,
-        lastMessage:
-          error instanceof Error ? error.message : "Could not load app config",
+        ...notificationState(errorMessage(error, "Could not load app config"), {
+          title: "Load failed",
+          severity: "error",
+        }),
       })
     }
   },
@@ -620,8 +698,23 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
     persistConfig(nextConfig, set)
   },
 
-  setLastMessage(message) {
-    set({ lastMessage: message })
+  setLastMessage(message, options) {
+    set(notificationState(message, options))
+  },
+
+  showError(title, error, fallback) {
+    const message = errorMessage(error, fallback)
+    set(notificationState(message, { title, severity: "error" }))
+    return message
+  },
+
+  dismissNotification(notificationId) {
+    const notification = get().lastNotification
+    if (!notification || (notificationId && notification.id !== notificationId)) {
+      return
+    }
+
+    set({ lastNotification: undefined })
   },
 
   setDarkMode(enabled) {

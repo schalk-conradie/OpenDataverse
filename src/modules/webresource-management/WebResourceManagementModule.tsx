@@ -28,6 +28,7 @@ import {
   ImageIcon,
   Loader2,
   Play,
+  Plus,
   RefreshCw,
   RotateCcw,
   Save,
@@ -74,6 +75,7 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
+  addExistingWebResourceToSolution,
   createWebResourceInSolution,
   deleteWebResources,
   downloadWebResources,
@@ -911,6 +913,153 @@ function ImportWebResourcesDialog({
   )
 }
 
+function AddWebResourceToSolutionDialog({
+  open,
+  onOpenChange,
+  environment,
+  resource,
+  solutions,
+  solutionsLoading,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  environment: DataverseEnvironment
+  resource?: WebResource
+  solutions: SolutionSummary[]
+  solutionsLoading: boolean
+}) {
+  const queryClient = useQueryClient()
+  const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
+  const showError = useWorkspaceStore((state) => state.showError)
+  const [solutionUniqueName, setSolutionUniqueName] = useState("")
+  const selectedSolution =
+    solutions.find((solution) => solution.uniqueName === solutionUniqueName) ??
+    solutions[0]
+
+  const mutation = useMutation({
+    mutationFn: (uniqueName: string) =>
+      addExistingWebResourceToSolution(
+        environment,
+        uniqueName,
+        resource?.id ?? "",
+      ),
+    onSuccess: async (result) => {
+      setLastMessage(result.message)
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["solutions", environment.id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["solution-components", environment.id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["webResourceActivity", environment.id],
+        }),
+      ])
+      handleOpenChange(false)
+    },
+    onError: (error) => {
+      showError("Add to Solution failed", error, "Add failed")
+    },
+  })
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
+      setSolutionUniqueName("")
+      mutation.reset()
+    }
+
+    onOpenChange(nextOpen)
+  }
+
+  function submitAdd(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!resource || !selectedSolution) {
+      setLastMessage("Select a web resource and unmanaged solution.")
+      return
+    }
+
+    mutation.mutate(selectedSolution.uniqueName)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add to Solution</DialogTitle>
+          <DialogDescription>{environment.name}</DialogDescription>
+        </DialogHeader>
+
+        <form className="space-y-4" onSubmit={submitAdd}>
+          <div className="space-y-1">
+            <Label>Web Resource</Label>
+            <div className="truncate rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs text-muted-foreground">
+              {resource?.name ?? "No web resource selected"}
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="web-resource-add-solution">Solution</Label>
+            <Select
+              value={selectedSolution?.uniqueName}
+              onValueChange={setSolutionUniqueName}
+              disabled={solutionsLoading || solutions.length === 0}
+            >
+              <SelectTrigger id="web-resource-add-solution" className="w-full">
+                <SelectValue
+                  placeholder={
+                    solutionsLoading ? "Loading solutions" : "Select solution"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {solutions.map((solution) => (
+                  <SelectItem key={solution.id} value={solution.uniqueName}>
+                    {solution.friendlyName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+            This adds the existing web resource to the selected unmanaged
+            solution. It does not change the web resource content.
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleOpenChange(false)}
+              disabled={mutation.isPending}
+            >
+              Close
+            </Button>
+            <Button
+              type="submit"
+              disabled={
+                mutation.isPending ||
+                !resource ||
+                resource.isManaged ||
+                !selectedSolution
+              }
+            >
+              {mutation.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Plus className="size-4" />
+              )}
+              Add
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function AddFolderDialog({
   open,
   onOpenChange,
@@ -1704,6 +1853,7 @@ export function WebResourceManagementModule({
   const [selectedResourceId, setSelectedResourceId] = useState<string>()
   const [resourceViewerOpen, setResourceViewerOpen] = useState(false)
   const [importDialogOpen, setImportDialogOpen] = useState(false)
+  const [addToSolutionResource, setAddToSolutionResource] = useState<WebResource>()
   const [folderUpload, setFolderUpload] = useState<WebResourceFolderUpload>()
   const [folderCreate, setFolderCreate] = useState<WebResourceFolderCreate>()
   const [savingResourceAction, setSavingResourceAction] =
@@ -2396,6 +2546,19 @@ export function WebResourceManagementModule({
         solutions={unmanagedSolutionsQuery.data ?? []}
         solutionsLoading={unmanagedSolutionsQuery.isLoading}
       />
+      <AddWebResourceToSolutionDialog
+        key={`${environment.id}:${addToSolutionResource?.id ?? "no-resource"}`}
+        open={Boolean(addToSolutionResource)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAddToSolutionResource(undefined)
+          }
+        }}
+        environment={environment}
+        resource={addToSolutionResource}
+        solutions={unmanagedSolutionsQuery.data ?? []}
+        solutionsLoading={unmanagedSolutionsQuery.isLoading}
+      />
       <ImportWebResourcesDialog
         key={`${environment.id}:${folderUpload?.targetRoot ?? ""}:${folderUpload?.sourcePaths.join("|") ?? ""}`}
         open={Boolean(folderUpload)}
@@ -2825,6 +2988,17 @@ export function WebResourceManagementModule({
                           >
                             <Code2 className="size-4" />
                             View File
+                          </ContextMenuItem>
+                          <ContextMenuItem
+                            disabled={
+                              resource.isManaged ||
+                              unmanagedSolutionsQuery.isLoading ||
+                              (unmanagedSolutionsQuery.data ?? []).length === 0
+                            }
+                            onSelect={() => setAddToSolutionResource(resource)}
+                          >
+                            <Plus className="size-4" />
+                            Add to Solution
                           </ContextMenuItem>
                           {binding ? (
                             <ContextMenuItem
