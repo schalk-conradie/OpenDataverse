@@ -66,6 +66,7 @@ export const mockWebResources: WebResource[] = [
     type: "js",
     version: "9.2.0",
     isManaged: true,
+    isCustomizable: false,
     solution: "MicrosoftDynamics",
   },
   {
@@ -107,6 +108,15 @@ export const mockWebResources: WebResource[] = [
     version: "1.0.0",
     isManaged: false,
     solution: "CoreCustomizations",
+  },
+  {
+    id: "3f3c9f6a-1111-4d58-b77d-100000000011",
+    name: "msdyn_/solutionlayers/static/js/main.js",
+    type: "js",
+    version: "9.2.1",
+    isManaged: true,
+    isCustomizable: true,
+    solution: "MicrosoftDynamics",
   },
 ]
 

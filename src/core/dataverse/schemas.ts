@@ -112,6 +112,7 @@ export type WebResource = {
   type: "html" | "css" | "js" | "xml" | "image" | "resx"
   version: string
   isManaged: boolean
+  isCustomizable?: boolean
   solution: string
   modifiedOn?: string
   modifiedBy?: {

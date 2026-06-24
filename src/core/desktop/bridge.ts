@@ -301,6 +301,7 @@ export async function listWebResources(
   return [...mockWebResources, ...browserCreatedWebResources].filter(
     (resource) =>
       !browserDeletedWebResourceIds.has(resource.id) &&
+      resource.isCustomizable !== false &&
       (includeManaged || !resource.isManaged),
   )
 }

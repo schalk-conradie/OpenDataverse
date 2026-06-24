@@ -389,6 +389,19 @@ pub(super) fn web_resource_type_filter() -> String {
     .join(" or ")
 }
 
+fn web_resource_list_filter(include_managed: bool) -> String {
+    let mut filters = vec![
+        format!("({})", web_resource_type_filter()),
+        "iscustomizable/Value eq true".to_string(),
+    ];
+
+    if !include_managed {
+        filters.push("ismanaged eq false".to_string());
+    }
+
+    filters.join(" and ")
+}
+
 fn web_resource_content_from_api(
     resource: WebResourceContentApiItem,
 ) -> Result<WebResourceContent, String> {
@@ -467,10 +480,7 @@ pub(super) async fn list_web_resources(
     environment: DataverseEnvironment,
     include_managed: bool,
 ) -> Result<Vec<WebResource>, String> {
-    let mut filter = format!("({})", web_resource_type_filter());
-    if !include_managed {
-        filter.push_str(" and ismanaged eq false");
-    }
+    let filter = web_resource_list_filter(include_managed);
 
     let body = dataverse_get(
         &app,
@@ -718,6 +728,17 @@ mod tests {
                 "filter should include web resource type {type_code}"
             );
         }
+    }
+
+    #[test]
+    fn web_resource_list_filter_requires_customizable_resources() {
+        let unmanaged_filter = web_resource_list_filter(false);
+        assert!(unmanaged_filter.contains("iscustomizable/Value eq true"));
+        assert!(unmanaged_filter.contains("ismanaged eq false"));
+
+        let managed_filter = web_resource_list_filter(true);
+        assert!(managed_filter.contains("iscustomizable/Value eq true"));
+        assert!(!managed_filter.contains("ismanaged eq false"));
     }
 
     #[test]

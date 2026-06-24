@@ -11,6 +11,15 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.58",
+    date: "2026-06-24",
+    title: "Editable web resource filtering",
+    changes: [
+      "Changed Webresource Management to hide web resources that Dataverse marks as not customizable, including non-editable managed resources when the Managed switch is enabled.",
+      "Updated browser-preview web resource mocks so the Managed switch shows only customizable managed resources outside Tauri.",
+    ],
+  },
+  {
     version: "0.1.57",
     date: "2026-06-24",
     title: "Global error notifications",
