@@ -10,16 +10,21 @@ use sha2::{Digest, Sha256};
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     env, fs,
-    io::{BufRead, BufReader, Read, Write},
+    io::{Read, Write},
     net::TcpListener,
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    process::Stdio,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines},
+    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
+    sync::Mutex as AsyncMutex,
+};
 use url::{form_urlencoded, Url};
 use uuid::Uuid;
 
@@ -53,11 +58,8 @@ const AI_ATTACHMENT_MAX_CODEX_IMAGES: usize = 6;
 const AI_PASTED_IMAGES_DIR_NAME: &str = "ai-chat-pasted-images";
 const AI_PASTED_IMAGE_MAX_BYTES: usize = 15_000_000;
 const AI_CHAT_EVENT: &str = "ai-chat-event";
-const AI_DEFAULT_PROVIDER: &str = "codex";
-const AI_DEFAULT_MODEL: &str = "gpt-5.4-mini";
-const AI_DEFAULT_REASONING_EFFORT: &str = "medium";
-const AI_DEFAULT_CLAUDE_MODEL: &str = "claude-sonnet-4-6";
-const AI_DEFAULT_CLAUDE_REASONING_EFFORT: &str = "medium";
+const AI_SIDECAR_RESPONSE_TIMEOUT: Duration = Duration::from_secs(180);
+const AI_SIDECAR_STDERR_LINES: usize = 20;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 

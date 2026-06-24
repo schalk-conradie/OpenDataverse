@@ -105,7 +105,7 @@ pub(super) struct AiChatStreamEvent {
 #[derive(Default)]
 pub(super) struct AiChatState {
     threads: Mutex<HashMap<String, AiChatThread>>,
-    sidecar: Mutex<Option<AiSidecarProcess>>,
+    sidecar: AsyncMutex<Option<AiSidecarProcess>>,
 }
 
 #[derive(Debug)]
@@ -125,13 +125,42 @@ pub(super) struct AiMutationRequest {
 pub(super) struct AiSidecarProcess {
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    stdout: Lines<BufReader<ChildStdout>>,
+    stderr_tail: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl Drop for AiSidecarProcess {
     fn drop(&mut self) {
-        let _ = self.child.kill();
+        let _ = self.child.start_kill();
     }
+}
+
+const AI_MODEL_CATALOG_JSON: &str = include_str!("../../../src/core/ai/model-catalog.json");
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiModelCatalog {
+    default_provider: String,
+    providers: Vec<AiProviderCatalog>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiProviderCatalog {
+    id: String,
+    default_model: String,
+    default_reasoning_effort: String,
+    models: Vec<AiCatalogOption>,
+    #[serde(default)]
+    legacy_models: Vec<String>,
+    reasoning_efforts: Vec<AiCatalogOption>,
+    #[serde(default)]
+    legacy_reasoning_efforts: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AiCatalogOption {
+    value: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -251,6 +280,26 @@ pub(super) fn default_ai_chat_mode() -> String {
     "chat".to_string()
 }
 
+fn ai_model_catalog() -> Result<AiModelCatalog, String> {
+    serde_json::from_str(AI_MODEL_CATALOG_JSON)
+        .map_err(|error| format!("AI model catalog is invalid: {error}"))
+}
+
+fn ai_provider_catalog<'a>(
+    catalog: &'a AiModelCatalog,
+    provider: &str,
+) -> Option<&'a AiProviderCatalog> {
+    catalog.providers.iter().find(|item| item.id == provider)
+}
+
+fn ai_catalog_contains(options: &[AiCatalogOption], value: &str) -> bool {
+    options.iter().any(|option| option.value == value)
+}
+
+fn ai_catalog_contains_legacy(options: &[String], value: &str) -> bool {
+    options.iter().any(|option| option == value)
+}
+
 pub(super) fn normalize_ai_chat_mode(mode: Option<&str>) -> Result<String, String> {
     let mode = mode
         .map(str::trim)
@@ -264,47 +313,34 @@ pub(super) fn normalize_ai_chat_mode(mode: Option<&str>) -> Result<String, Strin
 }
 
 pub(super) fn normalize_ai_provider(provider: Option<&str>) -> Result<String, String> {
+    let catalog = ai_model_catalog()?;
     let provider = provider
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(AI_DEFAULT_PROVIDER);
+        .unwrap_or(&catalog.default_provider);
 
-    match provider {
-        "codex" | "claude" => Ok(provider.to_string()),
-        _ => Err(format!("Unsupported AI provider: {provider}")),
+    if let Some(provider) = ai_provider_catalog(&catalog, provider) {
+        Ok(provider.id.clone())
+    } else {
+        Err(format!("Unsupported AI provider: {provider}"))
     }
 }
 
 pub(super) fn normalize_ai_model(provider: &str, model: Option<&str>) -> Result<String, String> {
-    let default_model = match provider {
-        "claude" => AI_DEFAULT_CLAUDE_MODEL,
-        _ => AI_DEFAULT_MODEL,
-    };
+    let catalog = ai_model_catalog()?;
+    let provider_catalog = ai_provider_catalog(&catalog, provider)
+        .ok_or_else(|| format!("Unsupported AI provider: {provider}"))?;
     let model = model
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(default_model);
+        .unwrap_or(&provider_catalog.default_model);
 
-    match provider {
-        "codex" => match model {
-            "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" | "gpt-5.3-codex-spark" => Ok(model.to_string()),
-            _ => Err(format!("Unsupported Codex model: {model}")),
-        },
-        "claude" => match model {
-            "claude-fable-5"
-            | "claude-opus-4-8"
-            | "claude-opus-4-7"
-            | "claude-opus-4-6"
-            | "claude-opus-4-5-20251101"
-            | "claude-opus-4-5"
-            | "claude-sonnet-4-6"
-            | "claude-sonnet-4-5-20250929"
-            | "claude-sonnet-4-5"
-            | "claude-haiku-4-5-20251001"
-            | "claude-haiku-4-5" => Ok(model.to_string()),
-            _ => Err(format!("Unsupported Claude model: {model}")),
-        },
-        _ => Err(format!("Unsupported AI provider: {provider}")),
+    if ai_catalog_contains(&provider_catalog.models, model)
+        || ai_catalog_contains_legacy(&provider_catalog.legacy_models, model)
+    {
+        Ok(model.to_string())
+    } else {
+        Err(format!("Unsupported {provider} model: {model}"))
     }
 }
 
@@ -312,29 +348,22 @@ pub(super) fn normalize_ai_reasoning_effort(
     provider: &str,
     reasoning_effort: Option<&str>,
 ) -> Result<String, String> {
-    let default_reasoning_effort = match provider {
-        "claude" => AI_DEFAULT_CLAUDE_REASONING_EFFORT,
-        _ => AI_DEFAULT_REASONING_EFFORT,
-    };
+    let catalog = ai_model_catalog()?;
+    let provider_catalog = ai_provider_catalog(&catalog, provider)
+        .ok_or_else(|| format!("Unsupported AI provider: {provider}"))?;
     let reasoning_effort = reasoning_effort
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(default_reasoning_effort);
+        .unwrap_or(&provider_catalog.default_reasoning_effort);
 
-    match provider {
-        "codex" => match reasoning_effort {
-            "low" | "medium" | "high" | "xhigh" => Ok(reasoning_effort.to_string()),
-            _ => Err(format!(
-                "Unsupported Codex reasoning effort: {reasoning_effort}"
-            )),
-        },
-        "claude" => match reasoning_effort {
-            "low" | "medium" | "high" | "xhigh" | "max" => Ok(reasoning_effort.to_string()),
-            _ => Err(format!(
-                "Unsupported Claude reasoning effort: {reasoning_effort}"
-            )),
-        },
-        _ => Err(format!("Unsupported AI provider: {provider}")),
+    if ai_catalog_contains(&provider_catalog.reasoning_efforts, reasoning_effort)
+        || ai_catalog_contains_legacy(&provider_catalog.legacy_reasoning_efforts, reasoning_effort)
+    {
+        Ok(reasoning_effort.to_string())
+    } else {
+        Err(format!(
+            "Unsupported {provider} reasoning effort: {reasoning_effort}"
+        ))
     }
 }
 
@@ -1371,7 +1400,7 @@ pub(super) fn spawn_ai_sidecar(app: &AppHandle) -> Result<AiSidecarProcess, Stri
         .env("PATH", ai_sidecar_path_env(&home_dir))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
 
     #[cfg(target_os = "windows")]
     command.creation_flags(CREATE_NO_WINDOW);
@@ -1390,12 +1419,76 @@ pub(super) fn spawn_ai_sidecar(app: &AppHandle) -> Result<AiSidecarProcess, Stri
         .stdout
         .take()
         .ok_or_else(|| "AI sidecar stdout was not available.".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "AI sidecar stderr was not available.".to_string())?;
+    let stderr_tail = Arc::new(Mutex::new(VecDeque::new()));
+    spawn_ai_sidecar_stderr_reader(stderr, Arc::clone(&stderr_tail));
 
     Ok(AiSidecarProcess {
         child,
         stdin,
-        stdout: BufReader::new(stdout),
+        stdout: BufReader::new(stdout).lines(),
+        stderr_tail,
     })
+}
+
+fn push_ai_sidecar_stderr_tail(tail: &Arc<Mutex<VecDeque<String>>>, line: String) {
+    let Ok(mut lines) = tail.lock() else {
+        return;
+    };
+
+    if lines.len() >= AI_SIDECAR_STDERR_LINES {
+        lines.pop_front();
+    }
+    lines.push_back(line);
+}
+
+fn spawn_ai_sidecar_stderr_reader(stderr: ChildStderr, tail: Arc<Mutex<VecDeque<String>>>) {
+    tauri::async_runtime::spawn(async move {
+        let mut lines = BufReader::new(stderr).lines();
+
+        loop {
+            match lines.next_line().await {
+                Ok(Some(line)) => push_ai_sidecar_stderr_tail(&tail, line),
+                Ok(None) => break,
+                Err(error) => {
+                    push_ai_sidecar_stderr_tail(
+                        &tail,
+                        format!("Could not read AI sidecar stderr: {error}"),
+                    );
+                    break;
+                }
+            }
+        }
+    });
+}
+
+fn ai_sidecar_stderr_tail(tail: &Arc<Mutex<VecDeque<String>>>) -> String {
+    let Ok(lines) = tail.lock() else {
+        return String::new();
+    };
+
+    let lines = lines
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!(" Recent sidecar stderr: {}", lines.join(" | "))
+    }
+}
+
+fn ai_sidecar_timeout_error(tail: &Arc<Mutex<VecDeque<String>>>) -> String {
+    format!(
+        "AI sidecar timed out after {} seconds.{}",
+        AI_SIDECAR_RESPONSE_TIMEOUT.as_secs(),
+        ai_sidecar_stderr_tail(tail)
+    )
 }
 
 pub(super) fn ensure_ai_sidecar<'a>(
@@ -1420,7 +1513,7 @@ pub(super) fn ensure_ai_sidecar<'a>(
         .ok_or_else(|| "AI sidecar was not available.".to_string())
 }
 
-pub(super) fn run_ai_sidecar_stream_request(
+pub(super) async fn run_ai_sidecar_stream_request(
     app: &AppHandle,
     state: &State<'_, AiChatState>,
     method: &str,
@@ -1433,52 +1526,87 @@ pub(super) fn run_ai_sidecar_stream_request(
       "method": method,
       "params": params,
     });
-    let mut sidecar_slot = state.sidecar.lock().map_err(|error| error.to_string())?;
-    let process = ensure_ai_sidecar(app, &mut sidecar_slot)?;
-
-    process
-        .stdin
-        .write_all(format!("{request}\n").as_bytes())
-        .and_then(|_| process.stdin.flush())
-        .map_err(|error| format!("Could not send request to AI sidecar: {error}"))?;
-
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let bytes_read = process
-            .stdout
-            .read_line(&mut line)
-            .map_err(|error| format!("Could not read AI sidecar response: {error}"))?;
-
-        if bytes_read == 0 {
-            *sidecar_slot = None;
-            return Err("AI sidecar stopped before returning a response.".to_string());
+    let mut sidecar_slot = state.sidecar.lock().await;
+    let mut reset_sidecar = false;
+    let request_result = {
+        let process = ensure_ai_sidecar(app, &mut sidecar_slot)?;
+        let request_line = format!("{request}\n");
+        let send_result = async {
+            process.stdin.write_all(request_line.as_bytes()).await?;
+            process.stdin.flush().await
         }
+        .await;
 
-        let response: AiSidecarResponse = serde_json::from_str(line.trim()).map_err(|error| {
-            format!(
-                "AI sidecar returned invalid JSON: {error}. Response: {}",
-                line.trim()
-            )
-        })?;
+        if let Err(error) = send_result {
+            reset_sidecar = true;
+            Err(format!("Could not send request to AI sidecar: {error}"))
+        } else {
+            let response = tokio::time::timeout(AI_SIDECAR_RESPONSE_TIMEOUT, async {
+                loop {
+                    let Some(line) = process.stdout.next_line().await.map_err(|error| {
+                        (format!("Could not read AI sidecar response: {error}"), true)
+                    })?
+                    else {
+                        return Err((
+                            "AI sidecar stopped before returning a response.".to_string(),
+                            true,
+                        ));
+                    };
 
-        if response.id != request_id {
-            continue;
+                    let response: AiSidecarResponse =
+                        serde_json::from_str(line.trim()).map_err(|error| {
+                            (
+                                format!(
+                                    "AI sidecar returned invalid JSON: {error}. Response: {}",
+                                    line.trim()
+                                ),
+                                false,
+                            )
+                        })?;
+
+                    if response.id != request_id {
+                        continue;
+                    }
+
+                    if let Some(event) = response.event {
+                        on_event(event);
+                        continue;
+                    }
+
+                    if response.ok.unwrap_or(false) {
+                        return Ok(response.result.unwrap_or(Value::Null));
+                    }
+
+                    return Err((
+                        response
+                            .error
+                            .unwrap_or_else(|| "AI sidecar request failed.".to_string()),
+                        false,
+                    ));
+                }
+            })
+            .await;
+
+            match response {
+                Ok(result) => result.map_err(|(message, should_reset)| {
+                    reset_sidecar = should_reset;
+                    message
+                }),
+                Err(_) => {
+                    reset_sidecar = true;
+                    let timeout_error = ai_sidecar_timeout_error(&process.stderr_tail);
+                    let _ = process.child.start_kill();
+                    Err(timeout_error)
+                }
+            }
         }
+    };
 
-        if let Some(event) = response.event {
-            on_event(event);
-            continue;
-        }
-
-        if response.ok.unwrap_or(false) {
-            return Ok(response.result.unwrap_or(Value::Null));
-        }
-
-        return Err(response
-            .error
-            .unwrap_or_else(|| "AI sidecar request failed.".to_string()));
+    if reset_sidecar {
+        *sidecar_slot = None;
     }
+
+    request_result
 }
 
 pub(super) fn environment_by_id(
@@ -2036,7 +2164,7 @@ pub(super) fn ai_tool_argument(arguments: &Value, name: &str) -> Option<String> 
         .map(ToString::to_string)
 }
 
-pub(super) fn run_ai_provider_turn(
+pub(super) async fn run_ai_provider_turn(
     app: &AppHandle,
     state: &State<'_, AiChatState>,
     thread: &AiChatThread,
@@ -2068,6 +2196,7 @@ pub(super) fn run_ai_provider_turn(
         }),
         |_event| {},
     )
+    .await
     .map_err(|error| user_safe_ai_provider_error(&thread.provider, error))?;
 
     serde_json::from_value(result).map_err(|error| {
@@ -2274,7 +2403,8 @@ pub(super) async fn build_ai_chat_response(
             } else {
                 Vec::new()
             },
-        )?;
+        )
+        .await?;
         update_ai_thread_provider_thread_id(thread, turn.provider_session_id());
         let mut provider_turn_message = mark_ai_message_status(&provider_turn_message, "complete");
         provider_turn_message.metadata = Some(serde_json::json!({
@@ -2727,6 +2857,78 @@ mod tests {
             .iter()
             .find(|(item_key, _)| item_key == key)
             .map(|(_, value)| value.clone())
+    }
+
+    #[test]
+    fn ai_model_catalog_drives_defaults_and_validation() {
+        let provider = normalize_ai_provider(None).expect("default provider should normalize");
+
+        assert_eq!(provider, "codex");
+        assert_eq!(
+            normalize_ai_model(&provider, None).expect("default model should normalize"),
+            "gpt-5.4-mini"
+        );
+        assert_eq!(
+            normalize_ai_reasoning_effort(&provider, None)
+                .expect("default reasoning effort should normalize"),
+            "medium"
+        );
+        assert!(normalize_ai_model(&provider, Some("not-a-model")).is_err());
+        assert!(normalize_ai_provider(Some("not-a-provider")).is_err());
+    }
+
+    #[test]
+    fn ai_model_catalog_keeps_legacy_claude_values_accepted() {
+        assert_eq!(
+            normalize_ai_model("claude", Some("claude-sonnet-4-5"))
+                .expect("legacy Claude model should remain readable"),
+            "claude-sonnet-4-5"
+        );
+        assert_eq!(
+            normalize_ai_reasoning_effort("claude", Some("xhigh"))
+                .expect("legacy Claude reasoning should remain readable"),
+            "xhigh"
+        );
+    }
+
+    #[test]
+    fn ai_sidecar_stderr_tail_is_bounded_and_trimmed() {
+        let tail = Arc::new(Mutex::new(VecDeque::new()));
+
+        for index in 0..(AI_SIDECAR_STDERR_LINES + 2) {
+            push_ai_sidecar_stderr_tail(&tail, format!(" entry-{index:02} "));
+        }
+
+        let display = ai_sidecar_stderr_tail(&tail);
+
+        assert!(!display.contains("entry-00"));
+        assert!(!display.contains("entry-01"));
+        assert!(display.contains("entry-02"));
+        assert!(display.contains(&format!("entry-{}", AI_SIDECAR_STDERR_LINES + 1)));
+        assert!(display.starts_with(" Recent sidecar stderr: entry-02"));
+    }
+
+    #[test]
+    fn ai_sidecar_timeout_error_includes_timeout_and_stderr_tail() {
+        let tail = Arc::new(Mutex::new(VecDeque::new()));
+
+        assert_eq!(
+            ai_sidecar_timeout_error(&tail),
+            format!(
+                "AI sidecar timed out after {} seconds.",
+                AI_SIDECAR_RESPONSE_TIMEOUT.as_secs()
+            )
+        );
+
+        push_ai_sidecar_stderr_tail(&tail, "sidecar stack trace".to_string());
+
+        assert_eq!(
+            ai_sidecar_timeout_error(&tail),
+            format!(
+                "AI sidecar timed out after {} seconds. Recent sidecar stderr: sidecar stack trace",
+                AI_SIDECAR_RESPONSE_TIMEOUT.as_secs()
+            )
+        );
     }
 
     #[test]
