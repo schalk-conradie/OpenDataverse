@@ -111,6 +111,14 @@ impl Default for AppConfig {
 struct AppearanceSettings {
     #[serde(default)]
     dark_mode: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mode: Option<String>,
+    #[serde(default = "default_appearance_theme")]
+    theme: String,
+}
+
+fn default_appearance_theme() -> String {
+    "opendataverse".to_string()
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -798,6 +806,45 @@ mod tests {
     fn safe_storage_segment_removes_path_characters() {
         assert_eq!(safe_storage_segment("../environment/id"), "environment_id");
         assert_eq!(safe_storage_segment(""), "unknown");
+    }
+
+    #[test]
+    fn user_settings_preserve_appearance_theme_and_mode() {
+        let settings: UserSettings = serde_json::from_value(serde_json::json!({
+          "appearance": {
+            "darkMode": false,
+            "mode": "light",
+            "theme": "catppuccin"
+          },
+          "dangerZone": {
+            "experimentalAiAgentEnabled": true
+          }
+        }))
+        .expect("settings should deserialize");
+
+        let saved = serde_json::to_value(settings).expect("settings should serialize");
+
+        assert_eq!(saved["appearance"]["darkMode"], false);
+        assert_eq!(saved["appearance"]["mode"], "light");
+        assert_eq!(saved["appearance"]["theme"], "catppuccin");
+        assert_eq!(saved["dangerZone"]["experimentalAiAgentEnabled"], true);
+    }
+
+    #[test]
+    fn legacy_dark_mode_user_settings_keep_mode_absent_for_frontend_migration() {
+        let settings: UserSettings = serde_json::from_value(serde_json::json!({
+          "appearance": {
+            "darkMode": true
+          },
+          "dangerZone": {}
+        }))
+        .expect("legacy settings should deserialize");
+
+        let saved = serde_json::to_value(settings).expect("settings should serialize");
+
+        assert_eq!(saved["appearance"]["darkMode"], true);
+        assert!(saved["appearance"].get("mode").is_none());
+        assert_eq!(saved["appearance"]["theme"], "opendataverse");
     }
 }
 

@@ -110,7 +110,7 @@ The system explicitly rejects generic SaaS dashboard aesthetics, bloated enterpr
 
 ## 2. Colors
 
-The palette is a restrained OKLCH system: tinted neutrals with a single violet-indigo accent.
+The default palette is a restrained OKLCH system: tinted neutrals with a single violet-indigo accent. Additional appearance themes map well-known palettes onto the same semantic tokens, so component code still uses `bg-background`, `text-foreground`, `border-border`, `bg-primary`, and related utilities instead of theme-specific colors.
 
 ### Primary
 
@@ -138,6 +138,8 @@ The palette is a restrained OKLCH system: tinted neutrals with a single violet-i
 **The One Accent Rule.** The violet-indigo primary is the only accent. It is reserved for selection, primary action, and state indicators. Do not introduce a second saturated accent color for decoration or categorization.
 
 **The Tonal State Rule.** Semantic states (warning, error, success) are conveyed with 10% tinted surfaces and a subtle border, not with full-saturation fills or side stripes.
+
+**Theme Families.** OpenDataverse supports OpenDataverse, Gruvbox, Rose Pine, and Catppuccin theme families, each with light and dark modes. Theme CSS may override only the shared semantic variables in `src/index.css`; module code must keep using semantic Tailwind utilities rather than hard-coded palette values.
 
 ## 3. Typography
 

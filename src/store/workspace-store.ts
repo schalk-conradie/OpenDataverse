@@ -13,6 +13,10 @@ import {
   startBrowserAuth,
 } from "@/core/desktop/bridge"
 import {
+  type AppearanceMode,
+  type AppearanceThemeId,
+} from "@/core/appearance/themes"
+import {
   createId,
   dataverseEnvironmentSchema,
   defaultAppConfig,
@@ -65,6 +69,8 @@ type WorkspaceStore = {
   ) => void
   setLastMessage: (message?: string) => void
   setDarkMode: (enabled: boolean) => void
+  setAppearanceMode: (mode: AppearanceMode) => void
+  setAppearanceTheme: (themeId: AppearanceThemeId) => void
   setExperimentalAiAgentEnabled: (enabled: boolean) => void
   openTool: (toolId: ToolId, options?: OpenToolOptions) => void
   closeWindow: (windowId: string) => void
@@ -619,12 +625,31 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   setDarkMode(enabled) {
+    get().setAppearanceMode(enabled ? "dark" : "light")
+  },
+
+  setAppearanceMode(mode) {
     const settings = get().userSettings
     const nextSettings = {
       ...settings,
       appearance: {
         ...settings.appearance,
-        darkMode: enabled,
+        mode,
+        darkMode: mode === "dark",
+      },
+    }
+
+    set({ userSettings: nextSettings, lastMessage: undefined })
+    persistUserSettings(nextSettings, set)
+  },
+
+  setAppearanceTheme(themeId) {
+    const settings = get().userSettings
+    const nextSettings = {
+      ...settings,
+      appearance: {
+        ...settings.appearance,
+        theme: themeId,
       },
     }
 

@@ -10,12 +10,14 @@ import {
 import {
   Download,
   Loader2,
+  Palette,
   Pencil,
   Plus,
   RefreshCw,
   Settings,
   ShieldAlert,
   SlidersHorizontal,
+  SunMoon,
   Trash2,
   X,
 } from "lucide-react"
@@ -59,6 +61,14 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { appNightlyLabel, appVersion, appWindowTitle } from "@/core/build-info"
+import {
+  appearanceModes,
+  appearanceThemes,
+  getAppearanceTheme,
+  getAppearanceThemeClassName,
+  type AppearanceMode,
+  type AppearanceThemeId,
+} from "@/core/appearance/themes"
 import {
   getChangelogBuildId,
   markChangelogBuildSeen,
@@ -114,6 +124,11 @@ const WebResourceManagementModule = lazy(() =>
     }),
   ),
 )
+
+const appearanceModeLabels: Record<AppearanceMode, string> = {
+  light: "Light",
+  dark: "Dark",
+}
 
 type EnvironmentFormDialogProps = {
   mode: "add" | "edit"
@@ -457,16 +472,33 @@ function ManageEnvironmentsDialog() {
 }
 
 function SettingsDialog({ appVersion }: { appVersion: string }) {
-  const darkMode = useWorkspaceStore(
-    (state) => state.userSettings.appearance.darkMode,
+  const appearanceThemeId = useWorkspaceStore(
+    (state) => state.userSettings.appearance.theme,
+  )
+  const appearanceMode = useWorkspaceStore(
+    (state) => state.userSettings.appearance.mode,
   )
   const experimentalAiAgentEnabled = useWorkspaceStore(
     (state) => state.userSettings.dangerZone.experimentalAiAgentEnabled,
   )
-  const setDarkMode = useWorkspaceStore((state) => state.setDarkMode)
+  const setAppearanceTheme = useWorkspaceStore(
+    (state) => state.setAppearanceTheme,
+  )
+  const setAppearanceMode = useWorkspaceStore(
+    (state) => state.setAppearanceMode,
+  )
   const setExperimentalAiAgentEnabled = useWorkspaceStore(
     (state) => state.setExperimentalAiAgentEnabled,
   )
+  const selectedTheme = getAppearanceTheme(appearanceThemeId)
+
+  function changeTheme(value: string) {
+    setAppearanceTheme(value as AppearanceThemeId)
+  }
+
+  function changeMode(value: string) {
+    setAppearanceMode(value as AppearanceMode)
+  }
 
   return (
     <Dialog>
@@ -496,18 +528,74 @@ function SettingsDialog({ appVersion }: { appVersion: string }) {
             </TabsTrigger>
           </TabsList>
           <TabsContent value="appearance" className="min-h-0 pt-3">
-            <div className="flex min-h-12 items-center justify-between gap-4 border bg-background px-3">
-              <Label
-                htmlFor="settings-dark-mode"
-                className="text-sm font-medium"
-              >
-                Dark mode
-              </Label>
-              <Switch
-                id="settings-dark-mode"
-                checked={darkMode}
-                onCheckedChange={setDarkMode}
-              />
+            <div className="grid gap-3">
+              <div className="grid gap-2 rounded-lg border border-border bg-background p-3">
+                <div className="flex min-h-8 items-center justify-between gap-4">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Palette className="size-4 shrink-0 text-muted-foreground" />
+                    <Label
+                      htmlFor="settings-appearance-theme"
+                      className="text-sm font-medium"
+                    >
+                      Theme
+                    </Label>
+                  </div>
+                  <Select
+                    value={appearanceThemeId}
+                    onValueChange={changeTheme}
+                  >
+                    <SelectTrigger
+                      id="settings-appearance-theme"
+                      className="w-44"
+                    >
+                      <SelectValue placeholder="Theme" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {appearanceThemes.map((theme) => (
+                        <SelectItem key={theme.id} value={theme.id}>
+                          {theme.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-1.5 pl-6" aria-hidden="true">
+                  {selectedTheme.swatches.map((swatch) => (
+                    <span
+                      key={swatch}
+                      className="size-4 rounded-sm border border-border"
+                      style={{ backgroundColor: swatch }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex min-h-14 items-center justify-between gap-4 rounded-lg border border-border bg-background p-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <SunMoon className="size-4 shrink-0 text-muted-foreground" />
+                  <Label
+                    htmlFor="settings-appearance-mode"
+                    className="text-sm font-medium"
+                  >
+                    Mode
+                  </Label>
+                </div>
+                <Select value={appearanceMode} onValueChange={changeMode}>
+                  <SelectTrigger
+                    id="settings-appearance-mode"
+                    className="w-32"
+                  >
+                    <SelectValue placeholder="Mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {appearanceModes.map((mode) => (
+                      <SelectItem key={mode} value={mode}>
+                        {appearanceModeLabels[mode]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </TabsContent>
           <TabsContent value="danger-zone" className="min-h-0 pt-3">
@@ -626,8 +714,11 @@ function App() {
   const closeWindow = useWorkspaceStore((state) => state.closeWindow)
   const activateWindow = useWorkspaceStore((state) => state.activateWindow)
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
-  const darkMode = useWorkspaceStore(
-    (state) => state.userSettings.appearance.darkMode,
+  const appearanceThemeId = useWorkspaceStore(
+    (state) => state.userSettings.appearance.theme,
+  )
+  const appearanceMode = useWorkspaceStore(
+    (state) => state.userSettings.appearance.mode,
   )
   const experimentalAiAgentEnabled = useWorkspaceStore(
     (state) => state.userSettings.dangerZone.experimentalAiAgentEnabled,
@@ -645,8 +736,17 @@ function App() {
   }, [hydrate])
 
   useEffect(() => {
-    document.documentElement.classList.toggle("dark", darkMode)
-  }, [darkMode])
+    const root = document.documentElement
+    const themeClassNames = appearanceThemes.map((theme) =>
+      getAppearanceThemeClassName(theme.id),
+    )
+
+    root.classList.remove(...themeClassNames)
+    root.classList.add(getAppearanceThemeClassName(appearanceThemeId))
+    root.classList.toggle("dark", appearanceMode === "dark")
+    root.dataset.appearanceTheme = appearanceThemeId
+    root.dataset.appearanceMode = appearanceMode
+  }, [appearanceMode, appearanceThemeId])
 
   useEffect(() => {
     let cancelled = false

@@ -11,6 +11,16 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.56",
+    date: "2026-06-24",
+    title: "Appearance themes",
+    changes: [
+      "Replaced the single dark mode toggle with Theme and Mode controls in Settings > Appearance.",
+      "Added OpenDataverse, Gruvbox, Rose Pine, and Catppuccin theme families with light and dark token sets.",
+      "Kept existing dark mode preferences compatible while persisting the new appearance theme and mode settings in browser preview and the Tauri desktop app.",
+    ],
+  },
+  {
     version: "0.1.55",
     date: "2026-06-23",
     title: "Code quality hardening",
