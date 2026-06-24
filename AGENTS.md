@@ -30,6 +30,8 @@ Read `PRODUCT.md`, `DESIGN.md`, and this file before editing any UI. These three
 
 All color, radius, and typography tokens live in `src/index.css`. Reference them through Tailwind utilities (`bg-primary`, `text-muted-foreground`, `rounded-md`, `border-border`) or shadcn variables (`--background`, `--foreground`, `--muted`). Do not introduce arbitrary one-off colors or radii in module code.
 
+Appearance themes are implemented as light/dark semantic variable overrides in `src/index.css`. When adding a theme, add both modes, persist only the theme id/mode in user settings, and keep module components on semantic utilities rather than palette-specific classes.
+
 ## Component conventions
 
 - **Buttons:** Prefer `variant="outline"` for toolbar actions. Reserve `variant="default"` for the single most important action. Use `variant="outline"` with `className="text-destructive hover:bg-destructive/10"` for destructive actions, not the filled destructive variant.

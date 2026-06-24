@@ -1,5 +1,12 @@
 import { z } from "zod"
 
+import {
+  appearanceModes,
+  appearanceThemeIds,
+  defaultAppearanceMode,
+  defaultAppearanceThemeId,
+} from "@/core/appearance/themes"
+
 export const dataverseUrlPattern =
   /^https:\/\/[a-zA-Z0-9-]+\.crm[0-9]*\.dynamics\.com$/
 
@@ -41,12 +48,33 @@ export const appConfigSchema = z.object({
   bindings: z.array(webResourceBindingSchema),
 })
 
+const appearanceSettingsSchema = z
+  .object({
+    darkMode: z.boolean().catch(false),
+    mode: z.enum(appearanceModes).catch(defaultAppearanceMode).optional(),
+    theme: z
+      .enum(appearanceThemeIds)
+      .catch(defaultAppearanceThemeId)
+      .default(defaultAppearanceThemeId),
+  })
+  .default({
+    darkMode: false,
+    mode: defaultAppearanceMode,
+    theme: defaultAppearanceThemeId,
+  })
+  .transform((appearance) => {
+    const mode =
+      appearance.mode ?? (appearance.darkMode ? "dark" : defaultAppearanceMode)
+
+    return {
+      ...appearance,
+      mode,
+      darkMode: mode === "dark",
+    }
+  })
+
 export const userSettingsSchema = z.object({
-  appearance: z
-    .object({
-      darkMode: z.boolean().catch(false),
-    })
-    .default({ darkMode: false }),
+  appearance: appearanceSettingsSchema,
   dangerZone: z
     .object({
       experimentalAiAgentEnabled: z.boolean().catch(false),
@@ -64,6 +92,8 @@ export const defaultAppConfig: AppConfig = {
 export const defaultUserSettings: UserSettings = {
   appearance: {
     darkMode: false,
+    mode: defaultAppearanceMode,
+    theme: defaultAppearanceThemeId,
   },
   dangerZone: {
     experimentalAiAgentEnabled: false,
