@@ -109,6 +109,13 @@ const FetchXmlBuilderModule = lazy(() =>
     default: module.FetchXmlBuilderModule,
   })),
 )
+const FormLogicCopilotModule = lazy(() =>
+  import("@/modules/form-logic-copilot/FormLogicCopilotModule").then(
+    (module) => ({
+      default: module.FormLogicCopilotModule,
+    }),
+  ),
+)
 const PluginRegistrationModule = lazy(() =>
   import("@/modules/plugin-registration/PluginRegistrationModule").then(
     (module) => ({
@@ -664,6 +671,10 @@ function renderToolWindowContent(window: ToolWindow) {
 
   if (window.toolId === "fetchxml-builder") {
     return <FetchXmlBuilderModule window={window} />
+  }
+
+  if (window.toolId === "form-logic-copilot") {
+    return <FormLogicCopilotModule window={window} />
   }
 
   if (window.toolId === "plugin-registration") {

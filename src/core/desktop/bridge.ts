@@ -10,6 +10,8 @@ import {
   type DeleteWebResourcesResult,
   type DownloadWebResourcesResult,
   type PublishResult,
+  type FormLogicPublishResult,
+  type FormLogicWebResourceInput,
   type PluginAssemblyInspection,
   type PluginAssemblySummary,
   type PluginDependencyReport,
@@ -656,6 +658,37 @@ export async function createWebResourceInSolution(
     webResourceId,
     message: `Browser preview created ${input.name} in ${input.solutionUniqueName}.`,
   } satisfies SolutionWriteResult
+}
+
+export async function createFormLogicWebResource(
+  environment: DataverseEnvironment,
+  input: FormLogicWebResourceInput,
+) {
+  if (isTauriRuntime()) {
+    return invoke<FormLogicPublishResult>("create_form_logic_web_resource", {
+      environment,
+      input,
+    })
+  }
+
+  const createResult = await createWebResourceInSolution(environment, {
+    solutionUniqueName: input.solutionUniqueName,
+    name: input.name,
+    displayName: input.displayName,
+    description: input.description,
+    type: input.type,
+    content: input.content,
+  })
+
+  return {
+    webResourceId: createResult.webResourceId,
+    formId: input.formId,
+    formName: input.formName,
+    appliedBindings: input.bindings.length,
+    message: `Browser preview created ${input.name}, added ${input.entityLogicalName} and ${input.formName} to ${input.solutionUniqueName}, applied ${input.bindings.length} handler${
+      input.bindings.length === 1 ? "" : "s"
+    }, and published customizations.`,
+  } satisfies FormLogicPublishResult
 }
 
 export async function importWebResourcesInSolution(

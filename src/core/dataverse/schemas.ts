@@ -286,6 +286,33 @@ export type SolutionWriteResult = {
   message: string
 }
 
+export type FormLogicBindingInput = {
+  eventName: "onload" | "onchange"
+  eventLabel: string
+  attributeLogicalName?: string
+  handler: string
+  passExecutionContext: boolean
+}
+
+export type FormLogicWebResourceInput = {
+  solutionUniqueName: string
+  name: string
+  displayName: string
+  description: string
+  type: WebResource["type"]
+  content: string
+  entityLogicalName: string
+  formId: string
+  formName: string
+  bindings: FormLogicBindingInput[]
+}
+
+export type FormLogicPublishResult = SolutionWriteResult & {
+  formId: string
+  formName: string
+  appliedBindings: number
+}
+
 export type WebResourceImportItem = {
   sourcePath: string
   name: string
@@ -684,6 +711,7 @@ export type ToolId =
   | "autopublisher"
   | "ai-chat"
   | "ai-agent-experimental"
+  | "form-logic-copilot"
   | "fetchxml-builder"
   | "plugin-registration"
   | "solution-explorer"

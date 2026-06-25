@@ -919,6 +919,7 @@ pub(crate) fn run() {
             solutions::add_existing_web_resource_to_solution,
             solutions::remove_solution_component_from_solution,
             solutions::create_web_resource_in_solution,
+            solutions::create_form_logic_web_resource,
             solutions::import_web_resources_in_solution,
             plugins::inspect_plugin_assembly,
             plugins::list_plugin_assemblies,
