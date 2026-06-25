@@ -201,6 +201,48 @@ export type FetchXmlQueryResult = {
   webApiUrl: string
 }
 
+export type FormLogicEntitySummary = {
+  logicalName: string
+  entitySetName: string
+  displayName: string
+  primaryNameAttribute?: string
+  primaryIdAttribute?: string
+}
+
+export type FormLogicFormSummary = {
+  id: string
+  name: string
+  typeCode: number
+  typeLabel: string
+  description: string
+  isDefault: boolean
+  isManaged: boolean
+  formActivationState: number
+}
+
+export type FormLogicOptionValue = {
+  value: number
+  label: string
+}
+
+export type FormLogicAttributeMetadata = {
+  logicalName: string
+  displayName: string
+  attributeType: string
+  requiredLevel?: string
+  isValidForRead: boolean
+  lookupTargets?: string[]
+  optionValues?: FormLogicOptionValue[]
+}
+
+export type FormLogicFormContext = {
+  entity: FormLogicEntitySummary
+  form: FormLogicFormSummary
+  formXml: string
+  attributes: FormLogicAttributeMetadata[]
+  source: "dataverse" | "browser-preview"
+}
+
 export type SolutionSummary = {
   id: string
   uniqueName: string
@@ -284,33 +326,6 @@ export type SolutionWebResourceCandidate = {
 export type SolutionWriteResult = {
   webResourceId?: string
   message: string
-}
-
-export type FormLogicBindingInput = {
-  eventName: "onload" | "onchange"
-  eventLabel: string
-  attributeLogicalName?: string
-  handler: string
-  passExecutionContext: boolean
-}
-
-export type FormLogicWebResourceInput = {
-  solutionUniqueName: string
-  name: string
-  displayName: string
-  description: string
-  type: WebResource["type"]
-  content: string
-  entityLogicalName: string
-  formId: string
-  formName: string
-  bindings: FormLogicBindingInput[]
-}
-
-export type FormLogicPublishResult = SolutionWriteResult & {
-  formId: string
-  formName: string
-  appliedBindings: number
 }
 
 export type WebResourceImportItem = {

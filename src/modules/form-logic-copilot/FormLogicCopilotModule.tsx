@@ -1,20 +1,19 @@
 import { useMemo, useState, type FormEvent } from "react"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import Editor from "@monaco-editor/react"
 import {
   BotMessageSquare,
   CheckCircle2,
   Copy,
+  Database,
   FileCode2,
   Loader2,
   RefreshCw,
   SendHorizontal,
-  ShieldCheck,
   WandSparkles,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -23,11 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import {
-  createFormLogicWebResource,
+  getFormLogicFormContext,
   isTauriRuntime,
-  listSolutions,
+  listFormLogicEntities,
+  listFormLogicForms,
 } from "@/core/desktop/bridge"
 import {
   sendAiChatMessage,
@@ -37,7 +36,8 @@ import {
   createId,
   getEnvironmentById,
   type DataverseEnvironment,
-  type SolutionSummary,
+  type FormLogicAttributeMetadata,
+  type FormLogicFormContext,
   type ToolWindow,
 } from "@/core/dataverse/schemas"
 import { cn } from "@/lib/utils"
@@ -64,37 +64,56 @@ type FormLogicCopilotModuleProps = {
   window: ToolWindow
 }
 
-type ContextReference = {
-  logicalName: string
-  displayName: string
-  reason: string
-}
-
-type FormTarget = {
-  id: string
+type ParsedTab = {
   name: string
-  type: string
-  description: string
-  defaultPrompt: string
-  namespaceName: string
-  statusField: ContextReference
-  targetField: ContextReference
-  targetTab: ContextReference
-  inactiveStatusValue: number
+  label: string
 }
 
-type EntityTarget = {
-  logicalName: string
-  displayName: string
-  forms: FormTarget[]
+type ParsedSection = {
+  name: string
+  label: string
+  tabName?: string
+  tabLabel?: string
+}
+
+type ParsedControl = {
+  id: string
+  label: string
+  fieldLogicalName?: string
+  sectionName?: string
+  sectionLabel?: string
+  tabName?: string
+  tabLabel?: string
+}
+
+type ParsedEvent = {
+  ownerType: "form" | "control"
+  owner: string
+  eventName: string
+  handlers: string[]
+}
+
+type StructuredField = FormLogicAttributeMetadata & {
+  controlIds: string[]
+  sectionName?: string
+  sectionLabel?: string
+  tabName?: string
+  tabLabel?: string
+}
+
+type StructuredFormContext = {
+  raw: FormLogicFormContext
+  tabs: ParsedTab[]
+  sections: ParsedSection[]
+  controls: ParsedControl[]
+  events: ParsedEvent[]
+  fields: StructuredField[]
 }
 
 type BindingSuggestion = {
   id: string
   target: string
   eventLabel: string
-  eventName: "onload" | "onchange"
-  attributeLogicalName?: string
   handler: string
   status: "ready" | "review"
 }
@@ -106,8 +125,14 @@ type EditorChatMessage = {
 }
 
 type StatusPillTone = "success" | "warning" | "muted"
+type WizardStepId = "target" | "generate"
 
-type WizardStepId = "target" | "generate" | "create"
+const browserPreviewEnvironment: DataverseEnvironment = {
+  id: "browser-preview",
+  name: "Browser preview",
+  url: "https://preview.crm.dynamics.com",
+  authState: "connected",
+}
 
 const wizardSteps: Array<{
   id: WizardStepId
@@ -116,190 +141,212 @@ const wizardSteps: Array<{
 }> = [
   {
     id: "target",
-    title: "Prompt",
-    description: "Choose context and generate.",
+    title: "Form",
+    description: "Choose metadata and prompt.",
   },
   {
     id: "generate",
     title: "Script",
-    description: "Review and refine the script.",
-  },
-  {
-    id: "create",
-    title: "Publish",
-    description: "Save and bind to the form.",
+    description: "Review, refine, and copy.",
   },
 ]
 
-const entityTargets: EntityTarget[] = [
-  {
-    logicalName: "account",
-    displayName: "Account",
-    forms: [
-      {
-        id: "account-main",
-        name: "Main account",
-        type: "Main",
-        description: "Primary account form used by the sales team.",
-        defaultPrompt:
-          "When Status is Inactive, hide Billing and make Credit Limit not required.",
-        namespaceName: "AccountFormLogic",
-        statusField: {
-          logicalName: "statuscode",
-          displayName: "Status",
-          reason: "Controls whether the Billing tab is visible.",
-        },
-        targetField: {
-          logicalName: "creditlimit",
-          displayName: "Credit Limit",
-          reason: "Required level changes when the account is active.",
-        },
-        targetTab: {
-          logicalName: "billing",
-          displayName: "Billing",
-          reason: "Hidden when Status is Inactive.",
-        },
-        inactiveStatusValue: 2,
-      },
-      {
-        id: "account-quick-create",
-        name: "Account quick create",
-        type: "Quick Create",
-        description: "Compact account creation form.",
-        defaultPrompt:
-          "When Status is Inactive, make Credit Limit optional and hide Billing.",
-        namespaceName: "AccountQuickCreateLogic",
-        statusField: {
-          logicalName: "statuscode",
-          displayName: "Status",
-          reason: "Controls optional account setup fields.",
-        },
-        targetField: {
-          logicalName: "creditlimit",
-          displayName: "Credit Limit",
-          reason: "Required level changes after status changes.",
-        },
-        targetTab: {
-          logicalName: "billing",
-          displayName: "Billing",
-          reason: "Hidden when the row is inactive.",
-        },
-        inactiveStatusValue: 2,
-      },
-    ],
-  },
-  {
-    logicalName: "contact",
-    displayName: "Contact",
-    forms: [
-      {
-        id: "contact-main",
-        name: "Main contact",
-        type: "Main",
-        description: "Primary contact form.",
-        defaultPrompt:
-          "When Status is Inactive, hide Details and make Email optional.",
-        namespaceName: "ContactFormLogic",
-        statusField: {
-          logicalName: "statuscode",
-          displayName: "Status",
-          reason: "Controls inactive contact behavior.",
-        },
-        targetField: {
-          logicalName: "emailaddress1",
-          displayName: "Email",
-          reason: "Required level changes when the contact is inactive.",
-        },
-        targetTab: {
-          logicalName: "details",
-          displayName: "Details",
-          reason: "Hidden when Status is Inactive.",
-        },
-        inactiveStatusValue: 2,
-      },
-    ],
-  },
-]
-
-function defaultEntity() {
-  return entityTargets[0]
-}
-
-function firstFormForEntity(entity: EntityTarget) {
-  return entity.forms[0]
-}
-
-function getEntity(logicalName: string) {
-  return (
-    entityTargets.find((entity) => entity.logicalName === logicalName) ??
-    defaultEntity()
+function directChild(element: Element, name: string) {
+  return Array.from(element.children).find(
+    (child) => child.tagName.toLowerCase() === name,
   )
 }
 
-function getForm(entity: EntityTarget, formId: string) {
-  return entity.forms.find((form) => form.id === formId) ?? firstFormForEntity(entity)
+function labelFromElement(element: Element, fallback: string) {
+  const labels = directChild(element, "labels")
+  const label = labels
+    ? Array.from(labels.children).find(
+        (child) => child.tagName.toLowerCase() === "label",
+      )
+    : undefined
+
+  return (
+    label?.getAttribute("description")?.trim() ||
+    element.getAttribute("label")?.trim() ||
+    fallback
+  )
 }
 
-function libraryObjectName(entity: EntityTarget) {
-  const name = entity.displayName || entity.logicalName
-  const pascalName = name
+function closestByTag(element: Element, tagName: string) {
+  let current: Element | null = element.parentElement
+  while (current) {
+    if (current.tagName.toLowerCase() === tagName) {
+      return current
+    }
+    current = current.parentElement
+  }
+  return undefined
+}
+
+function uniqueByName<T extends { name: string }>(items: T[]) {
+  return Array.from(new Map(items.map((item) => [item.name, item])).values())
+}
+
+function parseFormXml(context: FormLogicFormContext): StructuredFormContext {
+  const parser = new DOMParser()
+  const document = parser.parseFromString(context.formXml, "application/xml")
+  const hasParseError = document.querySelector("parsererror")
+  if (hasParseError) {
+    return {
+      raw: context,
+      tabs: [],
+      sections: [],
+      controls: [],
+      events: [],
+      fields: context.attributes.map((attribute) => ({
+        ...attribute,
+        controlIds: [],
+      })),
+    }
+  }
+
+  const tabs = uniqueByName(
+    Array.from(document.querySelectorAll("tab")).map((tab, index) => {
+      const name = tab.getAttribute("name")?.trim() || `tab-${index + 1}`
+      return {
+        name,
+        label: labelFromElement(tab, name),
+      }
+    }),
+  )
+
+  const sections = uniqueByName(
+    Array.from(document.querySelectorAll("section")).map((section, index) => {
+      const tab = closestByTag(section, "tab")
+      const tabName = tab?.getAttribute("name")?.trim()
+      const sectionName =
+        section.getAttribute("name")?.trim() || `section-${index + 1}`
+      return {
+        name: sectionName,
+        label: labelFromElement(section, sectionName),
+        tabName,
+        tabLabel: tab ? labelFromElement(tab, tabName ?? "Tab") : undefined,
+      }
+    }),
+  )
+
+  const controls = Array.from(document.querySelectorAll("control")).map(
+    (control, index) => {
+      const section = closestByTag(control, "section")
+      const tab = closestByTag(control, "tab")
+      const fieldLogicalName = control.getAttribute("datafieldname")?.trim()
+      const id =
+        control.getAttribute("id")?.trim() ||
+        fieldLogicalName ||
+        `control-${index + 1}`
+      const sectionName = section?.getAttribute("name")?.trim()
+      const tabName = tab?.getAttribute("name")?.trim()
+      const cell = closestByTag(control, "cell")
+
+      return {
+        id,
+        fieldLogicalName,
+        label: cell ? labelFromElement(cell, fieldLogicalName ?? id) : id,
+        sectionName,
+        sectionLabel: section
+          ? labelFromElement(section, sectionName ?? "Section")
+          : undefined,
+        tabName,
+        tabLabel: tab ? labelFromElement(tab, tabName ?? "Tab") : undefined,
+      }
+    },
+  )
+
+  const events = Array.from(document.querySelectorAll("event")).map((event) => {
+    const control = closestByTag(event, "control")
+    const owner =
+      control?.getAttribute("datafieldname")?.trim() ||
+      control?.getAttribute("id")?.trim() ||
+      context.form.name
+    const handlers = Array.from(event.children)
+      .filter((child) => child.tagName.toLowerCase() === "handlers")
+      .flatMap((handlersNode) => Array.from(handlersNode.children))
+      .filter((child) => child.tagName.toLowerCase() === "handler")
+      .map((handler) => {
+        const functionName = handler.getAttribute("functionName")?.trim()
+        const libraryName = handler.getAttribute("libraryName")?.trim()
+        return [libraryName, functionName].filter(Boolean).join(" ")
+      })
+      .filter(Boolean)
+
+    return {
+      ownerType: control ? "control" : "form",
+      owner,
+      eventName: event.getAttribute("name")?.trim() || "event",
+      handlers,
+    } satisfies ParsedEvent
+  })
+
+  const controlsByField = new Map<string, ParsedControl[]>()
+  for (const control of controls) {
+    if (!control.fieldLogicalName) {
+      continue
+    }
+    const current = controlsByField.get(control.fieldLogicalName) ?? []
+    current.push(control)
+    controlsByField.set(control.fieldLogicalName, current)
+  }
+
+  const fields = context.attributes.map((attribute) => {
+    const fieldControls = controlsByField.get(attribute.logicalName) ?? []
+    const firstControl = fieldControls[0]
+
+    return {
+      ...attribute,
+      controlIds: fieldControls.map((control) => control.id),
+      sectionName: firstControl?.sectionName,
+      sectionLabel: firstControl?.sectionLabel,
+      tabName: firstControl?.tabName,
+      tabLabel: firstControl?.tabLabel,
+    }
+  })
+
+  return {
+    raw: context,
+    tabs,
+    sections,
+    controls,
+    events,
+    fields,
+  }
+}
+
+function pascalToken(value: string) {
+  return value
     .split(/[^a-zA-Z0-9]+/)
     .filter(Boolean)
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join("")
-
-  return `${pascalName || "Form"}Library`
 }
 
-function normalizedPublisherPrefix(prefix: string | undefined) {
-  const trimmed = prefix?.trim()
+function libraryObjectName(context: StructuredFormContext) {
+  const token =
+    pascalToken(context.raw.entity.displayName) ||
+    pascalToken(context.raw.entity.logicalName) ||
+    "Form"
 
-  return trimmed || "new"
+  return `${token}Library`
 }
 
-function withPublisherPrefix(name: string, prefix: string | undefined) {
-  const normalizedPrefix = normalizedPublisherPrefix(prefix)
-  const trimmed = name.trim().replace(/^\/+/, "")
-
-  if (!trimmed) {
-    return ""
-  }
-
-  if (
-    trimmed.startsWith(`${normalizedPrefix}_`) ||
-    trimmed.startsWith(`${normalizedPrefix}_/`)
-  ) {
-    return trimmed
-  }
-
-  const withoutExistingPrefix = trimmed.replace(
-    /^[a-zA-Z][a-zA-Z0-9]{1,7}_/,
-    "",
-  )
-
-  return `${normalizedPrefix}_${withoutExistingPrefix}`
-}
-
-function webResourceDefaults(
-  entity: EntityTarget,
-  form: FormTarget,
-  publisherPrefix = "new",
-) {
-  const formToken = form.type === "Quick Create" ? "quickcreate" : "form"
-  const logicalName = withPublisherPrefix(
-    `${entity.logicalName}${formToken}logic.js`,
-    publisherPrefix,
-  )
+function webResourceDefaults(context: StructuredFormContext) {
+  const formToken =
+    context.raw.form.typeLabel === "Quick Create" ? "quickcreate" : "form"
 
   return {
-    logicalName,
-    displayName: `${entity.displayName} ${form.type} Logic`,
-    description: `Form logic for ${entity.displayName} ${form.name}`,
+    logicalName: `${context.raw.entity.logicalName}${formToken}logic.js`,
+    displayName: `${context.raw.entity.displayName} ${context.raw.form.typeLabel} Logic`,
+    description: `Form logic for ${context.raw.entity.displayName} ${context.raw.form.name}`,
   }
 }
 
-function sourceForContext(entity: EntityTarget, form: FormTarget) {
-  const libraryName = libraryObjectName(entity)
+function sourceForContext(context: StructuredFormContext) {
+  const libraryName = libraryObjectName(context)
+  const firstTabName = context.tabs[0]?.name
 
   return `var ${libraryName} = ${libraryName} || {};
 
@@ -309,61 +356,75 @@ ${libraryName}.onLoad = function (executionContext) {
 };
 
 ${libraryName}.updateFormState = function (formContext) {
-  var targetTab = formContext.ui.tabs.get("${form.targetTab.logicalName}");
-  if (targetTab) {
-    targetTab.setVisible(true);
+  ${firstTabName ? `var tab = formContext.ui.tabs.get("${firstTabName}");` : "var tab = null;"}
+  if (tab) {
+    tab.setVisible(true);
   }
 };`
 }
 
-function bindingSuggestionsForContext(
-  entity: EntityTarget,
-  form: FormTarget,
-): BindingSuggestion[] {
-  const namespace = libraryObjectName(entity)
-
-  return [
-    {
-      id: `${entity.logicalName}-${form.id}-onload`,
-      target: `${form.name} form`,
-      eventLabel: "Form OnLoad",
-      eventName: "onload",
-      handler: `${namespace}.onLoad`,
-      status: "ready",
+function compactPromptContext(context: StructuredFormContext) {
+  return {
+    source: context.raw.source,
+    entity: {
+      logicalName: context.raw.entity.logicalName,
+      displayName: context.raw.entity.displayName,
+      entitySetName: context.raw.entity.entitySetName,
+      primaryNameAttribute: context.raw.entity.primaryNameAttribute,
+      primaryIdAttribute: context.raw.entity.primaryIdAttribute,
     },
-  ]
-}
-
-function selectedSolution(
-  solutions: SolutionSummary[] | undefined,
-  uniqueName: string,
-) {
-  return (
-    solutions?.find((solution) => solution.uniqueName === uniqueName) ??
-    solutions?.[0]
-  )
+    form: {
+      id: context.raw.form.id,
+      name: context.raw.form.name,
+      type: context.raw.form.typeLabel,
+      isDefault: context.raw.form.isDefault,
+      isManaged: context.raw.form.isManaged,
+    },
+    fields: context.fields.map((field) => ({
+      logicalName: field.logicalName,
+      displayName: field.displayName,
+      type: field.attributeType,
+      requiredLevel: field.requiredLevel,
+      controlIds: field.controlIds,
+      tab: field.tabName,
+      section: field.sectionName,
+      lookupTargets: field.lookupTargets,
+      options: field.optionValues?.slice(0, 30),
+    })),
+    tabs: context.tabs,
+    sections: context.sections,
+    controls: context.controls.map((control) => ({
+      id: control.id,
+      fieldLogicalName: control.fieldLogicalName,
+      label: control.label,
+      tab: control.tabName,
+      section: control.sectionName,
+    })),
+    events: context.events.map((event) => ({
+      ownerType: event.ownerType,
+      owner: event.owner,
+      eventName: event.eventName,
+      handlers: event.handlers,
+    })),
+  }
 }
 
 function buildGenerationPrompt(input: {
-  entity: EntityTarget
-  form: FormTarget
+  context: StructuredFormContext
   request: string
 }) {
-  const libraryName = libraryObjectName(input.entity)
+  const libraryName = libraryObjectName(input.context)
 
   return `Generate Dataverse model-driven app form JavaScript for this request.
 
 Request:
 ${input.request}
 
-Known form context:
-- Table logical name: ${input.entity.logicalName}
-- Table display name: ${input.entity.displayName}
-- Form name: ${input.form.name}
-- Form type: ${input.form.type}
-- Available fields: ${input.form.statusField.logicalName} (${input.form.statusField.displayName}), ${input.form.targetField.logicalName} (${input.form.targetField.displayName})
-- Available tab or section: ${input.form.targetTab.logicalName} (${input.form.targetTab.displayName})
-- Default binding: ${libraryName}.onLoad on form OnLoad
+The following context was derived from the selected Dataverse table metadata and selected form definition. Use only fields, controls, tabs, sections, options, lookup targets, and events listed here. Do not invent logical names.
+
+${JSON.stringify(compactPromptContext(input.context), null, 2)}
+
+Default manual binding note: register ${libraryName}.onLoad on the form OnLoad event unless the request clearly requires a different exposed handler.
 
 Return only a compact JSON object with these string properties:
 - logicalName
@@ -377,19 +438,19 @@ The source must be production-oriented JavaScript for a Dataverse web resource. 
 }
 
 function buildRevisionPrompt(input: {
-  entity: EntityTarget
-  form: FormTarget
+  context: StructuredFormContext
   currentSource: string
   changeRequest: string
 }) {
-  const libraryName = libraryObjectName(input.entity)
+  const libraryName = libraryObjectName(input.context)
 
   return `Revise this Dataverse form JavaScript web resource.
 
-Table: ${input.entity.logicalName}
-Form: ${input.form.name}
 Requested change:
 ${input.changeRequest}
+
+Selected form context:
+${JSON.stringify(compactPromptContext(input.context), null, 2)}
 
 Current source:
 ${input.currentSource}
@@ -400,13 +461,49 @@ Return only a compact JSON object with:
 
 Return valid JSON only. Do not include a provider name, explanation, markdown fence, or any text before or after the JSON object.
 
-Follow YAGNI: make the smallest clear change, preserve existing structure where possible, and do not add speculative helpers, abstractions, configuration, event handlers, or defensive wrappers. Keep executionContext.getFormContext(), do not add typeof function checks around Dataverse APIs, use simple null checks only for returned form objects, keep handlers exposed directly on ${libraryName}, and do not add new event handlers unless the requested change needs them. Avoid markdown.`
+Follow YAGNI: make the smallest clear change, preserve existing structure where possible, use only form context fields/controls/tabs/sections listed above, and do not add speculative helpers, abstractions, configuration, event handlers, or defensive wrappers. Keep executionContext.getFormContext(), do not add typeof function checks around Dataverse APIs, use simple null checks only for returned form objects, keep handlers exposed directly on ${libraryName}, and do not add new event handlers unless the requested change needs them. Avoid markdown.`
 }
 
-function browserPreviewGeneratedDraft(entity: EntityTarget, form: FormTarget) {
+function bindingSuggestionsForContext(
+  context?: StructuredFormContext,
+): BindingSuggestion[] {
+  if (!context) {
+    return []
+  }
+
+  const namespace = libraryObjectName(context)
+  const suggestions: BindingSuggestion[] = [
+    {
+      id: `${context.raw.form.id}-onload`,
+      target: `${context.raw.form.name} form`,
+      eventLabel: "Form OnLoad",
+      handler: `${namespace}.onLoad`,
+      status: "ready",
+    },
+  ]
+  const onchangeOwners = context.events
+    .filter(
+      (event) => event.ownerType === "control" && event.eventName === "onchange",
+    )
+    .map((event) => event.owner)
+
+  for (const owner of Array.from(new Set(onchangeOwners)).slice(0, 4)) {
+    suggestions.push({
+      id: `${context.raw.form.id}-${owner}-onchange`,
+      target: owner,
+      eventLabel: "Field OnChange",
+      handler: `${namespace}.on${pascalToken(owner)}Change`,
+      status: "review",
+    })
+  }
+
+  return suggestions
+}
+
+function browserPreviewGeneratedDraft(context: StructuredFormContext) {
   return {
-    ...webResourceDefaults(entity, form),
-    source: sourceForContext(entity, form),
+    ...webResourceDefaults(context),
+    source: sourceForContext(context),
   } satisfies GeneratedDraft
 }
 
@@ -443,69 +540,6 @@ function StatusPill({
   )
 }
 
-function MetadataField({
-  id,
-  label,
-  value,
-  onChange,
-  readOnly,
-}: {
-  id: string
-  label: string
-  value: string
-  onChange?: (value: string) => void
-  readOnly?: boolean
-}) {
-  return (
-    <div className="min-w-0 space-y-1">
-      <Label htmlFor={id}>{label}</Label>
-      <Input
-        id={id}
-        value={value}
-        onChange={(event) => onChange?.(event.target.value)}
-        readOnly={readOnly}
-        className={cn(readOnly && "bg-muted/40 text-muted-foreground")}
-      />
-    </div>
-  )
-}
-
-function SolutionSelect({
-  solutions,
-  selectedUniqueName,
-  loading,
-  onChange,
-}: {
-  solutions: SolutionSummary[] | undefined
-  selectedUniqueName: string
-  loading: boolean
-  onChange: (uniqueName: string) => void
-}) {
-  return (
-    <div className="min-w-0 space-y-1">
-      <Label htmlFor="form-logic-solution">Unmanaged solution</Label>
-      <Select
-        value={selectedUniqueName}
-        onValueChange={onChange}
-        disabled={loading || !solutions?.length}
-      >
-        <SelectTrigger id="form-logic-solution" className="w-full">
-          <SelectValue
-            placeholder={loading ? "Loading solutions" : "Select solution"}
-          />
-        </SelectTrigger>
-        <SelectContent>
-          {solutions?.map((solution) => (
-            <SelectItem key={solution.id} value={solution.uniqueName}>
-              {solution.friendlyName}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  )
-}
-
 function EmptyEnvironment() {
   return (
     <section className="flex h-full items-center justify-center bg-background p-6">
@@ -516,35 +550,60 @@ function EmptyEnvironment() {
         <h2 className="mt-3 text-sm font-semibold">Select an environment</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Form Logic Copilot needs an active Dataverse environment before it can
-          create a web resource.
+          generate a script.
         </p>
       </div>
     </section>
   )
 }
 
+function MetadataLoadState({
+  loading,
+  error,
+}: {
+  loading: boolean
+  error: unknown
+}) {
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-border bg-muted/30 p-6 text-center">
+        <div className="mx-auto flex size-11 items-center justify-center rounded-xl border border-border bg-background">
+          <Loader2 className="size-5 animate-spin text-muted-foreground" />
+        </div>
+        <h2 className="mt-3 text-sm font-semibold">Loading metadata</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Reading table metadata, forms, and the selected form definition.
+        </p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        {error instanceof Error ? error.message : "Could not load metadata."}
+      </div>
+    )
+  }
+
+  return null
+}
+
 export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) {
-  const queryClient = useQueryClient()
   const config = useWorkspaceStore((state) => state.config)
-  const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
   const showError = useWorkspaceStore((state) => state.showError)
   const appearanceMode = useWorkspaceStore(
     (state) => state.userSettings.appearance.mode,
   )
-  const environment = getEnvironmentById(
+  const configuredEnvironment = getEnvironmentById(
     config,
     window.environmentId ?? config.currentEnvironmentId,
   )
-  const initialEntity = defaultEntity()
-  const initialForm = firstFormForEntity(initialEntity)
-  const initialDefaults = webResourceDefaults(initialEntity, initialForm)
+  const environment =
+    configuredEnvironment ?? (!isTauriRuntime() ? browserPreviewEnvironment : undefined)
   const [wizardStep, setWizardStep] = useState<WizardStepId>("target")
-  const [entityLogicalName, setEntityLogicalName] = useState(
-    initialEntity.logicalName,
-  )
-  const entity = getEntity(entityLogicalName)
-  const [formId, setFormId] = useState(initialForm.id)
-  const form = getForm(entity, formId)
+  const [entityLogicalName, setEntityLogicalName] = useState("")
+  const [formId, setFormId] = useState("")
   const [request, setRequest] = useState("")
   const [aiProvider, setAiProvider] = useState<AiChatProvider>("codex")
   const [aiModel, setAiModel] = useState<AiChatModel>(
@@ -553,93 +612,88 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
   const [reasoningEffort, setReasoningEffort] = useState<AiReasoningEffort>(
     defaultReasoningByProvider.codex,
   )
-  const [logicalName, setLogicalName] = useState(initialDefaults.logicalName)
-  const [displayName, setDisplayName] = useState(initialDefaults.displayName)
-  const [description, setDescription] = useState(initialDefaults.description)
-  const [solutionUniqueName, setSolutionUniqueName] = useState("")
-  const [source, setSource] = useState(sourceForContext(initialEntity, initialForm))
+  const [logicalName, setLogicalName] = useState("formlogic.js")
+  const [source, setSource] = useState("")
   const [hasGenerated, setHasGenerated] = useState(false)
-  const bindingSuggestions = useMemo(
-    () => bindingSuggestionsForContext(entity, form),
-    [entity, form],
-  )
-  const [includedBindingIds, setIncludedBindingIds] = useState(
-    () => new Set(bindingSuggestions.map((binding) => binding.id)),
-  )
   const [copied, setCopied] = useState(false)
   const [chatInput, setChatInput] = useState("")
   const [chatMessages, setChatMessages] = useState<EditorChatMessage[]>([])
 
-  const solutionsQuery = useQuery({
-    queryKey: ["solutions", environment?.id, "unmanaged"],
+  const entitiesQuery = useQuery({
+    queryKey: ["form-logic-entities", environment?.id],
     enabled: Boolean(environment),
-    queryFn: () => listSolutions(environment as DataverseEnvironment, "unmanaged"),
+    queryFn: () => listFormLogicEntities(environment as DataverseEnvironment),
   })
-  const chosenSolution = selectedSolution(
-    solutionsQuery.data,
-    solutionUniqueName,
-  )
-  const selectedSolutionUniqueName = chosenSolution?.uniqueName ?? ""
-  const publisherPrefix = normalizedPublisherPrefix(
-    chosenSolution?.publisherPrefix,
-  )
-  const prefixedLogicalName = withPublisherPrefix(logicalName, publisherPrefix)
-  const includedBindings = useMemo(
-    () =>
-      bindingSuggestions.filter((binding) =>
-        includedBindingIds.has(binding.id),
+  const activeEntityLogicalName =
+    entityLogicalName || entitiesQuery.data?.[0]?.logicalName || ""
+  const formsQuery = useQuery({
+    queryKey: ["form-logic-forms", environment?.id, activeEntityLogicalName],
+    enabled: Boolean(environment && activeEntityLogicalName),
+    queryFn: () =>
+      listFormLogicForms(
+        environment as DataverseEnvironment,
+        activeEntityLogicalName,
       ),
-    [bindingSuggestions, includedBindingIds],
+  })
+  const activeFormId =
+    formId && formsQuery.data?.some((form) => form.id === formId)
+      ? formId
+      : formsQuery.data?.[0]?.id || ""
+  const contextQuery = useQuery({
+    queryKey: [
+      "form-logic-form-context",
+      environment?.id,
+      activeEntityLogicalName,
+      activeFormId,
+    ],
+    enabled: Boolean(environment && activeEntityLogicalName && activeFormId),
+    queryFn: () =>
+      getFormLogicFormContext(
+        environment as DataverseEnvironment,
+        activeEntityLogicalName,
+        activeFormId,
+      ),
+  })
+
+  const structuredContext = useMemo(
+    () => (contextQuery.data ? parseFormXml(contextQuery.data) : undefined),
+    [contextQuery.data],
   )
-  const canCreate = Boolean(
-    environment &&
-      selectedSolutionUniqueName &&
-      prefixedLogicalName.trim() &&
-      displayName.trim() &&
-      source.trim() &&
-      includedBindings.length > 0,
+  const selectedEntity = entitiesQuery.data?.find(
+    (entity) => entity.logicalName === activeEntityLogicalName,
   )
+  const selectedForm = formsQuery.data?.find((form) => form.id === activeFormId)
+  const bindingSuggestions = useMemo(
+    () => bindingSuggestionsForContext(structuredContext),
+    [structuredContext],
+  )
+  const defaultDraft = structuredContext
+    ? webResourceDefaults(structuredContext)
+    : undefined
+  const effectiveLogicalName = hasGenerated
+    ? logicalName
+    : defaultDraft?.logicalName ?? logicalName
   const editorTheme = appearanceMode === "dark" ? "vs-dark" : "vs"
   const providerLabel =
     providerOptions.find((option) => option.value === aiProvider)?.label ??
     "Codex"
   const activeStepIndex = wizardSteps.findIndex((step) => step.id === wizardStep)
-  const canProceedToCreate = hasGenerated && source.trim().length > 0
-
-  function resetDraftForContext(nextEntity: EntityTarget, nextForm: FormTarget) {
-    const defaults = webResourceDefaults(nextEntity, nextForm, publisherPrefix)
-
-    setRequest("")
-    setLogicalName(defaults.logicalName)
-    setDisplayName(defaults.displayName)
-    setDescription(defaults.description)
-    setSource(sourceForContext(nextEntity, nextForm))
-    setHasGenerated(false)
-    setIncludedBindingIds(
-      new Set(
-        bindingSuggestionsForContext(nextEntity, nextForm).map(
-          (binding) => binding.id,
-        ),
-      ),
-    )
-    setChatInput("")
-    setChatMessages([])
-  }
+  const canReviewScript = hasGenerated && source.trim().length > 0
+  const canGenerate =
+    Boolean(structuredContext) && request.trim().length > 0 && !contextQuery.isLoading
 
   function handleEntityChange(nextLogicalName: string) {
-    const nextEntity = getEntity(nextLogicalName)
-    const nextForm = firstFormForEntity(nextEntity)
-
-    setEntityLogicalName(nextEntity.logicalName)
-    setFormId(nextForm.id)
-    resetDraftForContext(nextEntity, nextForm)
+    setEntityLogicalName(nextLogicalName)
+    setFormId("")
+    setRequest("")
+    setHasGenerated(false)
+    setSource("")
   }
 
   function handleFormChange(nextFormId: string) {
-    const nextForm = getForm(entity, nextFormId)
-
-    setFormId(nextForm.id)
-    resetDraftForContext(entity, nextForm)
+    setFormId(nextFormId)
+    setHasGenerated(false)
+    setSource("")
   }
 
   function handleProviderChange(nextProvider: AiChatProvider) {
@@ -651,35 +705,19 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
   function goToPreviousStep() {
     if (wizardStep === "generate") {
       setWizardStep("target")
-      return
-    }
-
-    if (wizardStep === "create") {
-      setWizardStep("generate")
     }
   }
 
   function goToNextStep() {
-    if (wizardStep === "target" && canProceedToCreate) {
+    if (wizardStep === "target" && canReviewScript) {
       setWizardStep("generate")
-      return
-    }
-
-    if (wizardStep === "generate" && canProceedToCreate) {
-      setWizardStep("create")
     }
   }
 
   function applyGeneratedDraft(draft: GeneratedDraft) {
     setSource(draft.source)
     if (draft.logicalName) {
-      setLogicalName(withPublisherPrefix(draft.logicalName, publisherPrefix))
-    }
-    if (draft.displayName) {
-      setDisplayName(draft.displayName)
-    }
-    if (draft.description) {
-      setDescription(draft.description)
+      setLogicalName(draft.logicalName)
     }
   }
 
@@ -688,9 +726,12 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
       if (!environment) {
         throw new Error("Select an environment before generating form logic.")
       }
+      if (!structuredContext) {
+        throw new Error("Select a table and form before generating form logic.")
+      }
 
       if (!isTauriRuntime()) {
-        return browserPreviewGeneratedDraft(entity, form)
+        return browserPreviewGeneratedDraft(structuredContext)
       }
 
       const thread = await startAiChatThread({
@@ -704,7 +745,10 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
         threadId: thread.id,
         environmentId: environment.id,
         mode: "chat",
-        message: buildGenerationPrompt({ entity, form, request }),
+        message: buildGenerationPrompt({
+          context: structuredContext,
+          request,
+        }),
         provider: aiProvider,
         model: aiModel,
         reasoningEffort,
@@ -737,6 +781,9 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
       if (!environment) {
         throw new Error("Select an environment before revising form logic.")
       }
+      if (!structuredContext) {
+        throw new Error("Load form metadata before revising form logic.")
+      }
 
       if (!isTauriRuntime()) {
         return {
@@ -757,8 +804,7 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
         environmentId: environment.id,
         mode: "chat",
         message: buildRevisionPrompt({
-          entity,
-          form,
+          context: structuredContext,
           currentSource: source,
           changeRequest,
         }),
@@ -800,86 +846,10 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
     },
   })
 
-  const createMutation = useMutation({
-    mutationFn: () =>
-      createFormLogicWebResource(environment as DataverseEnvironment, {
-        solutionUniqueName: selectedSolutionUniqueName,
-        name: prefixedLogicalName,
-        displayName: displayName.trim(),
-        description: description.trim(),
-        type: "js",
-        content: source,
-        entityLogicalName: entity.logicalName,
-        formId: form.id,
-        formName: form.name,
-        bindings: includedBindings.map((binding) => ({
-          eventName: binding.eventName,
-          eventLabel: binding.eventLabel,
-          attributeLogicalName: binding.attributeLogicalName,
-          handler: binding.handler,
-          passExecutionContext: true,
-        })),
-      }),
-    onSuccess: async (result) => {
-      setLastMessage(
-        result.message,
-        {
-          title: "Saved and published",
-          severity: "success",
-        },
-      )
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: ["webResources", environment?.id],
-        }),
-        queryClient.invalidateQueries({
-          queryKey: ["solutions", environment?.id],
-        }),
-        queryClient.invalidateQueries({
-          queryKey: ["solution-components", environment?.id],
-        }),
-        queryClient.invalidateQueries({
-          queryKey: ["webResourceActivity", environment?.id],
-        }),
-      ])
-    },
-    onError: (error) => {
-      showError("Save and publish failed", error, "Publish failed")
-    },
-  })
-
   async function copySource() {
     await navigator.clipboard.writeText(source)
     setCopied(true)
     globalThis.setTimeout(() => setCopied(false), 1600)
-  }
-
-  function toggleBinding(bindingId: string, enabled: boolean) {
-    setIncludedBindingIds((current) => {
-      const next = new Set(current)
-      if (enabled) {
-        next.add(bindingId)
-      } else {
-        next.delete(bindingId)
-      }
-      return next
-    })
-  }
-
-  function publishWebResource() {
-    if (!canCreate) {
-      setLastMessage("Complete web resource details and select at least one handler.", {
-        severity: "error",
-      })
-      return
-    }
-
-    createMutation.mutate()
-  }
-
-  function submitWebResource(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    publishWebResource()
   }
 
   function submitRevision(event: FormEvent<HTMLFormElement>) {
@@ -909,7 +879,7 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
               Form Logic Copilot
             </h1>
             <p className="truncate text-xs text-muted-foreground">
-              Generate, refine, and create Dynamics form JavaScript.
+              Generate, refine, and copy Dynamics form JavaScript.
             </p>
           </div>
         </div>
@@ -921,7 +891,7 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
       </header>
 
       <div className="border-b border-border bg-muted/20 px-4 py-3">
-        <div className="grid gap-2 md:grid-cols-3">
+        <div className="grid gap-2 md:grid-cols-2">
           {wizardSteps.map((step, index) => {
             const isActive = step.id === wizardStep
             const isComplete = index < activeStepIndex
@@ -969,20 +939,21 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
       <div className="min-h-0 overflow-hidden">
         {wizardStep === "target" && (
           <section className="h-full overflow-auto p-4">
-            <div className="mx-auto grid w-full max-w-4xl gap-4">
+            <div className="mx-auto grid w-full max-w-5xl gap-4">
               <div className="rounded-lg border border-border bg-background p-4">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="min-w-0 space-y-1">
-                    <Label htmlFor="form-logic-entity">Entity</Label>
+                    <Label htmlFor="form-logic-entity">Table</Label>
                     <Select
-                      value={entity.logicalName}
+                      value={activeEntityLogicalName}
                       onValueChange={handleEntityChange}
+                      disabled={entitiesQuery.isLoading}
                     >
                       <SelectTrigger id="form-logic-entity" className="w-full">
-                        <SelectValue />
+                        <SelectValue placeholder="Select table" />
                       </SelectTrigger>
                       <SelectContent>
-                        {entityTargets.map((target) => (
+                        {(entitiesQuery.data ?? []).map((target) => (
                           <SelectItem
                             key={target.logicalName}
                             value={target.logicalName}
@@ -996,12 +967,16 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
 
                   <div className="min-w-0 space-y-1">
                     <Label htmlFor="form-logic-form">Form</Label>
-                    <Select value={form.id} onValueChange={handleFormChange}>
+                    <Select
+                      value={activeFormId}
+                      onValueChange={handleFormChange}
+                      disabled={!activeEntityLogicalName || formsQuery.isLoading}
+                    >
                       <SelectTrigger id="form-logic-form" className="w-full">
-                        <SelectValue />
+                        <SelectValue placeholder="Select form" />
                       </SelectTrigger>
                       <SelectContent>
-                        {entity.forms.map((targetForm) => (
+                        {(formsQuery.data ?? []).map((targetForm) => (
                           <SelectItem key={targetForm.id} value={targetForm.id}>
                             {targetForm.name}
                           </SelectItem>
@@ -1011,18 +986,99 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
                   </div>
                 </div>
 
-                <div className="mt-4 rounded-lg border border-border bg-muted/30 p-3">
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="font-medium">{form.name}</span>
-                    <StatusPill tone="muted">{form.type}</StatusPill>
-                    <span className="truncate font-mono text-xs text-muted-foreground">
-                      {entity.logicalName}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {form.description}
-                  </p>
+                <div className="mt-4">
+                  <MetadataLoadState
+                    loading={
+                      entitiesQuery.isLoading ||
+                      formsQuery.isLoading ||
+                      contextQuery.isLoading
+                    }
+                    error={
+                      entitiesQuery.error ??
+                      formsQuery.error ??
+                      contextQuery.error
+                    }
+                  />
                 </div>
+
+                {structuredContext && (
+                  <div className="mt-4 rounded-lg border border-border bg-muted/30 p-3">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className="font-medium">
+                        {structuredContext.raw.form.name}
+                      </span>
+                      <StatusPill tone="muted">
+                        {structuredContext.raw.form.typeLabel}
+                      </StatusPill>
+                      <StatusPill
+                        tone={
+                          structuredContext.raw.source === "dataverse"
+                            ? "success"
+                            : "warning"
+                        }
+                      >
+                        {structuredContext.raw.source === "dataverse"
+                          ? "Dataverse metadata"
+                          : "Browser mock"}
+                      </StatusPill>
+                      <span className="truncate font-mono text-xs text-muted-foreground">
+                        {structuredContext.raw.entity.logicalName}
+                      </span>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-xs sm:grid-cols-4">
+                      <div className="rounded-md border border-border bg-background p-2">
+                        <div className="text-muted-foreground">Fields</div>
+                        <div className="mt-1 font-medium">
+                          {structuredContext.fields.length}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-background p-2">
+                        <div className="text-muted-foreground">Controls</div>
+                        <div className="mt-1 font-medium">
+                          {structuredContext.controls.length}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-background p-2">
+                        <div className="text-muted-foreground">Tabs</div>
+                        <div className="mt-1 font-medium">
+                          {structuredContext.tabs.length}
+                        </div>
+                      </div>
+                      <div className="rounded-md border border-border bg-background p-2">
+                        <div className="text-muted-foreground">Events</div>
+                        <div className="mt-1 font-medium">
+                          {structuredContext.events.length}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex min-w-0 flex-wrap gap-1.5">
+                      {structuredContext.fields.slice(0, 12).map((field) => (
+                        <span
+                          key={field.logicalName}
+                          className="max-w-full truncate rounded-md border border-border bg-background px-2 py-1 font-mono text-xs text-muted-foreground"
+                        >
+                          {field.logicalName}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {!formsQuery.isLoading &&
+                  activeEntityLogicalName &&
+                  (formsQuery.data ?? []).length === 0 && (
+                    <div className="mt-4 rounded-xl border border-border bg-muted/30 p-6 text-center">
+                      <div className="mx-auto flex size-11 items-center justify-center rounded-xl border border-border bg-background">
+                        <Database className="size-5 text-muted-foreground" />
+                      </div>
+                      <h2 className="mt-3 text-sm font-semibold">
+                        No active forms
+                      </h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Select another table with active model-driven app forms.
+                      </p>
+                    </div>
+                  )}
               </div>
 
               <form
@@ -1038,7 +1094,7 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
                   value={request}
                   onChange={(event) => setRequest(event.target.value)}
                   className="mt-2 h-40 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
-                  placeholder="What would you like to do?"
+                  placeholder="What would you like to do on this form?"
                 />
 
                 <div className="mt-4 grid gap-3 md:grid-cols-[minmax(140px,1fr)_minmax(210px,1.4fr)_minmax(140px,1fr)_auto]">
@@ -1115,7 +1171,7 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
                     <Button
                       type="submit"
                       className="w-full md:w-auto"
-                      disabled={generateMutation.isPending || !request.trim()}
+                      disabled={generateMutation.isPending || !canGenerate}
                     >
                       {generateMutation.isPending ? (
                         <Loader2 className="size-4 animate-spin" />
@@ -1141,8 +1197,8 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
                     <StatusPill tone="muted">{providerLabel}</StatusPill>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    The original prompt is locked here. Go back to regenerate
-                    from a different prompt.
+                    The script was generated from the selected form metadata.
+                    Go back to choose another table or form.
                   </p>
                 </div>
 
@@ -1168,12 +1224,12 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
               </div>
             </div>
 
-            <div className="grid min-h-0 xl:grid-cols-[minmax(0,1fr)_340px]">
-              <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden">
+            <div className="grid min-h-0 overflow-auto xl:grid-cols-[minmax(0,1fr)_340px] xl:overflow-hidden">
+              <div className="grid min-h-[26rem] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden xl:min-h-0">
                 <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border px-4 py-2">
                   <div className="flex min-w-0 items-center gap-2">
                     <div className="truncate rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs">
-                      {prefixedLogicalName || "new_formlogic.js"}
+                      {effectiveLogicalName || "formlogic.js"}
                     </div>
                     <StatusPill tone={hasGenerated ? "success" : "muted"}>
                       {hasGenerated ? "Script ready" : "Not generated"}
@@ -1197,7 +1253,7 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
                       beforeMount={configureWebResourceIntellisense}
                       height="100%"
                       language="javascript"
-                      path={`file:///opendataverse/form-logic/${prefixedLogicalName || "new_formlogic.js"}`}
+                      path={`file:///opendataverse/form-logic/${effectiveLogicalName || "formlogic.js"}`}
                       value={source}
                       onChange={(value) => setSource(value ?? "")}
                       loading={
@@ -1253,12 +1309,13 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
                     {hasGenerated
                       ? `${source.split("\n").length} lines`
                       : "Waiting for generation"}{" "}
-                    · {includedBindings.length} bindings selected
+                    · {bindingSuggestions.length} suggested handler
+                    {bindingSuggestions.length === 1 ? "" : "s"}
                   </span>
                 </div>
               </div>
 
-              <aside className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] border-t border-border bg-muted/20 xl:border-l xl:border-t-0">
+              <aside className="grid min-h-[24rem] grid-rows-[auto_minmax(0,1fr)_auto] border-t border-border bg-muted/20 xl:min-h-0 xl:border-l xl:border-t-0">
                 <div className="border-b border-border bg-background p-3">
                   <div className="flex items-center justify-between gap-2">
                     <h2 className="text-sm font-semibold">Script chat</h2>
@@ -1266,7 +1323,49 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
                   </div>
                 </div>
 
-                <div className="min-h-0 overflow-auto p-3">
+                <div className="min-h-0 space-y-3 overflow-auto p-3">
+                  <div className="rounded-lg border border-border bg-background p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-semibold">Manual deploy</h3>
+                      <StatusPill tone="muted">Script only</StatusPill>
+                    </div>
+                    <div className="mt-3 space-y-2 text-xs">
+                      <div className="min-w-0 rounded-md border border-border bg-muted/30 p-2">
+                        <div className="text-muted-foreground">
+                          Suggested file
+                        </div>
+                        <div className="mt-1 truncate font-mono">
+                          {effectiveLogicalName || "formlogic.js"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {bindingSuggestions.map((binding) => (
+                        <div
+                          key={binding.id}
+                          className="rounded-lg border border-border bg-muted/20 p-2.5"
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="truncate text-xs font-medium">
+                              {binding.eventLabel}
+                            </span>
+                            <StatusPill tone={statusPillTone(binding.status)}>
+                              {binding.status === "ready"
+                                ? "Suggested"
+                                : "Review"}
+                            </StatusPill>
+                          </div>
+                          <p className="mt-1 truncate text-xs text-muted-foreground">
+                            {binding.target}
+                          </p>
+                          <div className="mt-2 truncate rounded-md bg-background px-2 py-1 font-mono text-xs text-muted-foreground">
+                            {binding.handler}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
                   {chatMessages.length === 0 ? (
                     <div className="rounded-lg border border-border bg-background p-3 text-center">
                       <BotMessageSquare className="mx-auto size-4 text-muted-foreground" />
@@ -1334,147 +1433,13 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
             </div>
           </section>
         )}
-
-        {wizardStep === "create" && (
-          <form
-            id="form-logic-web-resource"
-            className="h-full overflow-auto p-4"
-            onSubmit={submitWebResource}
-          >
-            <div className="mx-auto grid w-full max-w-6xl gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-              <div className="rounded-lg border border-border bg-background p-4">
-                <div className="mb-4 flex min-w-0 items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <h2 className="text-sm font-semibold">
-                      Save and Publish
-                    </h2>
-                    <p className="mt-1 truncate text-xs text-muted-foreground">
-                      Add the script, table, and form changes to the selected solution.
-                    </p>
-                  </div>
-                  <StatusPill tone="muted">Script (JScript)</StatusPill>
-                </div>
-
-                <div className="grid gap-3 lg:grid-cols-4">
-                  <MetadataField
-                    id="form-logic-logical-name"
-                    label="Web resource logical name"
-                    value={prefixedLogicalName}
-                    onChange={setLogicalName}
-                  />
-                  <MetadataField
-                    id="form-logic-display-name"
-                    label="Display name"
-                    value={displayName}
-                    onChange={setDisplayName}
-                  />
-                  <SolutionSelect
-                    solutions={solutionsQuery.data}
-                    selectedUniqueName={selectedSolutionUniqueName}
-                    loading={solutionsQuery.isLoading}
-                    onChange={setSolutionUniqueName}
-                  />
-                  <MetadataField
-                    id="form-logic-publisher-prefix"
-                    label="Publisher prefix"
-                    value={publisherPrefix}
-                    readOnly
-                  />
-                  <MetadataField
-                    id="form-logic-description"
-                    label="Description"
-                    value={description}
-                    onChange={setDescription}
-                  />
-                  <MetadataField
-                    id="form-logic-type"
-                    label="Type"
-                    value="Script (JScript)"
-                    readOnly
-                  />
-                  <MetadataField
-                    id="form-logic-language"
-                    label="Language"
-                    value="English"
-                    readOnly
-                  />
-                </div>
-
-                {solutionsQuery.error && (
-                  <div className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                    {solutionsQuery.error instanceof Error
-                      ? solutionsQuery.error.message
-                      : "Could not load unmanaged solutions"}
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-lg border border-border bg-background p-4">
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <h2 className="text-sm font-semibold">Bindings</h2>
-                  <span className="text-xs text-muted-foreground">
-                    Apply to form
-                  </span>
-                </div>
-
-                <div className="space-y-2">
-                  {bindingSuggestions.map((binding) => (
-                    <div
-                      key={binding.id}
-                      className="rounded-lg border border-border bg-muted/20 p-2.5"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="truncate font-medium">
-                              {binding.eventLabel}
-                            </span>
-                            <StatusPill tone={statusPillTone(binding.status)}>
-                              {binding.status === "ready" ? "Ready" : "Review"}
-                            </StatusPill>
-                          </div>
-                          <p className="mt-1 truncate text-xs text-muted-foreground">
-                            {binding.target}
-                          </p>
-                        </div>
-                        <Switch
-                          checked={includedBindingIds.has(binding.id)}
-                          onCheckedChange={(enabled) =>
-                            toggleBinding(binding.id, enabled)
-                          }
-                          aria-label={`Include ${binding.eventLabel}`}
-                          size="sm"
-                        />
-                      </div>
-                      <div className="mt-2 truncate rounded-md bg-background px-2 py-1 font-mono text-xs text-muted-foreground">
-                        {binding.handler}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-3 rounded-lg border border-border bg-muted/30 p-2.5">
-                  <div className="flex items-start gap-2">
-                    <ShieldCheck className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-                    <div className="min-w-0">
-                      <div className="font-medium">Binding check</div>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Adds the table and form to this solution, applies the
-                        available handlers, and publishes the customizations.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-            </div>
-          </form>
-        )}
       </div>
 
       <footer className="flex min-w-0 items-center justify-between gap-3 border-t border-border bg-background px-4 py-3">
         <div className="min-w-0 text-xs text-muted-foreground">
           {wizardSteps[activeStepIndex]?.title} screen
+          {selectedEntity ? ` · ${selectedEntity.displayName}` : ""}
+          {selectedForm ? ` · ${selectedForm.name}` : ""}
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -1485,28 +1450,23 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
           >
             Previous
           </Button>
-          {wizardStep === "create" ? (
+          {wizardStep === "generate" ? (
             <Button
               type="button"
-              onClick={publishWebResource}
-              disabled={!canCreate || createMutation.isPending}
+              variant="outline"
+              onClick={() => void copySource()}
+              disabled={!hasGenerated}
             >
-              {createMutation.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <FileCode2 className="size-4" />
-              )}
-              Save and Publish
+              <Copy className="size-4" />
+              {copied ? "Copied" : "Copy Script"}
             </Button>
           ) : (
             <Button
               type="button"
               onClick={goToNextStep}
-              disabled={!canProceedToCreate}
+              disabled={!canReviewScript}
             >
-              {wizardStep === "target"
-                ? "Review Script"
-                : "Configure Publish"}
+              Review Script
             </Button>
           )}
         </div>

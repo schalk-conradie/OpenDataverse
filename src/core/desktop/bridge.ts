@@ -9,9 +9,10 @@ import {
   type CreatePluginTypeInput,
   type DeleteWebResourcesResult,
   type DownloadWebResourcesResult,
+  type FormLogicEntitySummary,
+  type FormLogicFormContext,
+  type FormLogicFormSummary,
   type PublishResult,
-  type FormLogicPublishResult,
-  type FormLogicWebResourceInput,
   type PluginAssemblyInspection,
   type PluginAssemblySummary,
   type PluginDependencyReport,
@@ -660,37 +661,6 @@ export async function createWebResourceInSolution(
   } satisfies SolutionWriteResult
 }
 
-export async function createFormLogicWebResource(
-  environment: DataverseEnvironment,
-  input: FormLogicWebResourceInput,
-) {
-  if (isTauriRuntime()) {
-    return invoke<FormLogicPublishResult>("create_form_logic_web_resource", {
-      environment,
-      input,
-    })
-  }
-
-  const createResult = await createWebResourceInSolution(environment, {
-    solutionUniqueName: input.solutionUniqueName,
-    name: input.name,
-    displayName: input.displayName,
-    description: input.description,
-    type: input.type,
-    content: input.content,
-  })
-
-  return {
-    webResourceId: createResult.webResourceId,
-    formId: input.formId,
-    formName: input.formName,
-    appliedBindings: input.bindings.length,
-    message: `Browser preview created ${input.name}, added ${input.entityLogicalName} and ${input.formName} to ${input.solutionUniqueName}, applied ${input.bindings.length} handler${
-      input.bindings.length === 1 ? "" : "s"
-    }, and published customizations.`,
-  } satisfies FormLogicPublishResult
-}
-
 export async function importWebResourcesInSolution(
   environment: DataverseEnvironment,
   input: {
@@ -728,6 +698,67 @@ export async function importWebResourcesInSolution(
     skipped: [],
     message: `Browser preview imported ${imported.length} web resources.`,
   } satisfies WebResourceImportResult
+}
+
+export async function listFormLogicEntities(environment: DataverseEnvironment) {
+  if (isTauriRuntime()) {
+    return invoke<FormLogicEntitySummary[]>("list_form_logic_entities", {
+      environment,
+    })
+  }
+
+  const { mockFormLogicEntities } = await import(
+    "@/modules/form-logic-copilot/mock-data"
+  )
+  return mockFormLogicEntities
+}
+
+export async function listFormLogicForms(
+  environment: DataverseEnvironment,
+  entityLogicalName: string,
+) {
+  if (isTauriRuntime()) {
+    return invoke<FormLogicFormSummary[]>("list_form_logic_forms", {
+      environment,
+      entityLogicalName,
+    })
+  }
+
+  const { mockFormLogicForms } = await import(
+    "@/modules/form-logic-copilot/mock-data"
+  )
+  return mockFormLogicForms[entityLogicalName] ?? []
+}
+
+export async function getFormLogicFormContext(
+  environment: DataverseEnvironment,
+  entityLogicalName: string,
+  formId: string,
+) {
+  if (isTauriRuntime()) {
+    return invoke<FormLogicFormContext>("get_form_logic_form_context", {
+      environment,
+      entityLogicalName,
+      formId,
+    })
+  }
+
+  const { mockFormLogicContexts, mockFormLogicForms, mockFormLogicEntities } =
+    await import("@/modules/form-logic-copilot/mock-data")
+  const context = mockFormLogicContexts[formId]
+  if (context) {
+    return context
+  }
+
+  const fallbackEntity =
+    mockFormLogicEntities.find(
+      (entity) => entity.logicalName === entityLogicalName,
+    ) ?? mockFormLogicEntities[0]
+  const fallbackForm =
+    mockFormLogicForms[fallbackEntity.logicalName]?.[0] ??
+    Object.values(mockFormLogicForms)[0]?.[0]
+
+  return mockFormLogicContexts[fallbackForm.id]
 }
 
 export async function listPluginAssemblies(environment: DataverseEnvironment) {

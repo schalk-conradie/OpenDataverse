@@ -11,22 +11,30 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.60",
+    date: "2026-06-25",
+    title: "Form Logic metadata context",
+    changes: [
+      "Changed Form Logic Copilot to load Dataverse table metadata, active forms, selected form XML, and form field metadata instead of using hard-coded account/contact context.",
+      "Added browser-preview form metadata and FormXML mocks so the two-step script creator can still be validated outside Tauri.",
+      "Changed Form Logic Copilot prompts to include parsed fields, controls, tabs, sections, events, lookup targets, and options from the selected form while keeping the output as a copyable script only.",
+    ],
+  },
+  {
     version: "0.1.59",
     date: "2026-06-24",
     title: "Form Logic Copilot",
     changes: [
-      "Added a three-screen Form Logic Copilot wizard where the first screen selects the entity/form, prompt, AI provider, and model before generating the script.",
+      "Added a two-screen Form Logic Copilot flow where the first screen selects the entity/form, prompt, AI provider, and model before generating the script.",
       "Added an effort selector to Form Logic Copilot generation so Codex and Claude script creation can use the chosen thinking level.",
       "Added a Monaco review screen with provider-locked chat revisions and model switching for follow-up changes.",
-      "Added Save and Publish for generated form scripts, including web resource creation, form event handler binding, and browser-preview fallback behavior.",
+      "Changed Form Logic Copilot into a script creator with copyable JavaScript, suggested manual handler notes, and no web resource creation or form publishing action.",
+      "Grouped the sidebar into collapsible AI, Dev Tools, and Solution Tools sections.",
       "Changed Form Logic Copilot prompts and browser-preview scripts to expose handlers on an entity-specific library object such as AccountLibrary instead of OpenDataverse.",
       "Changed Form Logic Copilot generation to default to a single form OnLoad handler and avoid extra OnChange handlers unless the prompt explicitly needs field-change behavior.",
       "Changed Form Logic Copilot prompts to avoid typeof checks around Dataverse client APIs and prefer simple null checks on returned controls or tabs.",
       "Added YAGNI guidance to Form Logic Copilot prompts so generated scripts avoid speculative helpers, abstractions, configuration, and defensive wrappers.",
       "Changed the Form Logic Copilot prompt box to start empty with a direct placeholder instead of prefilled example text.",
-      "Changed Form Logic Copilot web resource naming to use the selected solution publisher prefix and made the script-step publish CTA a navigation action.",
-      "Changed Form Logic Copilot publishing to add the table and form to the selected unmanaged solution before applying generated handlers.",
-      "Changed Form Logic Copilot publishing to skip selected field handlers when the field control is not on the selected form XML instead of failing the publish.",
       "Hardened Form Logic Copilot generation parsing so provider-prefixed responses and fenced JavaScript drafts no longer fail with raw JSON parse errors.",
     ],
   },
