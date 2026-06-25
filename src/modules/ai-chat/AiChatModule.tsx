@@ -80,6 +80,7 @@ import { cn } from "@/lib/utils"
 import type {
   AiChatAttachment,
   AiChatAttachmentBundle,
+  AiChatContextUsage,
   AiChatMode,
   AiChatMessage,
   AiChatModel,
@@ -501,6 +502,48 @@ function getProviderThreadIdFromMessages(messages: AiChatMessage[]) {
       : undefined
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value)
+}
+
+function isAiChatContextUsage(value: unknown): value is AiChatContextUsage {
+  if (!value || typeof value !== "object") {
+    return false
+  }
+
+  const candidate = value as Partial<AiChatContextUsage>
+  return (
+    isAiChatProvider(candidate.provider) &&
+    typeof candidate.model === "string" &&
+    isFiniteNumber(candidate.usedTokens) &&
+    isFiniteNumber(candidate.inputTokens) &&
+    isFiniteNumber(candidate.cachedInputTokens) &&
+    isFiniteNumber(candidate.outputTokens) &&
+    isFiniteNumber(candidate.reasoningOutputTokens) &&
+    typeof candidate.updatedAt === "string" &&
+    (candidate.contextWindowTokens === undefined ||
+      isFiniteNumber(candidate.contextWindowTokens)) &&
+    (candidate.percentFull === undefined ||
+      isFiniteNumber(candidate.percentFull))
+  )
+}
+
+function getMessageContextUsage(message: AiChatMessage) {
+  const usage = message.metadata?.contextUsage
+  return isAiChatContextUsage(usage) ? usage : undefined
+}
+
+function getContextUsageFromMessages(messages: AiChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const usage = getMessageContextUsage(messages[index])
+    if (usage) {
+      return usage
+    }
+  }
+
+  return undefined
+}
+
 function createChatTitle(message: string) {
   const normalized = message.trim().replace(/\s+/g, " ")
   if (!normalized) {
@@ -571,6 +614,128 @@ function formatAttachmentSize(value?: number) {
   }
 
   return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+
+function formatTokenCount(value: number) {
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1)}M`
+  }
+
+  if (value >= 1_000) {
+    return `${Math.round(value / 1_000)}k`
+  }
+
+  return String(Math.round(value))
+}
+
+function contextUsageTone(usage?: AiChatContextUsage) {
+  if (usage?.percentFull === undefined) {
+    return "neutral"
+  }
+
+  if (usage.percentFull >= 95) {
+    return "critical"
+  }
+
+  if (usage.percentFull >= 85) {
+    return "warning"
+  }
+
+  return "ok"
+}
+
+function contextUsageTitle(usage?: AiChatContextUsage) {
+  if (!usage) {
+    return "Context usage appears after the first provider response."
+  }
+
+  const used = `${usage.usedTokens.toLocaleString()} tokens used`
+  const window = usage.contextWindowTokens
+    ? ` of ${usage.contextWindowTokens.toLocaleString()}`
+    : ""
+  const percent = usage.percentFull
+    ? ` (${Math.round(usage.percentFull)}% full)`
+    : ""
+  const compact = usage.manualCompactionAvailable
+    ? "Manual compaction is available."
+    : usage.autoCompactionEnabled
+      ? "Provider-managed auto compaction can run when needed."
+      : "Manual compaction is not available in this provider path."
+
+  return `Context window: ${used}${window}${percent}.\nInput: ${usage.inputTokens.toLocaleString()}, cached: ${usage.cachedInputTokens.toLocaleString()}, output: ${usage.outputTokens.toLocaleString()}, reasoning: ${usage.reasoningOutputTokens.toLocaleString()}.\n${compact}`
+}
+
+function ContextUsageIndicator({
+  usage,
+  running,
+}: {
+  usage?: AiChatContextUsage
+  running: boolean
+}) {
+  const tone = contextUsageTone(usage)
+  const percent =
+    usage?.percentFull === undefined
+      ? undefined
+      : Math.max(0, Math.min(100, usage.percentFull))
+  const label = usage
+    ? percent === undefined
+      ? "Context"
+      : `${Math.round(percent)}% context`
+    : "Context pending"
+  const tokenLabel = usage
+    ? usage.contextWindowTokens
+      ? `${formatTokenCount(usage.usedTokens)} / ${formatTokenCount(
+          usage.contextWindowTokens,
+        )}`
+      : `${formatTokenCount(usage.usedTokens)} tokens`
+    : "After first reply"
+
+  return (
+    <div
+      className={cn(
+        "flex min-w-44 shrink-0 items-center gap-2 rounded-md border bg-background px-2.5 py-1.5 text-xs",
+        tone === "ok" &&
+          "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/70 dark:bg-emerald-950/30 dark:text-emerald-100",
+        tone === "warning" &&
+          "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100",
+        tone === "critical" &&
+          "border-destructive/30 bg-destructive/10 text-destructive",
+        tone === "neutral" && "text-muted-foreground",
+      )}
+      title={contextUsageTitle(usage)}
+    >
+      <span
+        className={cn(
+          "size-1.5 shrink-0 rounded-full",
+          tone === "ok" && "bg-emerald-500",
+          tone === "warning" && "bg-amber-500",
+          tone === "critical" && "bg-destructive",
+          tone === "neutral" && "bg-muted-foreground",
+        )}
+        aria-hidden="true"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="truncate font-medium text-foreground">{label}</span>
+          <span className="shrink-0 font-mono tracking-normal">
+            {tokenLabel}
+          </span>
+        </div>
+        <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
+          <div
+            className={cn(
+              "h-full rounded-full transition-[width] duration-200",
+              tone === "ok" && "bg-emerald-500",
+              tone === "warning" && "bg-amber-500",
+              tone === "critical" && "bg-destructive",
+              tone === "neutral" && "bg-muted-foreground/40",
+            )}
+            style={{ width: `${percent ?? (running ? 35 : 0)}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function attachmentIcon(attachment: AiChatAttachment) {
@@ -882,6 +1047,8 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
 
       const nextThread: AiChatThread = {
         ...current.thread,
+        contextUsage:
+          getMessageContextUsage(event.message) ?? current.thread.contextUsage,
         messages: upsertMessage(current.thread.messages, event.message),
         updatedAt: new Date().toISOString(),
       }
@@ -1238,6 +1405,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
         model: current.model,
         reasoningEffort: current.reasoningEffort,
         title: threadTitle,
+        contextUsage: activeThread.contextUsage,
         updatedAt: now,
         messages: pendingMessages,
       },
@@ -1260,6 +1428,8 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
         codexThreadId: activeThread.codexThreadId,
       })
       const providerThreadId = getProviderThreadIdFromMessages(responseMessages)
+      const contextUsage =
+        getContextUsageFromMessages(responseMessages) ?? activeThread.contextUsage
 
       persistAiState({
         running: false,
@@ -1280,6 +1450,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
           model: current.model,
           reasoningEffort: current.reasoningEffort,
           title: threadTitle,
+          contextUsage,
           updatedAt: new Date().toISOString(),
           messages: responseMessages,
         },
@@ -1300,6 +1471,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
           model: current.model,
           reasoningEffort: current.reasoningEffort,
           title: threadTitle,
+          contextUsage: activeThread.contextUsage,
           updatedAt: new Date().toISOString(),
           messages: [
             ...activeThread.messages,
@@ -1562,6 +1734,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          <ContextUsageIndicator usage={thread?.contextUsage} running={running} />
           <Select
             value={aiState.provider}
             onValueChange={(value) => updateProvider(value as AiChatProvider)}

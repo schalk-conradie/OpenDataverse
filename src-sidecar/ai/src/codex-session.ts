@@ -5,6 +5,7 @@ import {
   type Thread,
   type ThreadEvent,
   type ThreadItem,
+  type Usage,
 } from "@openai/codex-sdk"
 
 import {
@@ -44,6 +45,17 @@ export type RunCodexTurnResult = {
   response: string
   toolRequests: DataverseToolRequest[]
   items: Array<Pick<ThreadItem, "id" | "type">>
+  contextUsage?: ProviderContextUsage
+}
+
+type ProviderContextUsage = {
+  usedTokens: number
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  reasoningOutputTokens: number
+  autoCompactionEnabled: boolean
+  manualCompactionAvailable: boolean
 }
 
 function buildCodexInput(prompt: string, imagePaths?: string[]): CodexInput {
@@ -60,6 +72,24 @@ function buildCodexInput(prompt: string, imagePaths?: string[]): CodexInput {
       path,
     })),
   ]
+}
+
+function contextUsageFromCodexUsage(
+  usage: Usage | null | undefined,
+): ProviderContextUsage | undefined {
+  if (!usage) {
+    return undefined
+  }
+
+  return {
+    usedTokens: Math.max(0, usage.input_tokens),
+    inputTokens: Math.max(0, usage.input_tokens),
+    cachedInputTokens: Math.max(0, usage.cached_input_tokens),
+    outputTokens: Math.max(0, usage.output_tokens),
+    reasoningOutputTokens: Math.max(0, usage.reasoning_output_tokens),
+    autoCompactionEnabled: true,
+    manualCompactionAvailable: false,
+  }
 }
 
 export class CodexSessionManager {
@@ -124,6 +154,7 @@ export class CodexSessionManager {
       response: structured.response,
       toolRequests: structured.toolRequests,
       items: turn.items.map((item) => ({ id: item.id, type: item.type })),
+      contextUsage: contextUsageFromCodexUsage(turn.usage),
     }
   }
 
@@ -146,6 +177,7 @@ export class CodexSessionManager {
     )
     const items: ThreadItem[] = []
     let finalResponse = ""
+    let usage: Usage | null = null
 
     for await (const event of turn.events) {
       onEvent(event)
@@ -163,6 +195,10 @@ export class CodexSessionManager {
 
       if (event.type === "turn.failed") {
         throw new Error(event.error.message)
+      }
+
+      if (event.type === "turn.completed") {
+        usage = event.usage
       }
 
       if (event.type === "error") {
@@ -190,6 +226,7 @@ export class CodexSessionManager {
       response: structured.response,
       toolRequests: structured.toolRequests,
       items: items.map((item) => ({ id: item.id, type: item.type })),
+      contextUsage: contextUsageFromCodexUsage(usage),
     }
   }
 

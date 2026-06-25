@@ -58,6 +58,7 @@ export type AiChatThread = {
   codexThreadId?: string
   model?: AiChatModel
   reasoningEffort?: AiReasoningEffort
+  contextUsage?: AiChatContextUsage
   title: string
   createdAt: string
   updatedAt: string
@@ -82,6 +83,21 @@ export type AiChatProvider = "codex" | "claude"
 export type AiChatModel = string
 
 export type AiReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max"
+
+export type AiChatContextUsage = {
+  provider: AiChatProvider
+  model: AiChatModel
+  usedTokens: number
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  reasoningOutputTokens: number
+  updatedAt: string
+  contextWindowTokens?: number
+  percentFull?: number
+  autoCompactionEnabled?: boolean
+  manualCompactionAvailable?: boolean
+}
 
 export type AiChatWindowState = {
   thread?: AiChatThread

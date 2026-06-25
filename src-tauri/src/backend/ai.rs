@@ -45,6 +45,30 @@ pub(super) struct AiChatAttachmentBundle {
     warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct AiChatContextUsage {
+    #[serde(default)]
+    provider: String,
+    #[serde(default)]
+    model: String,
+    used_tokens: u64,
+    input_tokens: u64,
+    cached_input_tokens: u64,
+    output_tokens: u64,
+    reasoning_output_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    context_window_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    percent_full: Option<f64>,
+    #[serde(default)]
+    auto_compaction_enabled: bool,
+    #[serde(default)]
+    manual_compaction_available: bool,
+    #[serde(default)]
+    updated_at: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct PastedAiChatImageInput {
@@ -74,6 +98,8 @@ pub(super) struct AiChatThread {
     provider: String,
     model: String,
     reasoning_effort: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    context_usage: Option<AiChatContextUsage>,
     title: String,
     created_at: String,
     updated_at: String,
@@ -192,6 +218,8 @@ pub(super) struct AiProviderTurnResult {
     response: String,
     #[serde(default)]
     tool_requests: Vec<AiProviderToolRequest>,
+    #[serde(default)]
+    context_usage: Option<AiChatContextUsage>,
 }
 
 impl AiProviderTurnResult {
@@ -201,6 +229,28 @@ impl AiProviderTurnResult {
             .or(self.codex_thread_id.clone())
     }
 }
+
+fn normalize_ai_context_usage(
+    provider: &str,
+    model: &str,
+    mut usage: AiChatContextUsage,
+) -> Result<AiChatContextUsage, String> {
+    usage.provider = provider.to_string();
+    usage.model = model.to_string();
+    usage.updated_at = now_rfc3339()?;
+
+    if usage.used_tokens == 0 {
+        usage.used_tokens = usage.input_tokens;
+    }
+
+    if let Some(context_window_tokens) = usage.context_window_tokens.filter(|value| *value > 0) {
+        let percent = (usage.used_tokens as f64 / context_window_tokens as f64) * 100.0;
+        usage.percent_full = Some(percent.clamp(0.0, 100.0));
+    }
+
+    Ok(usage)
+}
+
 pub(super) fn ai_chat_history_root(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = legacy_opendataverse_dir(app)?.join(AI_CHATS_DIR_NAME);
     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
@@ -394,6 +444,7 @@ pub(super) fn create_ai_chat_thread(
         provider,
         model,
         reasoning_effort,
+        context_usage: None,
         title: "Dataverse Chat".to_string(),
         created_at: now.clone(),
         updated_at: now,
@@ -2406,6 +2457,13 @@ pub(super) async fn build_ai_chat_response(
         )
         .await?;
         update_ai_thread_provider_thread_id(thread, turn.provider_session_id());
+        let context_usage = turn
+            .context_usage
+            .map(|usage| normalize_ai_context_usage(&thread.provider, &thread.model, usage))
+            .transpose()?;
+        if let Some(context_usage) = context_usage.clone() {
+            thread.context_usage = Some(context_usage);
+        }
         let mut provider_turn_message = mark_ai_message_status(&provider_turn_message, "complete");
         provider_turn_message.metadata = Some(serde_json::json!({
           "provider": thread.provider,
@@ -2415,6 +2473,7 @@ pub(super) async fn build_ai_chat_response(
           "toolRound": completed_tool_rounds,
           "model": thread.model,
           "reasoningEffort": thread.reasoning_effort,
+          "contextUsage": context_usage,
         }));
         emit_ai_chat_message(app, &thread.id, &provider_turn_message);
         messages.push(provider_turn_message);

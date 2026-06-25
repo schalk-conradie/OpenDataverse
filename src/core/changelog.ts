@@ -11,6 +11,14 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.62",
+    date: "2026-06-25",
+    title: "AI chat context usage",
+    changes: [
+      "Added an AI Chat context usage indicator that shows provider-reported context tokens and highlights conversations that are close to the context window.",
+    ],
+  },
+  {
     version: "0.1.61",
     date: "2026-06-25",
     title: "Webresource binding tree",

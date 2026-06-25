@@ -5,6 +5,7 @@ import { createId } from "@/core/dataverse/schemas"
 import type {
   AiChatAttachment,
   AiChatAttachmentBundle,
+  AiChatContextUsage,
   AiChatMessage,
   AiChatMessageInput,
   AiChatStreamEvent,
@@ -83,6 +84,38 @@ function browserPreviewResponse(input: AiChatMessageInput) {
   }
 
   return "Ask for WhoAmI, entity sets, metadata, or a bounded OData GET query."
+}
+
+function createBrowserContextUsage(
+  thread: AiChatThread,
+  input: AiChatMessageInput,
+): AiChatContextUsage {
+  const contextChars = input.context?.length ?? 0
+  const messageTokens = Math.max(
+    24,
+    Math.round((input.message.length + contextChars) / 4),
+  )
+  const previousTokens = thread.contextUsage?.usedTokens ?? 18_000
+  const contextWindowTokens = 258_000
+  const usedTokens = Math.min(
+    contextWindowTokens,
+    previousTokens + messageTokens + 850,
+  )
+
+  return {
+    provider: input.provider,
+    model: input.model,
+    usedTokens,
+    inputTokens: usedTokens,
+    cachedInputTokens: Math.round(usedTokens * 0.2),
+    outputTokens: 420,
+    reasoningOutputTokens: input.provider === "codex" ? 96 : 0,
+    contextWindowTokens,
+    percentFull: (usedTokens / contextWindowTokens) * 100,
+    autoCompactionEnabled: input.provider === "codex",
+    manualCompactionAvailable: false,
+    updatedAt: new Date().toISOString(),
+  }
 }
 
 function summarizeThread(
@@ -312,10 +345,12 @@ export async function sendAiChatMessage(input: AiChatMessageInput) {
           }
         : undefined,
   })
+  const contextUsage = createBrowserContextUsage(thread, input)
   const toolMessage = createMessage("tool", "browser-preview", {
     toolName: "browser_preview",
     metadata: {
       environmentId: input.environmentId,
+      contextUsage,
     },
   })
   const assistantMessage = createMessage(
@@ -331,6 +366,7 @@ export async function sendAiChatMessage(input: AiChatMessageInput) {
     codexThreadId: input.codexThreadId ?? thread.codexThreadId,
     model: input.model,
     reasoningEffort: input.reasoningEffort,
+    contextUsage,
     title:
       thread.messages.length === 0
         ? titleFromMessage(input.message)

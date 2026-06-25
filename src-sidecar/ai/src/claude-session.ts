@@ -50,6 +50,19 @@ export type RunClaudeTurnResult = {
   response: string
   toolRequests: DataverseToolRequest[]
   items: Array<{ id: string; type: string }>
+  contextUsage?: ProviderContextUsage
+}
+
+type ProviderContextUsage = {
+  usedTokens: number
+  inputTokens: number
+  cachedInputTokens: number
+  outputTokens: number
+  reasoningOutputTokens: number
+  contextWindowTokens?: number
+  percentFull?: number
+  autoCompactionEnabled: boolean
+  manualCompactionAvailable: boolean
 }
 
 const defaultClaudeModel = "claude-sonnet-4-6"
@@ -95,6 +108,57 @@ function resultErrorMessage(result: SDKResultMessage) {
   }
 
   return result.stop_reason ?? "Claude request failed."
+}
+
+function safeTokenCount(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.round(value))
+    : 0
+}
+
+function contextWindowFromClaudeResult(
+  result: SDKResultMessage,
+  model?: string,
+) {
+  const preferred = model ? result.modelUsage[model]?.contextWindow : undefined
+  if (typeof preferred === "number" && preferred > 0) {
+    return preferred
+  }
+
+  return Object.values(result.modelUsage).find(
+    (usage) => usage.contextWindow > 0,
+  )?.contextWindow
+}
+
+function contextUsageFromClaudeResult(
+  result: SDKResultMessage,
+  model?: string,
+): ProviderContextUsage {
+  const inputTokens = safeTokenCount(result.usage.input_tokens)
+  const cacheReadInputTokens = safeTokenCount(
+    result.usage.cache_read_input_tokens,
+  )
+  const cacheCreationInputTokens = safeTokenCount(
+    result.usage.cache_creation_input_tokens,
+  )
+  const outputTokens = safeTokenCount(result.usage.output_tokens)
+  const contextWindowTokens = contextWindowFromClaudeResult(result, model)
+  const percentFull =
+    contextWindowTokens && contextWindowTokens > 0
+      ? (inputTokens / contextWindowTokens) * 100
+      : undefined
+
+  return {
+    usedTokens: inputTokens,
+    inputTokens,
+    cachedInputTokens: cacheReadInputTokens + cacheCreationInputTokens,
+    outputTokens,
+    reasoningOutputTokens: 0,
+    contextWindowTokens,
+    percentFull,
+    autoCompactionEnabled: false,
+    manualCompactionAvailable: false,
+  }
 }
 
 function createSession(input: {
@@ -165,6 +229,7 @@ export class ClaudeSessionManager {
           type: result.type,
         },
       ],
+      contextUsage: contextUsageFromClaudeResult(result, session.model),
     }
   }
 
