@@ -57,13 +57,17 @@ const COMPONENT_JSON_NAME_KEYS: &[&str] = &[
     "returnedTypeCode",
 ];
 
-const TABLE_COMPONENT_TYPES: &[i32] = &[1];
+const TABLE_COMPONENT_TYPE: i32 = 1;
+const SYSTEM_FORM_COMPONENT_TYPE: i32 = 60;
+const WEB_RESOURCE_COMPONENT_TYPE: i32 = 61;
+
+const TABLE_COMPONENT_TYPES: &[i32] = &[TABLE_COMPONENT_TYPE];
 const CHOICE_COMPONENT_TYPES: &[i32] = &[9];
 const ROLE_COMPONENT_TYPES: &[i32] = &[20];
-const SYSTEM_FORM_COMPONENT_TYPES: &[i32] = &[24, 60];
+const SYSTEM_FORM_COMPONENT_TYPES: &[i32] = &[24, SYSTEM_FORM_COMPONENT_TYPE];
 const VIEW_COMPONENT_TYPES: &[i32] = &[26];
 const PROCESS_COMPONENT_TYPES: &[i32] = &[29];
-const WEB_RESOURCE_COMPONENT_TYPES: &[i32] = &[61];
+const WEB_RESOURCE_COMPONENT_TYPES: &[i32] = &[WEB_RESOURCE_COMPONENT_TYPE];
 const MODEL_DRIVEN_APP_COMPONENT_TYPES: &[i32] = &[80];
 const CANVAS_APP_COMPONENT_TYPES: &[i32] = &[300];
 const ENV_VAR_DEFINITION_COMPONENT_TYPES: &[i32] = &[380];
@@ -310,16 +314,36 @@ pub(super) struct SolutionWriteResult {
     message: String,
 }
 
+fn add_solution_component_payload(
+    component_id: &str,
+    component_type: i32,
+    solution_unique_name: &str,
+    do_not_include_subcomponents: Option<bool>,
+) -> Value {
+    let mut payload = serde_json::json!({
+      "ComponentId": component_id,
+      "ComponentType": component_type,
+      "SolutionUniqueName": solution_unique_name,
+      "AddRequiredComponents": false
+    });
+
+    if let Some(do_not_include_subcomponents) = do_not_include_subcomponents {
+        payload["DoNotIncludeSubcomponents"] = serde_json::json!(do_not_include_subcomponents);
+    }
+
+    payload
+}
+
 fn add_web_resource_solution_component_payload(
     web_resource_id: &str,
     solution_unique_name: &str,
 ) -> Value {
-    serde_json::json!({
-      "ComponentId": web_resource_id,
-      "ComponentType": 61,
-      "SolutionUniqueName": solution_unique_name,
-      "AddRequiredComponents": false
-    })
+    add_solution_component_payload(
+        web_resource_id,
+        WEB_RESOURCE_COMPONENT_TYPE,
+        solution_unique_name,
+        None,
+    )
 }
 
 fn remove_solution_component_payload(
@@ -1770,7 +1794,7 @@ async fn ensure_unmanaged_solution(
     app: &AppHandle,
     environment: &DataverseEnvironment,
     solution_unique_name: &str,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let values = dataverse_get_collection_values(
         app,
         environment,
@@ -1795,6 +1819,8 @@ async fn ensure_unmanaged_solution(
     let Some(solution) = values.first() else {
         return Err(format!("Could not find solution {solution_unique_name}."));
     };
+    let solution_id = json_string(solution, "solutionid")
+        .ok_or_else(|| format!("Solution {solution_unique_name} did not include an id."))?;
 
     if json_bool(solution, "ismanaged").unwrap_or(false) {
         let name = json_string(solution, "friendlyname")
@@ -1804,7 +1830,7 @@ async fn ensure_unmanaged_solution(
         return Err(format!("Managed solution {name} cannot be changed."));
     }
 
-    Ok(())
+    Ok(solution_id)
 }
 
 async fn add_web_resource_to_solution(
@@ -2322,7 +2348,7 @@ mod tests {
             "CoreCustomizations",
         );
 
-        assert_eq!(payload["ComponentType"], 61);
+        assert_eq!(payload["ComponentType"], WEB_RESOURCE_COMPONENT_TYPE);
         assert_eq!(payload["AddRequiredComponents"], false);
         assert!(payload.get("DoNotIncludeSubcomponents").is_none());
     }

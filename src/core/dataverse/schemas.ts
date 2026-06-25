@@ -201,6 +201,48 @@ export type FetchXmlQueryResult = {
   webApiUrl: string
 }
 
+export type FormLogicEntitySummary = {
+  logicalName: string
+  entitySetName: string
+  displayName: string
+  primaryNameAttribute?: string
+  primaryIdAttribute?: string
+}
+
+export type FormLogicFormSummary = {
+  id: string
+  name: string
+  typeCode: number
+  typeLabel: string
+  description: string
+  isDefault: boolean
+  isManaged: boolean
+  formActivationState: number
+}
+
+export type FormLogicOptionValue = {
+  value: number
+  label: string
+}
+
+export type FormLogicAttributeMetadata = {
+  logicalName: string
+  displayName: string
+  attributeType: string
+  requiredLevel?: string
+  isValidForRead: boolean
+  lookupTargets?: string[]
+  optionValues?: FormLogicOptionValue[]
+}
+
+export type FormLogicFormContext = {
+  entity: FormLogicEntitySummary
+  form: FormLogicFormSummary
+  formXml: string
+  attributes: FormLogicAttributeMetadata[]
+  source: "dataverse" | "browser-preview"
+}
+
 export type SolutionSummary = {
   id: string
   uniqueName: string
@@ -684,6 +726,7 @@ export type ToolId =
   | "autopublisher"
   | "ai-chat"
   | "ai-agent-experimental"
+  | "form-logic-copilot"
   | "fetchxml-builder"
   | "plugin-registration"
   | "solution-explorer"

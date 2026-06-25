@@ -9,6 +9,7 @@ import {
 } from "react"
 import {
   AlertTriangle,
+  ChevronRight,
   CheckCircle2,
   Download,
   Info,
@@ -109,6 +110,13 @@ const FetchXmlBuilderModule = lazy(() =>
     default: module.FetchXmlBuilderModule,
   })),
 )
+const FormLogicCopilotModule = lazy(() =>
+  import("@/modules/form-logic-copilot/FormLogicCopilotModule").then(
+    (module) => ({
+      default: module.FormLogicCopilotModule,
+    }),
+  ),
+)
 const PluginRegistrationModule = lazy(() =>
   import("@/modules/plugin-registration/PluginRegistrationModule").then(
     (module) => ({
@@ -135,6 +143,30 @@ const appearanceModeLabels: Record<AppearanceMode, string> = {
   light: "Light",
   dark: "Dark",
 }
+
+type SidebarToolGroup = {
+  id: string
+  title: string
+  toolIds: ToolId[]
+}
+
+const sidebarToolGroups: SidebarToolGroup[] = [
+  {
+    id: "ai",
+    title: "AI",
+    toolIds: ["ai-chat", "form-logic-copilot", "ai-agent-experimental"],
+  },
+  {
+    id: "dev-tools",
+    title: "Dev Tools",
+    toolIds: ["autopublisher", "fetchxml-builder", "plugin-registration"],
+  },
+  {
+    id: "solution-tools",
+    title: "Solution Tools",
+    toolIds: ["solution-explorer"],
+  },
+]
 
 type EnvironmentFormDialogProps = {
   mode: "add" | "edit"
@@ -666,6 +698,10 @@ function renderToolWindowContent(window: ToolWindow) {
     return <FetchXmlBuilderModule window={window} />
   }
 
+  if (window.toolId === "form-logic-copilot") {
+    return <FormLogicCopilotModule window={window} />
+  }
+
   if (window.toolId === "plugin-registration") {
     return <PluginRegistrationModule window={window} />
   }
@@ -852,6 +888,9 @@ function App() {
   const [installingUpdate, setInstallingUpdate] = useState(false)
   const [updateProgress, setUpdateProgress] = useState<AppUpdateProgress>()
   const [pendingToolOpen, setPendingToolOpen] = useState<PendingToolOpen>()
+  const [collapsedToolGroupIds, setCollapsedToolGroupIds] = useState(
+    () => new Set<string>(),
+  )
 
   useEffect(() => {
     void hydrate()
@@ -992,9 +1031,40 @@ function App() {
   const pendingTool = pendingToolOpen
     ? getToolDefinition(pendingToolOpen.toolId)
     : undefined
-  const visibleTools = toolRegistry.filter(
-    (tool) => tool.id !== "ai-agent-experimental" || experimentalAiAgentEnabled,
+  const visibleTools = useMemo(
+    () =>
+      toolRegistry.filter(
+        (tool) =>
+          tool.id !== "ai-agent-experimental" || experimentalAiAgentEnabled,
+      ),
+    [experimentalAiAgentEnabled],
   )
+  const visibleToolGroups = useMemo(() => {
+    const toolsById = new Map(visibleTools.map((tool) => [tool.id, tool]))
+
+    return sidebarToolGroups
+      .map((group) => ({
+        ...group,
+        tools: group.toolIds.flatMap((toolId) => {
+          const tool = toolsById.get(toolId)
+
+          return tool ? [tool] : []
+        }),
+      }))
+      .filter((group) => group.tools.length > 0)
+  }, [visibleTools])
+
+  function toggleToolGroup(groupId: string) {
+    setCollapsedToolGroupIds((current) => {
+      const next = new Set(current)
+      if (next.has(groupId)) {
+        next.delete(groupId)
+      } else {
+        next.add(groupId)
+      }
+      return next
+    })
+  }
 
   function requestEnvironmentForTool(
     toolId: ToolId,
@@ -1217,51 +1287,93 @@ function App() {
           </section>
 
           <section className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3">
-            <div className="px-2 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              Tools
-            </div>
-            <div className="grid gap-0.5">
-              {visibleTools.map((tool) => (
-                <ContextMenu key={tool.id}>
-                  <ContextMenuTrigger asChild>
+            <div className="space-y-3">
+              {visibleToolGroups.map((group) => {
+                const collapsed = collapsedToolGroupIds.has(group.id)
+                const groupPanelId = `sidebar-tool-group-${group.id}`
+
+                return (
+                  <div key={group.id} className="min-w-0">
                     <button
-                      className={cn(
-                        "group flex w-full min-w-0 items-center gap-3 rounded-lg border border-transparent px-2.5 py-2 text-left transition-all hover:border-border hover:bg-background focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40",
-                        tool.status === "planned" && "opacity-60",
-                      )}
                       type="button"
-                      onClick={() => handleOpenTool(tool.id)}
+                      className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+                      aria-expanded={!collapsed}
+                      aria-controls={groupPanelId}
+                      onClick={() => toggleToolGroup(group.id)}
                     >
-                      <div className="flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors group-hover:text-primary group-hover:border-primary/20">
-                        <tool.icon className="size-3.5" />
-                      </div>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs font-medium">
-                          {tool.title}
-                        </span>
-                        <span className="block truncate text-[11px] text-muted-foreground">
-                          {tool.description}
-                        </span>
-                      </span>
-                      {tool.status === "planned" && (
-                        <Badge variant="secondary" className="shrink-0 h-4 px-1.5 text-[10px]">
-                          Planned
-                        </Badge>
-                      )}
+                      <ChevronRight
+                        className={cn(
+                          "size-3.5 shrink-0 transition-transform",
+                          !collapsed && "rotate-90",
+                        )}
+                      />
+                      <span className="truncate">{group.title}</span>
                     </button>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent>
-                    <ContextMenuItem
-                      onSelect={() =>
-                        handleOpenTool(tool.id, { newWindow: true })
-                      }
-                    >
-                      <Plus className="size-3.5" />
-                      Open Second Tab
-                    </ContextMenuItem>
-                  </ContextMenuContent>
-                </ContextMenu>
-              ))}
+
+                    {!collapsed && (
+                      <div id={groupPanelId} className="mt-1 grid gap-0.5">
+                        {group.tools.map((tool) => {
+                          const active = activeWindow?.toolId === tool.id
+
+                          return (
+                            <ContextMenu key={tool.id}>
+                              <ContextMenuTrigger asChild>
+                                <button
+                                  className={cn(
+                                    "group flex w-full min-w-0 items-center gap-3 rounded-lg border border-transparent px-2.5 py-2 text-left transition-all hover:border-border hover:bg-background focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40",
+                                    active && "border-border bg-primary/5",
+                                    tool.status === "planned" && "opacity-60",
+                                  )}
+                                  type="button"
+                                  onClick={() => handleOpenTool(tool.id)}
+                                >
+                                  <div
+                                    className={cn(
+                                      "flex size-7 shrink-0 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors group-hover:border-primary/20 group-hover:text-primary",
+                                      active &&
+                                        "border-primary/20 text-primary",
+                                    )}
+                                  >
+                                    <tool.icon className="size-3.5" />
+                                  </div>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-xs font-medium">
+                                      {tool.title}
+                                    </span>
+                                    <span className="block truncate text-[11px] text-muted-foreground">
+                                      {tool.description}
+                                    </span>
+                                  </span>
+                                  {tool.status === "planned" && (
+                                    <Badge
+                                      variant="secondary"
+                                      className="h-4 shrink-0 px-1.5 text-[10px]"
+                                    >
+                                      Planned
+                                    </Badge>
+                                  )}
+                                </button>
+                              </ContextMenuTrigger>
+                              <ContextMenuContent>
+                                <ContextMenuItem
+                                  onSelect={() =>
+                                    handleOpenTool(tool.id, {
+                                      newWindow: true,
+                                    })
+                                  }
+                                >
+                                  <Plus className="size-3.5" />
+                                  Open Second Tab
+                                </ContextMenuItem>
+                              </ContextMenuContent>
+                            </ContextMenu>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           </section>
 

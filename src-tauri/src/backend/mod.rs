@@ -31,6 +31,7 @@ use uuid::Uuid;
 mod ai;
 mod auth;
 mod fetchxml;
+mod form_logic;
 mod plugins;
 mod solutions;
 mod web_resources;
@@ -958,6 +959,9 @@ pub(crate) fn run() {
             ai::dataverse_ai_list_entity_sets,
             ai::dataverse_ai_metadata,
             ai::dataverse_ai_get,
+            form_logic::list_form_logic_entities,
+            form_logic::list_form_logic_forms,
+            form_logic::get_form_logic_form_context,
             fetchxml::list_fetchxml_entities,
             fetchxml::get_fetchxml_entity_metadata,
             fetchxml::execute_fetchxml_query

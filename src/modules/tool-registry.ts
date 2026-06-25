@@ -5,6 +5,7 @@ import {
   FileCode2,
   MessageSquareText,
   Puzzle,
+  WandSparkles,
 } from "lucide-react"
 
 import type { ToolId } from "@/core/dataverse/schemas"
@@ -30,6 +31,13 @@ export const toolRegistry: ToolDefinition[] = [
     title: "AI Agent (Experimental)",
     description: "Unsafe Dataverse changes",
     icon: BotMessageSquare,
+    status: "ready",
+  },
+  {
+    id: "form-logic-copilot",
+    title: "Form Logic Copilot",
+    description: "Generate form scripts",
+    icon: WandSparkles,
     status: "ready",
   },
   {
