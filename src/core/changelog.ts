@@ -11,6 +11,14 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.61",
+    date: "2026-06-25",
+    title: "Webresource binding tree",
+    changes: [
+      "Changed Webresource Management bindings to group bound files by their web resource root and folder path so related local files are easier to scan.",
+    ],
+  },
+  {
     version: "0.1.60",
     date: "2026-06-25",
     title: "Form Logic metadata context",

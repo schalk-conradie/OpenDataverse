@@ -194,6 +194,38 @@ type ResourceTreeRow =
       depth: number
     }
 
+type BindingTreeFolder = {
+  type: "folder"
+  id: string
+  name: string
+  path: string
+  children: BindingTreeNode[]
+  bindingCount: number
+  autoPublishCount: number
+  localDirectories: Set<string>
+}
+
+type BindingTreeFile = {
+  type: "file"
+  id: string
+  name: string
+  binding: WebResourceBinding
+}
+
+type BindingTreeNode = BindingTreeFolder | BindingTreeFile
+
+type BindingTreeRow =
+  | {
+      type: "folder"
+      folder: BindingTreeFolder
+      depth: number
+    }
+  | {
+      type: "file"
+      file: BindingTreeFile
+      depth: number
+    }
+
 type WatchedBinding = {
   binding: WebResourceBinding
   directoryPath: string
@@ -393,6 +425,25 @@ function sortResourceTree(nodes: ResourceTreeNode[]) {
   }
 }
 
+function sortBindingTree(nodes: BindingTreeNode[]) {
+  nodes.sort((left, right) => {
+    if (left.type !== right.type) {
+      return left.type === "folder" ? -1 : 1
+    }
+
+    return left.name.localeCompare(right.name, undefined, {
+      numeric: true,
+      sensitivity: "base",
+    })
+  })
+
+  for (const node of nodes) {
+    if (node.type === "folder") {
+      sortBindingTree(node.children)
+    }
+  }
+}
+
 function buildResourceTree(
   resources: WebResource[],
   boundResourceIds: Set<string>,
@@ -469,6 +520,82 @@ function buildResourceTree(
   return root.children
 }
 
+function localDirectoryPath(path: string) {
+  const lastSeparatorIndex = Math.max(
+    path.lastIndexOf("/"),
+    path.lastIndexOf("\\"),
+  )
+
+  return lastSeparatorIndex >= 0 ? path.slice(0, lastSeparatorIndex) : path
+}
+
+function buildBindingTree(bindings: WebResourceBinding[]) {
+  const root: BindingTreeFolder = {
+    type: "folder",
+    id: "binding-folder:",
+    name: "",
+    path: "",
+    children: [],
+    bindingCount: 0,
+    autoPublishCount: 0,
+    localDirectories: new Set(),
+  }
+  const folderByPath = new Map<string, BindingTreeFolder>()
+
+  for (const binding of bindings) {
+    const parts = splitResourceName(binding.webResourceName)
+    const fileName = parts.at(-1) ?? binding.webResourceName
+    const localDirectory = localDirectoryPath(binding.localPath)
+    let parent = root
+    const pathParts: string[] = []
+
+    root.bindingCount += 1
+    root.localDirectories.add(localDirectory)
+    if (binding.autoPublish) {
+      root.autoPublishCount += 1
+    }
+
+    for (const part of parts.slice(0, -1)) {
+      pathParts.push(part)
+      const folderPath = pathParts.join("/")
+      let folder = folderByPath.get(folderPath)
+
+      if (!folder) {
+        folder = {
+          type: "folder",
+          id: `binding-folder:${folderPath}`,
+          name: part,
+          path: folderPath,
+          children: [],
+          bindingCount: 0,
+          autoPublishCount: 0,
+          localDirectories: new Set(),
+        }
+        folderByPath.set(folderPath, folder)
+        parent.children.push(folder)
+      }
+
+      folder.bindingCount += 1
+      folder.localDirectories.add(localDirectory)
+      if (binding.autoPublish) {
+        folder.autoPublishCount += 1
+      }
+      parent = folder
+    }
+
+    parent.children.push({
+      type: "file",
+      id: `binding-file:${binding.id}`,
+      name: fileName,
+      binding,
+    })
+  }
+
+  sortBindingTree(root.children)
+
+  return root.children
+}
+
 function collectFolderIds(nodes: ResourceTreeNode[]) {
   const ids: string[] = []
 
@@ -476,6 +603,19 @@ function collectFolderIds(nodes: ResourceTreeNode[]) {
     if (node.type === "folder") {
       ids.push(node.id)
       ids.push(...collectFolderIds(node.children))
+    }
+  }
+
+  return ids
+}
+
+function collectBindingFolderIds(nodes: BindingTreeNode[]) {
+  const ids: string[] = []
+
+  for (const node of nodes) {
+    if (node.type === "folder") {
+      ids.push(node.id)
+      ids.push(...collectBindingFolderIds(node.children))
     }
   }
 
@@ -557,8 +697,62 @@ function flattenResourceTree(
   return rows
 }
 
+function flattenBindingTree(
+  nodes: BindingTreeNode[],
+  collapsedFolderIds: Set<string>,
+  depth = 0,
+) {
+  const rows: BindingTreeRow[] = []
+
+  for (const node of nodes) {
+    if (node.type === "folder") {
+      rows.push({ type: "folder", folder: node, depth })
+
+      if (!collapsedFolderIds.has(node.id)) {
+        rows.push(
+          ...flattenBindingTree(node.children, collapsedFolderIds, depth + 1),
+        )
+      }
+    } else {
+      rows.push({ type: "file", file: node, depth })
+    }
+  }
+
+  return rows
+}
+
 function formatResourceCount(count: number) {
   return count === 1 ? "1 item" : `${count} items`
+}
+
+function formatBindingCount(count: number) {
+  return count === 1 ? "1 binding" : `${count} bindings`
+}
+
+function formatAutoPublishCount(count: number, total: number) {
+  if (count === 0) {
+    return "Auto off"
+  }
+
+  if (count === total) {
+    return "Auto on"
+  }
+
+  return `${count}/${total} auto`
+}
+
+function summarizeBindingFolderLocalPath(folder: BindingTreeFolder) {
+  const localDirectories = [...folder.localDirectories]
+
+  if (localDirectories.length === 0) {
+    return "-"
+  }
+
+  if (localDirectories.length === 1) {
+    return localDirectories[0]
+  }
+
+  return `${localDirectories.length} local folders`
 }
 
 function formatDownloadDuration(
@@ -1864,6 +2058,9 @@ export function WebResourceManagementModule({
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
     () => new Set(),
   )
+  const [collapsedBindingFolderIds, setCollapsedBindingFolderIds] = useState<
+    Set<string>
+  >(() => new Set())
   const [publishingIds, setPublishingIds] = useState<Set<string>>(new Set())
   const config = useWorkspaceStore((state) => state.config)
   const addBinding = useWorkspaceStore((state) => state.addBinding)
@@ -1882,6 +2079,15 @@ export function WebResourceManagementModule({
   const autoPublishBindings = useMemo(
     () => bindings.filter((binding) => binding.autoPublish),
     [bindings],
+  )
+  const bindingTree = useMemo(() => buildBindingTree(bindings), [bindings])
+  const bindingFolderIds = useMemo(
+    () => collectBindingFolderIds(bindingTree),
+    [bindingTree],
+  )
+  const bindingTreeRows = useMemo(
+    () => flattenBindingTree(bindingTree, collapsedBindingFolderIds),
+    [bindingTree, collapsedBindingFolderIds],
   )
   const publishingBindingIdsRef = useRef<Set<string>>(new Set())
   const autoPublishTimersRef = useRef<Map<string, AutoPublishTimer>>(new Map())
@@ -1996,6 +2202,20 @@ export function WebResourceManagementModule({
 
   function toggleFolder(folderId: string) {
     setExpandedFolderIds((current) => {
+      const next = new Set(current)
+
+      if (next.has(folderId)) {
+        next.delete(folderId)
+      } else {
+        next.add(folderId)
+      }
+
+      return next
+    })
+  }
+
+  function toggleBindingFolder(folderId: string) {
+    setCollapsedBindingFolderIds((current) => {
       const next = new Set(current)
 
       if (next.has(folderId)) {
@@ -2677,8 +2897,11 @@ export function WebResourceManagementModule({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setExpandedFolderIds(new Set(folderIds))}
-                disabled={folderIds.length === 0}
+                onClick={() => {
+                  setExpandedFolderIds(new Set(folderIds))
+                  setCollapsedBindingFolderIds(new Set())
+                }}
+                disabled={folderIds.length === 0 && bindingFolderIds.length === 0}
               >
                 <FolderOpen className="size-3.5" />
                 Expand
@@ -2686,8 +2909,11 @@ export function WebResourceManagementModule({
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setExpandedFolderIds(new Set())}
-                disabled={folderIds.length === 0}
+                onClick={() => {
+                  setExpandedFolderIds(new Set())
+                  setCollapsedBindingFolderIds(new Set(bindingFolderIds))
+                }}
+                disabled={folderIds.length === 0 && bindingFolderIds.length === 0}
               >
                 <Folder className="size-3.5" />
                 Collapse
@@ -3073,59 +3299,149 @@ export function WebResourceManagementModule({
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-[38%]">Web Resource</TableHead>
                 <TableHead>Local File</TableHead>
-                <TableHead>Web Resource</TableHead>
                 <TableHead>Version</TableHead>
                 <TableHead>Auto</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {bindings.map((binding) => (
-                <TableRow key={binding.id}>
-                  <TableCell className="max-w-72 truncate font-mono text-xs">
-                    {binding.localPath}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {binding.webResourceName}
-                  </TableCell>
-                  <TableCell>{binding.lastKnownVersion || "-"}</TableCell>
-                  <TableCell>
-                    <Switch
-                      checked={binding.autoPublish}
-                      onCheckedChange={(autoPublish) =>
-                        updateBinding(binding.id, { autoPublish })
-                      }
-                    />
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1.5">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void publishBinding(binding)}
-                        disabled={publishingIds.has(binding.id)}
+              {bindingTreeRows.map((row) => {
+                if (row.type === "folder") {
+                  const expanded = !collapsedBindingFolderIds.has(row.folder.id)
+                  const localPathSummary = summarizeBindingFolderLocalPath(
+                    row.folder,
+                  )
+
+                  return (
+                    <TableRow
+                      key={row.folder.id}
+                      aria-expanded={expanded}
+                      className="cursor-pointer bg-muted/30 font-medium"
+                      onClick={() => toggleBindingFolder(row.folder.id)}
+                    >
+                      <TableCell className="max-w-96">
+                        <div
+                          className="flex min-w-0 items-center gap-1.5"
+                          style={{
+                            paddingLeft: `${row.depth * 1.25}rem`,
+                          }}
+                          title={row.folder.path}
+                        >
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-expanded={expanded}
+                            aria-label={`${
+                              expanded ? "Collapse" : "Expand"
+                            } ${row.folder.path}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              toggleBindingFolder(row.folder.id)
+                            }}
+                          >
+                            {expanded ? (
+                              <ChevronDown className="size-3.5" />
+                            ) : (
+                              <ChevronRight className="size-3.5" />
+                            )}
+                          </Button>
+                          {expanded ? (
+                            <FolderOpen className="size-4 shrink-0 text-primary" />
+                          ) : (
+                            <Folder className="size-4 shrink-0 text-muted-foreground" />
+                          )}
+                          <span className="truncate font-mono text-xs">
+                            {row.folder.name}
+                          </span>
+                          <span className="shrink-0 text-xs font-normal text-muted-foreground">
+                            {formatBindingCount(row.folder.bindingCount)}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell
+                        className="max-w-72 truncate font-mono text-xs text-muted-foreground"
+                        title={localPathSummary}
                       >
-                        {publishingIds.has(binding.id) ? (
-                          <Loader2 className="size-3.5 animate-spin" />
-                        ) : (
-                          <Play className="size-3.5" />
-                        )}
-                        Publish
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => unbindResource(binding)}
-                        disabled={publishingIds.has(binding.id)}
+                        {localPathSummary}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">-</TableCell>
+                      <TableCell>
+                        <span className="text-xs text-muted-foreground">
+                          {formatAutoPublishCount(
+                            row.folder.autoPublishCount,
+                            row.folder.bindingCount,
+                          )}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right" />
+                    </TableRow>
+                  )
+                }
+
+                const binding = row.file.binding
+
+                return (
+                  <TableRow key={binding.id}>
+                    <TableCell className="max-w-96">
+                      <div
+                        className="flex min-w-0 items-center gap-1.5"
+                        style={{
+                          paddingLeft: `${row.depth * 1.25 + 1.75}rem`,
+                        }}
+                        title={binding.webResourceName}
                       >
-                        <Unlink className="size-3.5" />
-                        Unbind
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+                        <FileCode2 className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="truncate font-mono text-xs">
+                          {row.file.name}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell
+                      className="max-w-72 truncate font-mono text-xs"
+                      title={binding.localPath}
+                    >
+                      {binding.localPath}
+                    </TableCell>
+                    <TableCell>{binding.lastKnownVersion || "-"}</TableCell>
+                    <TableCell>
+                      <Switch
+                        checked={binding.autoPublish}
+                        onCheckedChange={(autoPublish) =>
+                          updateBinding(binding.id, { autoPublish })
+                        }
+                      />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-1.5">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => void publishBinding(binding)}
+                          disabled={publishingIds.has(binding.id)}
+                        >
+                          {publishingIds.has(binding.id) ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <Play className="size-3.5" />
+                          )}
+                          Publish
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => unbindResource(binding)}
+                          disabled={publishingIds.has(binding.id)}
+                        >
+                          <Unlink className="size-3.5" />
+                          Unbind
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
               {bindings.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="h-40 text-center">
