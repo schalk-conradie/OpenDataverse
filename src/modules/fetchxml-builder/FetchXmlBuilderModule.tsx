@@ -30,6 +30,7 @@ import {
   getFetchXmlEntityMetadata,
   listFetchXmlEntities,
 } from "@/core/desktop/fetchxml-bridge"
+import { formatErrorMessage } from "@/core/errors"
 import {
   createId,
   getEnvironmentById,
@@ -1155,9 +1156,7 @@ export function FetchXmlBuilderModule({
         })
         .catch((error: unknown) => {
           setLastMessage(
-            error instanceof Error
-              ? error.message
-              : `Could not load metadata for ${logicalName}`,
+            formatErrorMessage(error, `Could not load metadata for ${logicalName}`),
           )
         })
     },
@@ -1237,8 +1236,7 @@ export function FetchXmlBuilderModule({
       setFetchXml(xml)
       setLastMessage(`Returned ${nextResult.rows.length} row(s)`)
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "FetchXML execution failed"
+      const message = formatErrorMessage(error, "FetchXML execution failed")
       setExecutionError(message)
       setLastMessage(message)
     } finally {
@@ -1348,6 +1346,20 @@ export function FetchXmlBuilderModule({
                   <div className="flex h-40 items-center justify-center gap-2 text-xs text-muted-foreground">
                     <Loader2 className="size-4 animate-spin" />
                     Loading metadata
+                  </div>
+                ) : entitiesQuery.isError ? (
+                  <div className="flex h-40 items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-center text-xs text-destructive">
+                    {formatErrorMessage(
+                      entitiesQuery.error,
+                      "Could not load tables.",
+                    )}
+                  </div>
+                ) : baseMetadataQuery.isError ? (
+                  <div className="flex h-40 items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-center text-xs text-destructive">
+                    {formatErrorMessage(
+                      baseMetadataQuery.error,
+                      "Could not load table metadata.",
+                    )}
                   </div>
                 ) : baseMetadata ? (
                   <FilterGroupEditor

@@ -42,6 +42,7 @@ import {
   unregisterPluginType,
   updatePluginAssembly,
 } from "@/core/desktop/bridge"
+import { formatErrorMessage } from "@/core/errors"
 import {
   choosePluginAssemblyFile,
   choosePluginRegistrationExportFile,
@@ -863,7 +864,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
   }
 
   function showError(title: string, error: unknown, fallback: string) {
-    const message = error instanceof Error ? error.message : fallback
+    const message = formatErrorMessage(error, fallback)
     setErrorDialog({ title, message })
     setLastMessage(message)
   }
@@ -1326,9 +1327,10 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
             <div className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
               <span>
-                {snapshotQuery.error instanceof Error
-                  ? snapshotQuery.error.message
-                  : "Plugin registrations could not be loaded."}
+                {formatErrorMessage(
+                  snapshotQuery.error,
+                  "Plugin registrations could not be loaded.",
+                )}
               </span>
             </div>
           )}
@@ -1878,6 +1880,14 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
                     ))}
                   </SelectContent>
                 </Select>
+                {filtersQuery.isError && (
+                  <p className="text-xs text-destructive">
+                    {formatErrorMessage(
+                      filtersQuery.error,
+                      "Message filters could not be loaded.",
+                    )}
+                  </p>
+                )}
               </div>
               <div className="grid gap-2">
                 <Label>Source</Label>

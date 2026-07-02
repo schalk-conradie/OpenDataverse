@@ -245,9 +245,9 @@ async fn retrieve_audit_changed_attributes(
     app: &AppHandle,
     environment: &DataverseEnvironment,
     audit_id: &str,
-) -> Vec<String> {
+) -> Result<Vec<String>, String> {
     let path = format!("/audits({audit_id})/Microsoft.Dynamics.CRM.RetrieveAuditDetails");
-    let Ok(body) = dataverse_get_with_headers(
+    let body = dataverse_get_with_headers(
         app,
         environment,
         &path,
@@ -255,13 +255,12 @@ async fn retrieve_audit_changed_attributes(
         &[("Prefer", "odata.include-annotations=\"*\"".to_string())],
     )
     .await
-    else {
-        return Vec::new();
-    };
+    .map_err(|error| format!("Retrieve audit details for {audit_id}: {error}"))?;
 
-    serde_json::from_str::<Value>(&body)
-        .map(|value| audit_detail_attribute_names(&value))
-        .unwrap_or_default()
+    let value = serde_json::from_str::<Value>(&body)
+        .map_err(|error| format!("Parse audit detail response for {audit_id}: {error}"))?;
+
+    Ok(audit_detail_attribute_names(&value))
 }
 
 fn audit_detail_text(kind: &str, changed_attributes: &[String]) -> String {
@@ -571,7 +570,7 @@ pub(super) async fn list_web_resource_activity(
             .unwrap_or_else(|| "Activity".to_string());
         let action = formatted_value(&value, "action").unwrap_or_else(|| operation.clone());
         let kind = audit_kind(&action, &operation);
-        let changed_attributes = retrieve_audit_changed_attributes(&app, &environment, &id).await;
+        let changed_attributes = retrieve_audit_changed_attributes(&app, &environment, &id).await?;
         let user = value.get("userid");
         let actor_name = user
             .and_then(|item| json_string(item, "fullname"))

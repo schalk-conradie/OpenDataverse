@@ -11,7 +11,9 @@ import {
   AlertTriangle,
   ChevronRight,
   CheckCircle2,
+  Copy,
   Download,
+  ExternalLink,
   Info,
   Loader2,
   Palette,
@@ -25,6 +27,7 @@ import {
   Trash2,
   X,
 } from "lucide-react"
+import { openUrl } from "@tauri-apps/plugin-opener"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -78,6 +81,7 @@ import {
   markChangelogBuildSeen,
   shouldShowChangelogForBuild,
 } from "@/core/changelog"
+import { isTauriRuntime } from "@/core/desktop/bridge"
 import { getRunningAppVersion } from "@/core/desktop/app-version"
 import {
   checkForAppUpdate,
@@ -143,6 +147,8 @@ const appearanceModeLabels: Record<AppearanceMode, string> = {
   light: "Light",
   dark: "Dark",
 }
+
+const githubIssueUrl = "https://github.com/schalk-conradie/OpenDataverse/issues/new"
 
 type SidebarToolGroup = {
   id: string
@@ -745,6 +751,31 @@ function AppNotificationCenter({
 }) {
   const [detailOpen, setDetailOpen] = useState(false)
   const [clickedNotificationId, setClickedNotificationId] = useState<string>()
+  const [copyState, setCopyState] = useState<{
+    notificationId?: string
+    status: "idle" | "copied" | "failed"
+  }>({ status: "idle" })
+
+  const errorLog = useMemo(() => {
+    if (!notification) {
+      return ""
+    }
+
+    return [
+      "OpenDataverse error report",
+      `Version: ${appVersion}`,
+      `Build: ${appNightlyLabel}`,
+      `Runtime: ${isTauriRuntime() ? "Tauri" : "Browser preview"}`,
+      `Time: ${notification.createdAt}`,
+      `Title: ${notification.title ?? "Operation failed"}`,
+      "",
+      "Message:",
+      notification.message,
+      "",
+      "Details:",
+      notification.details ?? notification.message,
+    ].join("\n")
+  }, [notification])
 
   useEffect(() => {
     if (!notification || clickedNotificationId === notification.id) {
@@ -761,15 +792,57 @@ function AppNotificationCenter({
   if (!notification) {
     return null
   }
+  const activeNotification = notification
 
   function keepNotificationOpen() {
-    setClickedNotificationId(notification?.id)
+    setClickedNotificationId(activeNotification.id)
   }
 
-  const isError = notification.severity === "error"
+  async function copyErrorLog() {
+    try {
+      await navigator.clipboard.writeText(errorLog)
+      setCopyState({ notificationId: activeNotification.id, status: "copied" })
+    } catch {
+      setCopyState({ notificationId: activeNotification.id, status: "failed" })
+    }
+  }
+
+  async function openGitHubIssue() {
+    const url = new URL(githubIssueUrl)
+    url.searchParams.set(
+      "title",
+      `[Error] ${activeNotification.title ?? "Operation failed"}`,
+    )
+    url.searchParams.set(
+      "body",
+      [
+        "### Error log",
+        "",
+        "```text",
+        errorLog.replaceAll("```", "` ` `"),
+        "```",
+      ].join("\n"),
+    )
+
+    try {
+      if (isTauriRuntime()) {
+        await openUrl(url.toString())
+      } else {
+        window.open(url.toString(), "_blank", "noopener,noreferrer")
+      }
+    } catch {
+      window.open(url.toString(), "_blank", "noopener,noreferrer")
+    }
+  }
+
+  const isError = activeNotification.severity === "error"
+  const copyStatus =
+    copyState.notificationId === activeNotification.id
+      ? copyState.status
+      : "idle"
   const Icon = isError
     ? AlertTriangle
-    : notification.severity === "success"
+    : activeNotification.severity === "success"
       ? CheckCircle2
       : Info
 
@@ -838,9 +911,34 @@ function AppNotificationCenter({
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-72 overflow-auto rounded-lg border border-destructive/20 bg-destructive/10 p-3 font-mono text-[11px] break-words whitespace-pre-wrap text-destructive">
-            {notification.message}
+            {notification.details ?? notification.message}
           </div>
-          <DialogFooter showCloseButton />
+          <DialogFooter showCloseButton>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void copyErrorLog()}
+            >
+              {copyStatus === "copied" ? (
+                <CheckCircle2 />
+              ) : (
+                <Copy />
+              )}
+              {copyStatus === "copied"
+                ? "Copied"
+                : copyStatus === "failed"
+                  ? "Copy failed"
+                  : "Copy log"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void openGitHubIssue()}
+            >
+              <ExternalLink />
+              GitHub issue
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

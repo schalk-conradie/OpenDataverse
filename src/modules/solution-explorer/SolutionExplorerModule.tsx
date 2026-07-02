@@ -29,6 +29,7 @@ import {
   removeSolutionComponentFromSolution,
   type SolutionManagedFilter,
 } from "@/core/desktop/bridge"
+import { formatErrorMessage } from "@/core/errors"
 import {
   getEnvironmentById,
   type DataverseEnvironment,
@@ -420,6 +421,14 @@ function AddExistingWebResourceDialog({
               <div className="flex h-40 items-center justify-center gap-2 text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
                 Loading
+              </div>
+            ) : candidatesQuery.isError ? (
+              <div className="flex h-40 items-center justify-center gap-2 p-4 text-center text-xs text-destructive">
+                <AlertTriangle className="size-4 shrink-0" />
+                {formatErrorMessage(
+                  candidatesQuery.error,
+                  "Could not load available web resources.",
+                )}
               </div>
             ) : filteredCandidates.length === 0 ? (
               <div className="flex h-40 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
@@ -869,10 +878,10 @@ function SolutionInspectorPanel({
   selectedComponent?: SolutionComponentSummary
   dependencies?: SolutionDependencyReport
   dependenciesLoading: boolean
-  dependenciesError: boolean
+  dependenciesError?: unknown
   layers: SolutionLayer[]
   layersLoading: boolean
-  layersError: boolean
+  layersError?: unknown
   onOpenRecord: () => void
   className?: string
 }) {
@@ -966,9 +975,12 @@ function SolutionInspectorPanel({
                 Loading dependencies
               </div>
             ) : dependenciesError ? (
-              <div className="flex h-64 items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 text-xs text-destructive">
-                <AlertTriangle className="size-4" />
-                Could not load dependencies.
+              <div className="flex h-64 items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-center text-xs text-destructive">
+                <AlertTriangle className="size-4 shrink-0" />
+                {formatErrorMessage(
+                  dependenciesError,
+                  "Could not load dependencies.",
+                )}
               </div>
             ) : (
               <div className="space-y-5">
@@ -1007,9 +1019,9 @@ function SolutionInspectorPanel({
                 Loading layers
               </div>
             ) : layersError ? (
-              <div className="flex h-64 items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 text-xs text-destructive">
-                <Layers className="size-4" />
-                Could not load layers.
+              <div className="flex h-64 items-center justify-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-center text-xs text-destructive">
+                <Layers className="size-4 shrink-0" />
+                {formatErrorMessage(layersError, "Could not load layers.")}
               </div>
             ) : (
               <LayersTable layers={layers} />
@@ -1191,10 +1203,10 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
         selectedComponent={selectedComponent}
         dependencies={dependencies}
         dependenciesLoading={dependenciesQuery.isLoading}
-        dependenciesError={dependenciesQuery.isError}
+        dependenciesError={dependenciesQuery.error}
         layers={layers}
         layersLoading={layersQuery.isLoading}
-        layersError={layersQuery.isError}
+        layersError={layersQuery.error}
         onOpenRecord={() => setLastMessage("Opening Dataverse record")}
       />
     )
@@ -1259,6 +1271,14 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
             <div className="flex h-40 items-center justify-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
               Loading solutions
+            </div>
+          ) : solutionsQuery.isError ? (
+            <div className="flex h-40 items-center justify-center gap-2 p-4 text-center text-xs text-destructive">
+              <AlertTriangle className="size-4 shrink-0" />
+              {formatErrorMessage(
+                solutionsQuery.error,
+                "Could not load solutions.",
+              )}
             </div>
           ) : filteredSolutions.length === 0 ? (
             <div className="flex h-40 flex-col items-center justify-center gap-2 p-4 text-center text-xs text-muted-foreground">
@@ -1409,6 +1429,14 @@ export function SolutionExplorerModule({ window }: { window: ToolWindow }) {
             <div className="flex h-64 items-center justify-center gap-2 text-xs text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
               Loading components
+            </div>
+          ) : componentsQuery.isError ? (
+            <div className="flex h-64 items-center justify-center gap-2 p-4 text-center text-xs text-destructive">
+              <AlertTriangle className="size-4 shrink-0" />
+              {formatErrorMessage(
+                componentsQuery.error,
+                "Could not load solution components.",
+              )}
             </div>
           ) : !selectedSolution ? (
             <div className="flex h-64 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">

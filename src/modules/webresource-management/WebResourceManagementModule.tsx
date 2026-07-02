@@ -88,6 +88,7 @@ import {
   saveWebResourceContent,
   type SolutionManagedFilter,
 } from "@/core/desktop/bridge"
+import { formatErrorMessage } from "@/core/errors"
 import {
   chooseLocalFile,
   chooseWebResourceDownloadFile,
@@ -866,6 +867,7 @@ function ImportWebResourcesDialog({
   environment,
   solutions,
   solutionsLoading,
+  solutionsError,
   initialSourcePaths = [],
   initialTargetRoot,
   title = "Import Web Resources",
@@ -876,6 +878,7 @@ function ImportWebResourcesDialog({
   environment: DataverseEnvironment
   solutions: SolutionSummary[]
   solutionsLoading: boolean
+  solutionsError?: unknown
   initialSourcePaths?: string[]
   initialTargetRoot?: string
   title?: string
@@ -919,7 +922,7 @@ function ImportWebResourcesDialog({
       resetForm()
     },
     onError: (error) => {
-      setLastMessage(error instanceof Error ? error.message : "Import failed")
+      setLastMessage(formatErrorMessage(error, "Import failed"))
     },
   })
 
@@ -1054,6 +1057,11 @@ function ImportWebResourcesDialog({
                 ))}
               </SelectContent>
             </Select>
+            {solutionsError ? (
+              <p className="text-xs text-destructive">
+                {formatErrorMessage(solutionsError, "Could not load solutions.")}
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-1">
@@ -1114,6 +1122,7 @@ function AddWebResourceToSolutionDialog({
   resource,
   solutions,
   solutionsLoading,
+  solutionsError,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -1121,6 +1130,7 @@ function AddWebResourceToSolutionDialog({
   resource?: WebResource
   solutions: SolutionSummary[]
   solutionsLoading: boolean
+  solutionsError?: unknown
 }) {
   const queryClient = useQueryClient()
   const setLastMessage = useWorkspaceStore((state) => state.setLastMessage)
@@ -1215,6 +1225,11 @@ function AddWebResourceToSolutionDialog({
                 ))}
               </SelectContent>
             </Select>
+            {solutionsError ? (
+              <p className="text-xs text-destructive">
+                {formatErrorMessage(solutionsError, "Could not load solutions.")}
+              </p>
+            ) : null}
           </div>
 
           <div className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
@@ -1260,6 +1275,7 @@ function AddFolderDialog({
   environment,
   solutions,
   solutionsLoading,
+  solutionsError,
   parentPath,
   existingFolderPaths,
   onFolderCreated,
@@ -1269,6 +1285,7 @@ function AddFolderDialog({
   environment: DataverseEnvironment
   solutions: SolutionSummary[]
   solutionsLoading: boolean
+  solutionsError?: unknown
   parentPath: string
   existingFolderPaths: Set<string>
   onFolderCreated: (folderPath: string) => void
@@ -1329,7 +1346,7 @@ function AddFolderDialog({
       handleOpenChange(false)
     },
     onError: (error) => {
-      setLastMessage(error instanceof Error ? error.message : "Create folder failed")
+      setLastMessage(formatErrorMessage(error, "Create folder failed"))
     },
   })
 
@@ -1430,6 +1447,11 @@ function AddFolderDialog({
                 ))}
               </SelectContent>
             </Select>
+            {solutionsError ? (
+              <p className="text-xs text-destructive">
+                {formatErrorMessage(solutionsError, "Could not load solutions.")}
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-1">
@@ -1825,10 +1847,7 @@ function ResourceViewerDialog({
       setActionError(
         {
           resourceId: content.id,
-          message:
-            error instanceof Error
-              ? error.message
-              : String(error ?? "Could not save web resource"),
+          message: formatErrorMessage(error, "Could not save web resource"),
         },
       )
     }
@@ -1956,7 +1975,7 @@ function ResourceViewerDialog({
           <div>
             {Boolean(error) && (
               <div className="m-4 rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
-                {error instanceof Error ? error.message : String(error)}
+                {formatErrorMessage(error, "Could not load web resource")}
               </div>
             )}
 
@@ -2182,7 +2201,7 @@ export function WebResourceManagementModule({
       ])
     },
     onError: (error) => {
-      setLastMessage(error instanceof Error ? error.message : "Delete failed")
+      setLastMessage(formatErrorMessage(error, "Delete failed"))
     },
   })
   const resourceTree = useMemo(
@@ -2314,10 +2333,7 @@ export function WebResourceManagementModule({
           preservePaths,
         })
       } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : String(error ?? "Download failed")
+        const message = formatErrorMessage(error, "Download failed")
         const completedAt = Date.now()
 
         updateDownloadJob(job.id, (current) => ({
@@ -2532,9 +2548,7 @@ export function WebResourceManagementModule({
       await Promise.all([refetchResources(), refetchActivity()])
     } catch (error) {
       setLastMessage(
-        error instanceof Error
-          ? `${trigger === "auto" ? "Auto-publish failed: " : ""}${error.message}`
-          : String(error ?? "Publish failed"),
+        `${trigger === "auto" ? "Auto-publish failed: " : ""}${formatErrorMessage(error, "Publish failed")}`,
       )
     } finally {
       setBindingPublishing(binding.id, false)
@@ -2596,11 +2610,7 @@ export function WebResourceManagementModule({
       setLastMessage(result.message)
       await Promise.all([refetchResources(), refetchActivity()])
     } catch (error) {
-      setLastMessage(
-        error instanceof Error
-          ? error.message
-          : String(error ?? "Could not save web resource"),
-      )
+      setLastMessage(formatErrorMessage(error, "Could not save web resource"))
       throw error
     } finally {
       setSavingResourceAction(undefined)
@@ -2677,9 +2687,7 @@ export function WebResourceManagementModule({
             }
           })().catch((error: unknown) => {
             setLastMessage(
-              error instanceof Error
-                ? `Auto-publish watcher failed: ${error.message}`
-                : "Auto-publish watcher failed",
+              `Auto-publish watcher failed: ${formatErrorMessage(error, "Unknown watcher error")}`,
             )
           })
         },
@@ -2696,9 +2704,7 @@ export function WebResourceManagementModule({
 
     void startAutoPublishWatcher().catch((error: unknown) => {
       setLastMessage(
-        error instanceof Error
-          ? `Could not start auto-publish watcher: ${error.message}`
-          : "Could not start auto-publish watcher",
+        `Could not start auto-publish watcher: ${formatErrorMessage(error, "Unknown watcher error")}`,
       )
     })
 
@@ -2765,6 +2771,7 @@ export function WebResourceManagementModule({
         environment={environment}
         solutions={unmanagedSolutionsQuery.data ?? []}
         solutionsLoading={unmanagedSolutionsQuery.isLoading}
+        solutionsError={unmanagedSolutionsQuery.error}
       />
       <AddWebResourceToSolutionDialog
         key={`${environment.id}:${addToSolutionResource?.id ?? "no-resource"}`}
@@ -2778,6 +2785,7 @@ export function WebResourceManagementModule({
         resource={addToSolutionResource}
         solutions={unmanagedSolutionsQuery.data ?? []}
         solutionsLoading={unmanagedSolutionsQuery.isLoading}
+        solutionsError={unmanagedSolutionsQuery.error}
       />
       <ImportWebResourcesDialog
         key={`${environment.id}:${folderUpload?.targetRoot ?? ""}:${folderUpload?.sourcePaths.join("|") ?? ""}`}
@@ -2790,6 +2798,7 @@ export function WebResourceManagementModule({
         environment={environment}
         solutions={unmanagedSolutionsQuery.data ?? []}
         solutionsLoading={unmanagedSolutionsQuery.isLoading}
+        solutionsError={unmanagedSolutionsQuery.error}
         initialSourcePaths={folderUpload?.sourcePaths}
         initialTargetRoot={folderUpload?.targetRoot}
         title="Upload Web Resources To Folder"
@@ -2806,6 +2815,7 @@ export function WebResourceManagementModule({
         environment={environment}
         solutions={unmanagedSolutionsQuery.data ?? []}
         solutionsLoading={unmanagedSolutionsQuery.isLoading}
+        solutionsError={unmanagedSolutionsQuery.error}
         parentPath={folderCreate?.parentPath ?? ""}
         existingFolderPaths={folderPaths}
         onFolderCreated={handleFolderCreated}
@@ -2944,9 +2954,10 @@ export function WebResourceManagementModule({
         >
           {resourceQuery.error && (
             <div className="border-b border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
-              {resourceQuery.error instanceof Error
-                ? resourceQuery.error.message
-                : String(resourceQuery.error)}
+              {formatErrorMessage(
+                resourceQuery.error,
+                "Could not load web resources",
+              )}
             </div>
           )}
 
@@ -3506,9 +3517,10 @@ export function WebResourceManagementModule({
                   Audit history unavailable
                 </div>
                 <p className="mt-1 max-w-2xl text-xs">
-                  {activityQuery.error instanceof Error
-                    ? activityQuery.error.message
-                    : "Dataverse did not return web resource audit history for this environment."}
+                  {formatErrorMessage(
+                    activityQuery.error,
+                    "Dataverse did not return web resource audit history for this environment.",
+                  )}
                 </p>
               </div>
             )}

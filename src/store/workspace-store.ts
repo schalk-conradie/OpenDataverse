@@ -12,6 +12,7 @@ import {
   saveUserSettings,
   startBrowserAuth,
 } from "@/core/desktop/bridge"
+import { formatErrorDetails, formatErrorMessage } from "@/core/errors"
 import {
   type AppearanceMode,
   type AppearanceThemeId,
@@ -40,6 +41,7 @@ export type AppNotification = {
   id: string
   title?: string
   message: string
+  details?: string
   severity: AppNotificationSeverity
   createdAt: string
 }
@@ -57,6 +59,7 @@ type OpenToolOptions = {
 
 type SetLastMessageOptions = {
   title?: string
+  details?: string
   severity?: AppNotificationSeverity
 }
 
@@ -115,6 +118,7 @@ function makeNotification(
     id: createId("notification"),
     title: options?.title,
     message,
+    details: options?.details,
     severity: options?.severity ?? inferNotificationSeverity(message),
     createdAt: new Date().toISOString(),
   }
@@ -155,10 +159,6 @@ function notificationState(
   }
 }
 
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : String(error ?? fallback)
-}
-
 function createToolWindow(toolId: ToolId, environmentId?: string): ToolWindow {
   const tool = getToolDefinition(toolId)
 
@@ -176,9 +176,11 @@ function persistConfig(
   set: (state: Partial<WorkspaceStore>) => void,
 ) {
   void saveAppConfig(config).catch((error: unknown) => {
+    const fallback = "Could not save app config"
     set({
-      ...notificationState(errorMessage(error, "Could not save app config"), {
+      ...notificationState(formatErrorMessage(error, fallback), {
         title: "Save failed",
+        details: formatErrorDetails(error, fallback),
         severity: "error",
       }),
     })
@@ -190,9 +192,11 @@ function persistUserSettings(
   set: (state: Partial<WorkspaceStore>) => void,
 ) {
   void saveUserSettings(settings).catch((error: unknown) => {
+    const fallback = "Could not save user settings"
     set({
-      ...notificationState(errorMessage(error, "Could not save user settings"), {
+      ...notificationState(formatErrorMessage(error, fallback), {
         title: "Save failed",
+        details: formatErrorDetails(error, fallback),
         severity: "error",
       }),
     })
@@ -217,7 +221,7 @@ function applyEnvironmentAuthState(
 function authStateForConnectionError(
   error: unknown,
 ): DataverseEnvironment["authState"] {
-  const message = error instanceof Error ? error.message : String(error ?? "")
+  const message = formatErrorMessage(error, "")
   const lower = message.toLowerCase()
 
   if (
@@ -231,10 +235,6 @@ function authStateForConnectionError(
   }
 
   return "error"
-}
-
-function connectionErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : String(error ?? fallback)
 }
 
 function environmentInputResult(
@@ -373,10 +373,7 @@ async function updateEnvironmentConnection(
             lastMessage:
               currentEnvironment?.authState === "connected" ||
               currentEnvironment?.authState === "connecting"
-                ? connectionErrorMessage(
-                    checkError,
-                    "Dataverse heartbeat failed",
-                  )
+                ? formatErrorMessage(checkError, "Dataverse heartbeat failed")
                 : get().lastMessage,
           })
           persistConfig(nextConfig, set)
@@ -412,7 +409,7 @@ async function updateEnvironmentConnection(
       )
       set({
         config: nextConfig,
-        lastMessage: connectionErrorMessage(authError, "Sign-in failed"),
+        lastMessage: formatErrorMessage(authError, "Sign-in failed"),
       })
       persistConfig(nextConfig, set)
     }
@@ -455,12 +452,14 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         lastNotification: undefined,
       })
     } catch (error) {
+      const fallback = "Could not load app config"
       set({
         loadState: "error",
         config: defaultAppConfig,
         userSettings: defaultUserSettings,
-        ...notificationState(errorMessage(error, "Could not load app config"), {
+        ...notificationState(formatErrorMessage(error, fallback), {
           title: "Load failed",
+          details: formatErrorDetails(error, fallback),
           severity: "error",
         }),
       })
@@ -535,10 +534,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
         await deleteEnvironmentToken(environmentId)
       } catch (error) {
         set({
-          lastMessage:
-            error instanceof Error
-              ? error.message
-              : "Could not remove environment token",
+          lastMessage: formatErrorMessage(
+            error,
+            "Could not remove environment token",
+          ),
         })
         return false
       }
@@ -606,10 +605,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       await deleteEnvironmentToken(environmentId)
     } catch (error) {
       set({
-        lastMessage:
-          error instanceof Error
-            ? error.message
-            : "Could not remove environment token",
+        lastMessage: formatErrorMessage(
+          error,
+          "Could not remove environment token",
+        ),
       })
       return false
     }
@@ -703,8 +702,14 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   showError(title, error, fallback) {
-    const message = errorMessage(error, fallback)
-    set(notificationState(message, { title, severity: "error" }))
+    const message = formatErrorMessage(error, fallback)
+    set(
+      notificationState(message, {
+        title,
+        details: formatErrorDetails(error, fallback),
+        severity: "error",
+      }),
+    )
     return message
   },
 

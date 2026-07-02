@@ -41,6 +41,7 @@ import {
   chooseAiChatImageFiles,
 } from "@/core/desktop/file-dialog"
 import { isTauriRuntime } from "@/core/desktop/bridge"
+import { formatErrorMessage } from "@/core/errors"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1024,10 +1025,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
       const summaries = await listAiChatThreads(environment.id)
       setChatHistory(summaries)
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Could not load AI chat history"
+      const message = formatErrorMessage(error, "Could not load AI chat history")
       setLastMessage(message)
       persistAiState({ error: message })
     } finally {
@@ -1100,8 +1098,10 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
         setLastMessage(bundle.warnings[0])
       }
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Could not prepare attachments"
+      const message = formatErrorMessage(
+        error,
+        "Could not prepare attachments",
+      )
       setLastMessage(message)
       persistAiState({ error: message })
     }
@@ -1130,8 +1130,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
         error: undefined,
       })
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Could not update attachments"
+      const message = formatErrorMessage(error, "Could not update attachments")
       setLastMessage(message)
       persistAiState({ error: message })
     }
@@ -1182,8 +1181,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
 
       await setPendingAttachmentPaths(savedPaths)
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Could not paste image"
+      const message = formatErrorMessage(error, "Could not paste image")
       setLastMessage(message)
       persistAiState({ error: message })
     }
@@ -1244,8 +1242,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
         error: undefined,
       })
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Could not load AI chat"
+      const message = formatErrorMessage(error, "Could not load AI chat")
       setLastMessage(message)
       persistAiState({ error: message })
     }
@@ -1303,8 +1300,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
       setRenameTarget(null)
       setRenameTitle("")
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Could not rename AI chat"
+      const message = formatErrorMessage(error, "Could not rename AI chat")
       setLastMessage(message)
       persistAiState({ error: message })
     }
@@ -1344,8 +1340,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
         setHistoryMenuOpen(true)
       }
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Could not delete AI chat"
+      const message = formatErrorMessage(error, "Could not delete AI chat")
       setLastMessage(message)
       persistAiState({ error: message })
     }
@@ -1457,8 +1452,7 @@ export function AiChatModule({ window, mode = "chat" }: AiChatModuleProps) {
       })
       void refreshChatHistory()
     } catch (error) {
-      const messageText =
-        error instanceof Error ? error.message : "AI chat turn failed"
+      const messageText = formatErrorMessage(error, "AI chat turn failed")
       setLastMessage(messageText)
       persistAiState({
         running: false,

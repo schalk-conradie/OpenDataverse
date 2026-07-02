@@ -32,6 +32,7 @@ import {
   sendAiChatMessage,
   startAiChatThread,
 } from "@/core/desktop/ai-bridge"
+import { formatErrorMessage } from "@/core/errors"
 import {
   createId,
   getEnvironmentById,
@@ -581,7 +582,7 @@ function MetadataLoadState({
   if (error) {
     return (
       <div className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-        {error instanceof Error ? error.message : "Could not load metadata."}
+        {formatErrorMessage(error, "Could not load metadata.")}
       </div>
     )
   }
@@ -1065,6 +1066,7 @@ export function FormLogicCopilotModule({ window }: FormLogicCopilotModuleProps) 
                 )}
 
                 {!formsQuery.isLoading &&
+                  !formsQuery.error &&
                   activeEntityLogicalName &&
                   (formsQuery.data ?? []).length === 0 && (
                     <div className="mt-4 rounded-xl border border-border bg-muted/30 p-6 text-center">

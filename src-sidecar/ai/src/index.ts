@@ -68,6 +68,22 @@ const lines = createInterface({
   crlfDelay: Infinity,
 })
 
+function formatErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) {
+    return error.message.trim() || fallback
+  }
+
+  if (typeof error === "string") {
+    return error.trim() || fallback
+  }
+
+  if (error === null || error === undefined) {
+    return fallback
+  }
+
+  return String(error)
+}
+
 function writeResponse(response: SidecarResponse) {
   process.stdout.write(`${JSON.stringify(response)}\n`)
 }
@@ -164,7 +180,7 @@ lines.on("line", (line) => {
       writeResponse({
         id: "unknown",
         ok: false,
-        error: error instanceof Error ? error.message : "Invalid JSON request",
+        error: formatErrorMessage(error, "Invalid JSON request"),
       })
       return
     }
@@ -176,8 +192,7 @@ lines.on("line", (line) => {
       writeResponse({
         id: request.id,
         ok: false,
-        error:
-          error instanceof Error ? error.message : "AI sidecar request failed",
+        error: formatErrorMessage(error, "AI sidecar request failed"),
       })
     }
   })()

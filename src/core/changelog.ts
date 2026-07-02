@@ -11,6 +11,16 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.63",
+    date: "2026-07-02",
+    title: "Error reporting",
+    changes: [
+      "Changed application error formatting to preserve Tauri and Dataverse string or object failures instead of replacing them with generic fallback text.",
+      "Added copy-log and prefilled GitHub issue actions to the global error details dialog.",
+      "Changed Dataverse-backed query surfaces and web resource audit detail loading to show the returned API failure instead of silently falling back to empty states.",
+    ],
+  },
+  {
     version: "0.1.62",
     date: "2026-06-25",
     title: "AI chat context usage",
