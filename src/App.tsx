@@ -93,6 +93,7 @@ import {
   dataverseUrlPattern,
   getEnvironmentById,
   normalizeEnvironmentUrl,
+  sortEnvironmentsByName,
   type DataverseEnvironment,
   type ToolId,
   type ToolWindow,
@@ -344,6 +345,10 @@ function ManageEnvironmentsDialog() {
   const deleteEnvironment = useWorkspaceStore(
     (state) => state.deleteEnvironment,
   )
+  const sortedEnvironments = useMemo(
+    () => sortEnvironmentsByName(config.environments),
+    [config.environments],
+  )
   const [deleteTarget, setDeleteTarget] = useState<DataverseEnvironment>()
   const [reconnectingId, setReconnectingId] = useState<string>()
   const [deleting, setDeleting] = useState(false)
@@ -388,7 +393,7 @@ function ManageEnvironmentsDialog() {
             </DialogDescription>
           </DialogHeader>
 
-          {config.environments.length === 0 ? (
+          {sortedEnvironments.length === 0 ? (
             <div className="border bg-background p-6 text-center text-xs text-muted-foreground">
               No environments saved.
             </div>
@@ -403,7 +408,7 @@ function ManageEnvironmentsDialog() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {config.environments.map((environment) => {
+                {sortedEnvironments.map((environment) => {
                   const reconnecting =
                     reconnectingId === environment.id ||
                     environment.authState === "connecting"
@@ -1119,6 +1124,10 @@ function App() {
     config,
     config.currentEnvironmentId,
   )
+  const sortedEnvironments = useMemo(
+    () => sortEnvironmentsByName(config.environments),
+    [config.environments],
+  )
   const activeEnvironmentNeedsReconnect =
     activeEnvironment?.authState === "expired" ||
     activeEnvironment?.authState === "error"
@@ -1223,7 +1232,7 @@ function App() {
               {pendingTool?.title ?? "a tool"}.
             </DialogDescription>
           </DialogHeader>
-          {config.environments.length > 0 ? (
+          {sortedEnvironments.length > 0 ? (
             <div className="grid gap-2">
               <Label htmlFor="environment-prompt-select">Environment</Label>
               <Select value="" onValueChange={selectPromptEnvironment}>
@@ -1234,7 +1243,7 @@ function App() {
                   <SelectValue placeholder="Select environment" />
                 </SelectTrigger>
                 <SelectContent>
-                  {config.environments.map((environment) => (
+                  {sortedEnvironments.map((environment) => (
                     <SelectItem key={environment.id} value={environment.id}>
                       {environment.name}
                     </SelectItem>
@@ -1332,7 +1341,7 @@ function App() {
                 <SelectValue placeholder="Select environment" />
               </SelectTrigger>
               <SelectContent>
-                {config.environments.map((environment) => (
+                {sortedEnvironments.map((environment) => (
                   <SelectItem key={environment.id} value={environment.id}>
                     {environment.name}
                   </SelectItem>

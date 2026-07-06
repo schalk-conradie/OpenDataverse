@@ -11,6 +11,14 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.64",
+    date: "2026-07-06",
+    title: "Environment selector ordering",
+    changes: [
+      "Changed environment selectors and the Manage Environments dialog to show saved environments alphabetically by name.",
+    ],
+  },
+  {
     version: "0.1.63",
     date: "2026-07-02",
     title: "Error reporting",

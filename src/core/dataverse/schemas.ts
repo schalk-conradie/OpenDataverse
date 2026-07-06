@@ -106,6 +106,21 @@ export type WebResourceBinding = z.infer<typeof webResourceBindingSchema>
 export type AppConfig = z.infer<typeof appConfigSchema>
 export type UserSettings = z.infer<typeof userSettingsSchema>
 
+const environmentNameCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+})
+
+export function sortEnvironmentsByName(
+  environments: readonly DataverseEnvironment[],
+) {
+  return [...environments].sort(
+    (a, b) =>
+      environmentNameCollator.compare(a.name, b.name) ||
+      environmentNameCollator.compare(a.id, b.id),
+  )
+}
+
 export type WebResource = {
   id: string
   name: string
