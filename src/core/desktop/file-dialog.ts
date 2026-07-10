@@ -1,6 +1,6 @@
 import { open, save } from "@tauri-apps/plugin-dialog"
 
-import { isTauriRuntime } from "@/core/desktop/bridge"
+import { isTauriRuntime } from "@/core/desktop/runtime"
 
 export async function chooseLocalFile() {
   if (!isTauriRuntime()) {

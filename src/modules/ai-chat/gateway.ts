@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 
-import { isTauriRuntime } from "@/core/desktop/bridge"
+import { isTauriRuntime } from "@/core/desktop/runtime"
 import { createId } from "@/core/dataverse/schemas"
 import type {
   AiChatAttachment,

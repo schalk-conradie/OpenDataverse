@@ -1,8 +1,13 @@
 import type { LucideIcon } from "lucide-react"
+import type { ComponentType, LazyExoticComponent } from "react"
 
-import type { ToolId } from "@/core/dataverse/schemas"
+import type { ToolId, ToolWindow } from "@/core/dataverse/schemas"
 
 export type ToolStatus = "ready" | "planned"
+
+export type ToolModuleProps = {
+  window: ToolWindow
+}
 
 export type ToolDefinition = {
   id: ToolId
@@ -10,4 +15,7 @@ export type ToolDefinition = {
   description: string
   icon: LucideIcon
   status: ToolStatus
+  component:
+    | ComponentType<ToolModuleProps>
+    | LazyExoticComponent<ComponentType<ToolModuleProps>>
 }

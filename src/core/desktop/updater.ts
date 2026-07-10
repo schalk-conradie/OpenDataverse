@@ -1,7 +1,7 @@
 import { relaunch } from "@tauri-apps/plugin-process"
 import { check, type Update } from "@tauri-apps/plugin-updater"
 
-import { isTauriRuntime } from "@/core/desktop/bridge"
+import { isTauriRuntime } from "@/core/desktop/runtime"
 
 export type AvailableAppUpdate = {
   version: string

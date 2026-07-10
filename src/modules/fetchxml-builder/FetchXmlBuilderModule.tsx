@@ -29,10 +29,9 @@ import {
   executeFetchXml,
   getFetchXmlEntityMetadata,
   listFetchXmlEntities,
-} from "@/core/desktop/fetchxml-bridge"
+} from "@/modules/fetchxml-builder/gateway"
 import { formatErrorMessage } from "@/core/errors"
 import {
-  createId,
   getEnvironmentById,
   type DataverseEnvironment,
   type FetchXmlAttributeSummary,
@@ -43,6 +42,26 @@ import {
   type ToolWindow,
 } from "@/core/dataverse/schemas"
 import { cn } from "@/lib/utils"
+import {
+  addNodeToGroup,
+  createCondition,
+  createGroup,
+  createRelatedBlock,
+  operatorByValue,
+  operatorsForAttribute,
+  removeNode,
+  updateConditionNode,
+  updateGroupNode,
+  updateRelatedNode,
+  type FilterCondition,
+  type FilterConditionChanges,
+  type FilterConjunction,
+  type FilterGroupNode,
+  type FilterNode,
+  type RelatedFilterChanges,
+  type RelatedFilterNode,
+} from "@/modules/fetchxml-builder/designer-domain"
+import { buildDesignerFetchXml } from "@/modules/fetchxml-builder/designer-xml"
 import { useWorkspaceStore } from "@/store/workspace-store"
 
 type FetchXmlBuilderModuleProps = {
@@ -51,128 +70,8 @@ type FetchXmlBuilderModuleProps = {
 
 type DesignerTab = "designer" | "fetchxml"
 
-type FilterConjunction = "and" | "or"
-
-type FilterCondition = {
-  type: "condition"
-  id: string
-  attribute?: string
-  operator: string
-  value: string
-}
-
-type FilterGroupNode = {
-  type: "group"
-  id: string
-  conjunction: FilterConjunction
-  children: FilterNode[]
-}
-
-type RelatedFilterNode = {
-  type: "related"
-  id: string
-  relationshipId?: string
-  relatedEntity?: string
-  relatedLabel?: string
-  fromAttribute?: string
-  toAttribute?: string
-  relationshipType?: FetchXmlRelationshipSummary["relationshipType"]
-  group: FilterGroupNode
-}
-
-type FilterNode = FilterCondition | FilterGroupNode | RelatedFilterNode
-
-type FilterOperator = {
-  value: string
-  label: string
-  requiresValue: boolean
-  valueMode?: "text" | "option"
-}
-
 const selectClassName =
   "h-8 min-w-0 border border-input bg-background px-2 text-xs outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
-
-const textOperators: FilterOperator[] = [
-  { value: "eq", label: "Equals", requiresValue: true },
-  { value: "ne", label: "Does not equal", requiresValue: true },
-  { value: "like", label: "Contains", requiresValue: true },
-  { value: "not-like", label: "Does not contain", requiresValue: true },
-  { value: "begins-with", label: "Begins with", requiresValue: true },
-  { value: "not-begin-with", label: "Does not begin with", requiresValue: true },
-  { value: "ends-with", label: "Ends with", requiresValue: true },
-  { value: "not-end-with", label: "Does not end with", requiresValue: true },
-  { value: "not-null", label: "Contains data", requiresValue: false },
-  { value: "null", label: "Does not contain data", requiresValue: false },
-]
-
-const numericOperators: FilterOperator[] = [
-  { value: "eq", label: "Equals", requiresValue: true },
-  { value: "ne", label: "Does not equal", requiresValue: true },
-  { value: "gt", label: "Greater than", requiresValue: true },
-  { value: "ge", label: "Greater than or equal", requiresValue: true },
-  { value: "lt", label: "Less than", requiresValue: true },
-  { value: "le", label: "Less than or equal", requiresValue: true },
-  { value: "not-null", label: "Contains data", requiresValue: false },
-  { value: "null", label: "Does not contain data", requiresValue: false },
-]
-
-const optionOperators: FilterOperator[] = [
-  { value: "eq", label: "Equals", requiresValue: true, valueMode: "option" },
-  {
-    value: "ne",
-    label: "Does not equal",
-    requiresValue: true,
-    valueMode: "option",
-  },
-  { value: "not-null", label: "Contains data", requiresValue: false },
-  { value: "null", label: "Does not contain data", requiresValue: false },
-]
-
-const dateOperators: FilterOperator[] = [
-  { value: "on", label: "Equals", requiresValue: true },
-  { value: "on-or-after", label: "On or after", requiresValue: true },
-  { value: "on-or-before", label: "On or before", requiresValue: true },
-  { value: "today", label: "Today", requiresValue: false },
-  { value: "yesterday", label: "Yesterday", requiresValue: false },
-  { value: "tomorrow", label: "Tomorrow", requiresValue: false },
-  { value: "last-x-days", label: "Last X days", requiresValue: true },
-  { value: "next-x-days", label: "Next X days", requiresValue: true },
-  { value: "not-null", label: "Contains data", requiresValue: false },
-  { value: "null", label: "Does not contain data", requiresValue: false },
-]
-
-const lookupOperators: FilterOperator[] = [
-  { value: "eq", label: "Equals", requiresValue: true },
-  { value: "ne", label: "Does not equal", requiresValue: true },
-  { value: "not-null", label: "Contains data", requiresValue: false },
-  { value: "null", label: "Does not contain data", requiresValue: false },
-]
-
-function createCondition(): FilterCondition {
-  return {
-    type: "condition",
-    id: createId("condition"),
-    operator: "eq",
-    value: "",
-  }
-}
-
-function createGroup(children: FilterNode[] = []): FilterGroupNode {
-  return {
-    type: "group",
-    id: createId("group"),
-    conjunction: "and",
-    children,
-  }
-}
-
-function createRelatedBlock(): RelatedFilterNode {
-  return {
-    type: "related",
-    id: createId("related"),
-    group: createGroup([createCondition()]),
-  }
-}
 
 function displayEntityName(entity?: FetchXmlEntitySummary) {
   if (!entity) {
@@ -206,310 +105,6 @@ function relationshipGroupLabel(
   }
 
   return "Many to many"
-}
-
-function operatorsForAttribute(attribute?: FetchXmlAttributeSummary) {
-  const type = attribute?.attributeType.toLowerCase() ?? ""
-
-  if (
-    ["integer", "bigint", "decimal", "double", "money"].some((item) =>
-      type.includes(item),
-    )
-  ) {
-    return numericOperators
-  }
-
-  if (
-    ["picklist", "state", "status", "boolean"].some((item) =>
-      type.includes(item),
-    )
-  ) {
-    return optionOperators
-  }
-
-  if (type.includes("datetime")) {
-    return dateOperators
-  }
-
-  if (
-    ["lookup", "customer", "owner", "uniqueidentifier"].some((item) =>
-      type.includes(item),
-    )
-  ) {
-    return lookupOperators
-  }
-
-  return textOperators
-}
-
-function operatorByValue(value: string, attribute?: FetchXmlAttributeSummary) {
-  return (
-    operatorsForAttribute(attribute).find((operator) => operator.value === value) ??
-    operatorsForAttribute(attribute)[0] ??
-    textOperators[0]
-  )
-}
-
-function escapeXml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-}
-
-function fetchXmlValue(operator: string, value: string) {
-  if (operator === "like" || operator === "not-like") {
-    return `%${value}%`
-  }
-
-  return value
-}
-
-function updateGroupNode(
-  group: FilterGroupNode,
-  groupId: string,
-  updater: (group: FilterGroupNode) => FilterGroupNode,
-): FilterGroupNode {
-  if (group.id === groupId) {
-    return updater(group)
-  }
-
-  return {
-    ...group,
-    children: group.children.map((child) => {
-      if (child.type === "group") {
-        return updateGroupNode(child, groupId, updater)
-      }
-
-      if (child.type === "related") {
-        return {
-          ...child,
-          group: updateGroupNode(child.group, groupId, updater),
-        }
-      }
-
-      return child
-    }),
-  }
-}
-
-function updateConditionNode(
-  group: FilterGroupNode,
-  conditionId: string,
-  changes: Partial<FilterCondition>,
-): FilterGroupNode {
-  return {
-    ...group,
-    children: group.children.map((child) => {
-      if (child.type === "condition" && child.id === conditionId) {
-        return { ...child, ...changes }
-      }
-
-      if (child.type === "group") {
-        return updateConditionNode(child, conditionId, changes)
-      }
-
-      if (child.type === "related") {
-        return {
-          ...child,
-          group: updateConditionNode(child.group, conditionId, changes),
-        }
-      }
-
-      return child
-    }),
-  }
-}
-
-function updateRelatedNode(
-  group: FilterGroupNode,
-  relatedId: string,
-  changes: Partial<RelatedFilterNode>,
-): FilterGroupNode {
-  return {
-    ...group,
-    children: group.children.map((child) => {
-      if (child.type === "related" && child.id === relatedId) {
-        return { ...child, ...changes }
-      }
-
-      if (child.type === "group") {
-        return updateRelatedNode(child, relatedId, changes)
-      }
-
-      if (child.type === "related") {
-        return {
-          ...child,
-          group: updateRelatedNode(child.group, relatedId, changes),
-        }
-      }
-
-      return child
-    }),
-  }
-}
-
-function removeNode(group: FilterGroupNode, nodeId: string): FilterGroupNode {
-  return {
-    ...group,
-    children: group.children
-      .filter((child) => child.id !== nodeId)
-      .map((child) => {
-        if (child.type === "group") {
-          return removeNode(child, nodeId)
-        }
-
-        if (child.type === "related") {
-          return { ...child, group: removeNode(child.group, nodeId) }
-        }
-
-        return child
-      }),
-  }
-}
-
-function addNodeToGroup(
-  group: FilterGroupNode,
-  groupId: string,
-  node: FilterNode,
-): FilterGroupNode {
-  return updateGroupNode(group, groupId, (target) => ({
-    ...target,
-    children: [...target.children, node],
-  }))
-}
-
-function conditionToXml(
-  condition: FilterCondition,
-  attributes: FetchXmlAttributeSummary[],
-  depth: number,
-) {
-  if (!condition.attribute) {
-    return ""
-  }
-
-  const attribute = attributes.find(
-    (item) => item.logicalName === condition.attribute,
-  )
-  const operator = operatorByValue(condition.operator, attribute)
-  const indent = "  ".repeat(depth)
-
-  if (!operator.requiresValue) {
-    return `${indent}<condition attribute="${escapeXml(
-      condition.attribute,
-    )}" operator="${operator.value}" />`
-  }
-
-  if (!condition.value.trim()) {
-    return ""
-  }
-
-  return `${indent}<condition attribute="${escapeXml(
-    condition.attribute,
-  )}" operator="${operator.value}" value="${escapeXml(
-    fetchXmlValue(operator.value, condition.value.trim()),
-  )}" />`
-}
-
-function groupToXml(
-  group: FilterGroupNode,
-  metadataByEntity: Map<string, FetchXmlEntityMetadata>,
-  entityName: string,
-  depth: number,
-): string {
-  const metadata = metadataByEntity.get(entityName)
-  const lines = group.children
-    .map((child) => {
-      if (child.type === "condition") {
-        return conditionToXml(child, metadata?.attributes ?? [], depth + 1)
-      }
-
-      if (child.type === "group") {
-        return groupToXml(child, metadataByEntity, entityName, depth + 1)
-      }
-
-      return relatedToXml(child, metadataByEntity, depth + 1)
-    })
-    .filter(Boolean)
-
-  if (lines.length === 0) {
-    return ""
-  }
-
-  const indent = "  ".repeat(depth)
-  return [
-    `${indent}<filter type="${group.conjunction}">`,
-    ...lines,
-    `${indent}</filter>`,
-  ].join("\n")
-}
-
-function relatedToXml(
-  related: RelatedFilterNode,
-  metadataByEntity: Map<string, FetchXmlEntityMetadata>,
-  depth: number,
-) {
-  if (!related.relatedEntity) {
-    return ""
-  }
-
-  const indent = "  ".repeat(depth)
-  const attributes = [
-    `name="${escapeXml(related.relatedEntity)}"`,
-    related.fromAttribute ? `from="${escapeXml(related.fromAttribute)}"` : "",
-    related.toAttribute ? `to="${escapeXml(related.toAttribute)}"` : "",
-    `link-type="inner"`,
-  ].filter(Boolean)
-  const groupXml = groupToXml(
-    related.group,
-    metadataByEntity,
-    related.relatedEntity,
-    depth + 1,
-  )
-
-  return [
-    `${indent}<link-entity ${attributes.join(" ")}>`,
-    groupXml,
-    `${indent}</link-entity>`,
-  ]
-    .filter(Boolean)
-    .join("\n")
-}
-
-function buildDesignerFetchXml(input: {
-  metadata: FetchXmlEntityMetadata
-  metadataByEntity: Map<string, FetchXmlEntityMetadata>
-  selectedColumns: string[]
-  rootGroup: FilterGroupNode
-  rowCount: number
-}) {
-  const columns =
-    input.selectedColumns.length > 0
-      ? input.selectedColumns
-      : input.metadata.primaryNameAttribute
-        ? [input.metadata.primaryNameAttribute]
-        : []
-  const lines = [
-    `<fetch count="${Math.max(1, input.rowCount)}">`,
-    `  <entity name="${escapeXml(input.metadata.logicalName)}">`,
-    ...columns.map(
-      (column) => `    <attribute name="${escapeXml(column)}" />`,
-    ),
-  ]
-  const filterXml = groupToXml(
-    input.rootGroup,
-    input.metadataByEntity,
-    input.metadata.logicalName,
-    2,
-  )
-
-  if (filterXml) {
-    lines.push(filterXml)
-  }
-
-  lines.push("  </entity>", "</fetch>")
-  return lines.join("\n")
 }
 
 function formatCellValue(value: unknown) {
@@ -617,7 +212,7 @@ function ConditionRow({
 }: {
   condition: FilterCondition
   attributes: FetchXmlAttributeSummary[]
-  onChange: (changes: Partial<FilterCondition>) => void
+  onChange: (changes: FilterConditionChanges) => void
   onRemove: () => void
 }) {
   const attribute = attributes.find(
@@ -725,11 +320,11 @@ function FilterGroupEditor({
   onConjunctionChange: (groupId: string, conjunction: FilterConjunction) => void
   onConditionChange: (
     conditionId: string,
-    changes: Partial<FilterCondition>,
+    changes: FilterConditionChanges,
   ) => void
   onRelatedChange: (
     relatedId: string,
-    changes: Partial<RelatedFilterNode>,
+    changes: RelatedFilterChanges,
   ) => void
   onAddNode: (groupId: string, node: FilterNode) => void
   onRemoveNode: (nodeId: string) => void
@@ -876,12 +471,12 @@ function RelatedBlockEditor({
   depth: number
   onRelatedChange: (
     relatedId: string,
-    changes: Partial<RelatedFilterNode>,
+    changes: RelatedFilterChanges,
   ) => void
   onConjunctionChange: (groupId: string, conjunction: FilterConjunction) => void
   onConditionChange: (
     conditionId: string,
-    changes: Partial<FilterCondition>,
+    changes: FilterConditionChanges,
   ) => void
   onAddNode: (groupId: string, node: FilterNode) => void
   onRemoveNode: (nodeId: string) => void
@@ -1175,7 +770,7 @@ export function FetchXmlBuilderModule({
 
   function handleConditionChange(
     conditionId: string,
-    changes: Partial<FilterCondition>,
+    changes: FilterConditionChanges,
   ) {
     setManualXmlEdited(false)
     setRootGroup((current) =>
@@ -1185,7 +780,7 @@ export function FetchXmlBuilderModule({
 
   function handleRelatedChange(
     relatedId: string,
-    changes: Partial<RelatedFilterNode>,
+    changes: RelatedFilterChanges,
   ) {
     setManualXmlEdited(false)
     setRootGroup((current) => updateRelatedNode(current, relatedId, changes))
