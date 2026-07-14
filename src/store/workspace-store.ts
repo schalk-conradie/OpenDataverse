@@ -5,13 +5,13 @@ import {
   checkDataverseConnection,
   completeBrowserAuth,
   deleteEnvironmentToken,
-  isTauriRuntime,
   loadAppConfig,
   loadUserSettings,
   saveAppConfig,
   saveUserSettings,
   startBrowserAuth,
-} from "@/core/desktop/bridge"
+} from "@/core/desktop/workspace-gateway"
+import { isTauriRuntime } from "@/core/desktop/runtime"
 import { formatErrorDetails, formatErrorMessage } from "@/core/errors"
 import {
   type AppearanceMode,
@@ -19,11 +19,9 @@ import {
 } from "@/core/appearance/themes"
 import {
   createId,
-  dataverseEnvironmentSchema,
   defaultAppConfig,
   defaultUserSettings,
   getEnvironmentById,
-  normalizeEnvironmentUrl,
   type AppConfig,
   type DataverseEnvironment,
   type ToolId,
@@ -32,6 +30,19 @@ import {
   type WebResourceBinding,
 } from "@/core/dataverse/schemas"
 import { getToolDefinition } from "@/modules/tool-registry"
+import {
+  applyEnvironmentAuthState,
+  applyEnvironmentUpdate,
+  closeToolWindow,
+  removeEnvironmentFromWorkspace,
+  removeWebResourceBinding,
+  updateToolWindowState,
+  updateWebResourceBinding,
+  upsertWebResourceBinding,
+  validateEnvironmentInput,
+  type EnvironmentInput,
+  type WebResourceBindingChanges,
+} from "@/store/workspace-state"
 
 type LoadState = "idle" | "loading" | "ready" | "error"
 
@@ -45,13 +56,6 @@ export type AppNotification = {
   severity: AppNotificationSeverity
   createdAt: string
 }
-
-type NewEnvironmentInput = {
-  name: string
-  url: string
-}
-
-type UpdateEnvironmentInput = NewEnvironmentInput
 
 type OpenToolOptions = {
   newWindow?: boolean
@@ -72,10 +76,10 @@ type WorkspaceStore = {
   lastMessage?: string
   lastNotification?: AppNotification
   hydrate: () => Promise<void>
-  addEnvironment: (input: NewEnvironmentInput) => void
+  addEnvironment: (input: EnvironmentInput) => void
   updateEnvironment: (
     environmentId: string,
-    input: UpdateEnvironmentInput,
+    input: EnvironmentInput,
   ) => Promise<boolean>
   deleteEnvironment: (environmentId: string) => Promise<boolean>
   selectEnvironment: (environmentId: string) => void
@@ -103,7 +107,7 @@ type WorkspaceStore = {
   addBinding: (binding: Omit<WebResourceBinding, "id">) => void
   updateBinding: (
     bindingId: string,
-    changes: Partial<Omit<WebResourceBinding, "id">>,
+    changes: WebResourceBindingChanges,
   ) => void
   removeBinding: (bindingId: string) => void
 }
@@ -203,21 +207,6 @@ function persistUserSettings(
   })
 }
 
-function applyEnvironmentAuthState(
-  config: AppConfig,
-  environmentId: string,
-  authState: DataverseEnvironment["authState"],
-) {
-  return {
-    ...config,
-    environments: config.environments.map((environment) =>
-      environment.id === environmentId
-        ? { ...environment, authState }
-        : environment,
-    ),
-  }
-}
-
 function authStateForConnectionError(
   error: unknown,
 ): DataverseEnvironment["authState"] {
@@ -235,75 +224,6 @@ function authStateForConnectionError(
   }
 
   return "error"
-}
-
-function environmentInputResult(
-  config: AppConfig,
-  input: NewEnvironmentInput,
-  currentEnvironmentId?: string,
-) {
-  const name = input.name.trim()
-  const url = normalizeEnvironmentUrl(input.url)
-
-  if (!name) {
-    return { error: "Name is required" }
-  }
-
-  const parsed = dataverseEnvironmentSchema.safeParse({
-    id: currentEnvironmentId ?? "environment-validation",
-    name,
-    url,
-    authState: "disconnected",
-  })
-
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "Invalid environment" }
-  }
-
-  const duplicateName = config.environments.some(
-    (environment) =>
-      environment.id !== currentEnvironmentId &&
-      environment.name.trim().toLowerCase() === name.toLowerCase(),
-  )
-
-  if (duplicateName) {
-    return { error: "Environment name already exists" }
-  }
-
-  const duplicateUrl = config.environments.some(
-    (environment) =>
-      environment.id !== currentEnvironmentId &&
-      normalizeEnvironmentUrl(environment.url).toLowerCase() ===
-        url.toLowerCase(),
-  )
-
-  if (duplicateUrl) {
-    return { error: "Environment URL already exists" }
-  }
-
-  return { data: { name, url } }
-}
-
-function nextEnvironmentIdAfterDelete(
-  config: AppConfig,
-  environmentId: string,
-) {
-  const environmentIndex = config.environments.findIndex(
-    (environment) => environment.id === environmentId,
-  )
-
-  if (environmentIndex === -1) {
-    return config.currentEnvironmentId
-  }
-
-  const nextEnvironments = config.environments.filter(
-    (environment) => environment.id !== environmentId,
-  )
-
-  return (
-    nextEnvironments[environmentIndex]?.id ??
-    nextEnvironments[environmentIndex - 1]?.id
-  )
 }
 
 async function updateEnvironmentConnection(
@@ -468,9 +388,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   addEnvironment(input) {
     const config = get().config
-    const result = environmentInputResult(config, input)
+    const result = validateEnvironmentInput(config, input)
 
-    if (result.error || !result.data) {
+    if (!result.ok) {
       set({ lastMessage: result.error })
       return
     }
@@ -510,26 +430,29 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       return false
     }
 
-    const result = environmentInputResult(config, input, environmentId)
+    const result = validateEnvironmentInput(config, input, environmentId)
 
-    if (result.error || !result.data) {
+    if (!result.ok) {
       set({ lastMessage: result.error })
       return false
     }
 
-    const nextUrl = result.data.url
-    const urlChanged =
-      normalizeEnvironmentUrl(environment.url).toLowerCase() !==
-      nextUrl.toLowerCase()
+    const update = applyEnvironmentUpdate(
+      config,
+      get().openWindows,
+      get().activeWindowId,
+      environment,
+      result.data,
+    )
 
-    if (urlChanged && activeConnectionChecks.has(environmentId)) {
+    if (update.urlChanged && activeConnectionChecks.has(environmentId)) {
       set({
         lastMessage: "Wait for sign-in to finish before changing the URL",
       })
       return false
     }
 
-    if (urlChanged) {
+    if (update.urlChanged) {
       try {
         await deleteEnvironmentToken(environmentId)
       } catch (error) {
@@ -543,44 +466,15 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       }
     }
 
-    const nextConfig = {
-      ...config,
-      environments: config.environments.map((item) =>
-        item.id === environmentId
-          ? {
-              ...item,
-              name: result.data.name,
-              url: nextUrl,
-              authState: urlChanged ? "disconnected" : item.authState,
-            }
-          : item,
-      ),
-      bindings: urlChanged
-        ? config.bindings.filter(
-            (binding) => binding.environmentId !== environmentId,
-          )
-        : config.bindings,
-    }
-    const nextWindows = urlChanged
-      ? get().openWindows.filter(
-          (window) => window.environmentId !== environmentId,
-        )
-      : get().openWindows
-    const activeWindowStillOpen = nextWindows.some(
-      (window) => window.id === get().activeWindowId,
-    )
-
     set({
-      config: nextConfig,
-      openWindows: nextWindows,
-      activeWindowId: activeWindowStillOpen
-        ? get().activeWindowId
-        : nextWindows.at(-1)?.id,
-      lastMessage: urlChanged
+      config: update.config,
+      openWindows: update.openWindows,
+      activeWindowId: update.activeWindowId,
+      lastMessage: update.urlChanged
         ? "Environment updated. Reconnect to use the new URL."
         : "Environment updated",
     })
-    persistConfig(nextConfig, set)
+    persistConfig(update.config, set)
     return true
   },
 
@@ -613,36 +507,20 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
       return false
     }
 
-    const currentEnvironmentId =
-      config.currentEnvironmentId === environmentId
-        ? nextEnvironmentIdAfterDelete(config, environmentId)
-        : config.currentEnvironmentId
-    const nextWindows = get().openWindows.filter(
-      (window) => window.environmentId !== environmentId,
+    const removal = removeEnvironmentFromWorkspace(
+      config,
+      get().openWindows,
+      get().activeWindowId,
+      environmentId,
     )
-    const activeWindowStillOpen = nextWindows.some(
-      (window) => window.id === get().activeWindowId,
-    )
-    const nextConfig = {
-      ...config,
-      currentEnvironmentId,
-      environments: config.environments.filter(
-        (item) => item.id !== environmentId,
-      ),
-      bindings: config.bindings.filter(
-        (binding) => binding.environmentId !== environmentId,
-      ),
-    }
 
     set({
-      config: nextConfig,
-      openWindows: nextWindows,
-      activeWindowId: activeWindowStillOpen
-        ? get().activeWindowId
-        : nextWindows.at(-1)?.id,
+      config: removal.config,
+      openWindows: removal.openWindows,
+      activeWindowId: removal.activeWindowId,
       lastMessage: `Deleted ${environment.name}`,
     })
-    persistConfig(nextConfig, set)
+    persistConfig(removal.config, set)
     return true
   },
 
@@ -832,17 +710,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
   },
 
   closeWindow(windowId) {
-    const openWindows = get().openWindows
-    const nextWindows = openWindows.filter((window) => window.id !== windowId)
-    const closingActiveWindow = get().activeWindowId === windowId
-    const nextActiveWindow = closingActiveWindow
-      ? nextWindows.at(-1)?.id
-      : get().activeWindowId
-
-    set({
-      openWindows: nextWindows,
-      activeWindowId: nextActiveWindow,
-    })
+    set(closeToolWindow(get().openWindows, get().activeWindowId, windowId))
   },
 
   activateWindow(windowId) {
@@ -851,71 +719,45 @@ export const useWorkspaceStore = create<WorkspaceStore>((set, get) => ({
 
   updateWindowState(windowId, state) {
     set({
-      openWindows: get().openWindows.map((window) =>
-        window.id === windowId
-          ? {
-              ...window,
-              state: {
-                ...window.state,
-                ...state,
-              },
-            }
-          : window,
-      ),
+      openWindows: updateToolWindowState(get().openWindows, windowId, state),
     })
   },
 
   addBinding(binding) {
     const config = get().config
-    const existingBinding = config.bindings.find(
-      (item) =>
-        item.environmentId === binding.environmentId &&
-        item.webResourceId === binding.webResourceId,
+    const upsert = upsertWebResourceBinding(
+      config,
+      binding,
+      createId("binding"),
     )
-    const nextConfig = {
-      ...config,
-      bindings: existingBinding
-        ? config.bindings.map((item) =>
-            item.id === existingBinding.id ? { ...binding, id: item.id } : item,
-          )
-        : [...config.bindings, { ...binding, id: createId("binding") }],
-    }
     set({
-      config: nextConfig,
-      lastMessage: existingBinding ? "Binding updated" : "Binding added",
+      config: upsert.config,
+      lastMessage: upsert.existingBinding ? "Binding updated" : "Binding added",
     })
-    persistConfig(nextConfig, set)
+    persistConfig(upsert.config, set)
   },
 
   updateBinding(bindingId, changes) {
-    const config = get().config
-    const nextConfig = {
-      ...config,
-      bindings: config.bindings.map((binding) =>
-        binding.id === bindingId ? { ...binding, ...changes } : binding,
-      ),
-    }
+    const nextConfig = updateWebResourceBinding(
+      get().config,
+      bindingId,
+      changes,
+    )
     set({ config: nextConfig, lastMessage: "Binding updated" })
     persistConfig(nextConfig, set)
   },
 
   removeBinding(bindingId) {
-    const config = get().config
-    const binding = config.bindings.find((item) => item.id === bindingId)
+    const removal = removeWebResourceBinding(get().config, bindingId)
 
-    if (!binding) {
+    if (!removal.removedBinding) {
       return
     }
 
-    const nextConfig = {
-      ...config,
-      bindings: config.bindings.filter((item) => item.id !== bindingId),
-    }
-
     set({
-      config: nextConfig,
-      lastMessage: `Unbound ${binding.webResourceName}`,
+      config: removal.config,
+      lastMessage: `Unbound ${removal.removedBinding.webResourceName}`,
     })
-    persistConfig(nextConfig, set)
+    persistConfig(removal.config, set)
   },
 }))

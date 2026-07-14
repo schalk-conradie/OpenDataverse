@@ -1,5 +1,11 @@
 # Architecture Decisions
 
+Feature-specific decisions may live in separate ADR files when keeping them
+inline would make this history harder to navigate:
+
+- [ADR-0003: Self-Contained Plugin Registration Tool](architecture/adr-0003-self-contained-plugin-registration-tool.md)
+- [ADR-0004: Feature-Oriented Boundaries With A Thin Composition Root](architecture/adr-0004-feature-oriented-boundaries.md)
+
 ## ADR-0002: AI Chat Provider Selection Is Session-Scoped
 
 Date: 2026-06-17

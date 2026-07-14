@@ -105,9 +105,10 @@ mise exec -- npm run tauri:build
 Useful checks:
 
 ```sh
-npm run build:web
-npm run lint
-npm --prefix src-sidecar/ai run build
+npm run verify
+mise exec -- cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+mise exec -- cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+mise exec -- cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 ## AI Provider Setup
@@ -142,6 +143,30 @@ OpenDataverse stores user-editable app data in `~/.OpenDataverse`:
 
 - `config.json` stores environments, selected environment, publisher prefix, and
   web resource bindings.
-- `user-settings.json` stores local UI preferences such as dark mode.
+- `user-settings.json` stores local UI preferences such as appearance theme and
+  light/dark mode.
 - `tokens/token-<environment-id>.json` stores the Dataverse token for an
   environment.
+
+## Architecture
+
+OpenDataverse is split across three runtime boundaries:
+
+- `src/` is the React renderer. `App.tsx` composes the shell, while each folder
+  under `src/modules/` owns its screen, pure domain transforms, typed Tauri
+  gateway, browser-preview behavior, and focused tests.
+- `src-tauri/` owns local storage, browser authentication, token refresh,
+  authenticated Dataverse transport, local file/process access, and Tauri
+  command registration. `src-tauri/src/backend/mod.rs` is the composition root;
+  shared storage and Dataverse transport live in named foundation modules.
+- `src-sidecar/ai/` owns provider SDK sessions. It receives structured requests
+  from Tauri and cannot access Dataverse refresh tokens directly.
+
+Shared frontend code under `src/core/` must not import feature implementations
+or feature mock data. Feature code may depend on shared configuration, runtime,
+schema, error, appearance, storage, and UI primitives. The tool registry is the
+single mapping from a tool id to its metadata and lazy-loaded module.
+
+Renderer calls use stable Tauri command names and serialized payloads. The
+quality suite checks that every statically invoked renderer command has a
+registered Rust handler.

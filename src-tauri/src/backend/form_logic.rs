@@ -1,4 +1,16 @@
-use super::*;
+use super::fetchxml;
+use super::{
+    dataverse::{
+        dataverse_get_collection_values, dataverse_get_json_value, json_bool, json_i32,
+        json_string, localized_label, odata_string_literal, validate_logical_name,
+    },
+    storage::DataverseEnvironment,
+};
+use serde::Serialize;
+use serde_json::Value;
+use std::collections::HashSet;
+use tauri::AppHandle;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -203,7 +215,7 @@ fn option_values_from_metadata(value: &Value) -> Vec<FormLogicOptionValue> {
         }
     }
 
-    options.sort_by(|left, right| left.value.cmp(&right.value));
+    options.sort_by_key(|option| option.value);
     options.dedup_by_key(|option| option.value);
     options
 }

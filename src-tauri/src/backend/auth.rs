@@ -1,82 +1,138 @@
-use super::*;
+use super::{
+    dataverse::{
+        auth_scope, dataverse_get, now_unix, token_from_response, TokenResponse, AUTHORITY_BASE,
+        CLIENT_ID, REDIRECT_URI,
+    },
+    storage::{save_token, DataverseEnvironment},
+};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::HashMap,
+    io::{Read, Write},
+    net::TcpListener,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use tauri::{AppHandle, State};
+use url::Url;
+use uuid::Uuid;
 
-#[tauri::command]
-pub(super) fn load_config(app: AppHandle) -> Result<AppConfig, String> {
-    let path = config_path(&app)?;
-
-    if !path.exists() {
-        let legacy_home_path = legacy_home_config_path(&app)?;
-        if legacy_home_path.exists() {
-            let legacy_data =
-                fs::read_to_string(&legacy_home_path).map_err(|error| error.to_string())?;
-            if !legacy_data.trim().is_empty() {
-                fs::write(&path, &legacy_data).map_err(|error| error.to_string())?;
-                return serde_json::from_str(&legacy_data).map_err(|error| error.to_string());
-            }
-        }
-
-        let legacy_path = legacy_config_path(&app)?;
-        if legacy_path.exists() {
-            let legacy_data =
-                fs::read_to_string(&legacy_path).map_err(|error| error.to_string())?;
-            if !legacy_data.trim().is_empty() {
-                fs::write(&path, &legacy_data).map_err(|error| error.to_string())?;
-                return serde_json::from_str(&legacy_data).map_err(|error| error.to_string());
-            }
-        }
-
-        return Ok(AppConfig::default());
-    }
-
-    let data = fs::read_to_string(path).map_err(|error| error.to_string())?;
-
-    if data.trim().is_empty() {
-        return Ok(AppConfig::default());
-    }
-
-    serde_json::from_str(&data).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub(super) fn save_config(app: AppHandle, config: AppConfig) -> Result<(), String> {
-    let path = config_path(&app)?;
-    let data = serde_json::to_string_pretty(&config).map_err(|error| error.to_string())?;
-    fs::write(path, data).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub(super) fn delete_environment_token(
-    app: AppHandle,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct AuthSession {
     environment_id: String,
-) -> Result<(), String> {
-    delete_token_file(token_path(&app, &environment_id)?)?;
-    delete_token_file(legacy_home_token_path(&app, &environment_id)?)?;
-    delete_token_file(legacy_token_path(&app, &environment_id)?)?;
-    Ok(())
+    status: String,
+    message: String,
 }
 
-#[tauri::command]
-pub(super) fn load_user_settings(app: AppHandle) -> Result<UserSettings, String> {
-    let path = user_settings_path(&app)?;
-
-    if !path.exists() {
-        return Ok(UserSettings::default());
-    }
-
-    let data = fs::read_to_string(path).map_err(|error| error.to_string())?;
-
-    if data.trim().is_empty() {
-        return Ok(UserSettings::default());
-    }
-
-    serde_json::from_str(&data).map_err(|error| error.to_string())
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct BrowserAuthStart {
+    session_id: String,
+    auth_url: String,
+    redirect_uri: String,
+    expires_at: i64,
 }
 
-#[tauri::command]
-pub(super) fn save_user_settings(app: AppHandle, settings: UserSettings) -> Result<(), String> {
-    let path = user_settings_path(&app)?;
-    let data = serde_json::to_string_pretty(&settings).map_err(|error| error.to_string())?;
-    fs::write(path, data).map_err(|error| error.to_string())
+#[derive(Debug, Clone)]
+struct PendingBrowserAuth {
+    environment_id: String,
+    code_verifier: String,
+    result: Arc<Mutex<Option<Result<AuthCodeResult, String>>>>,
+    expires_at: i64,
+}
+
+#[derive(Debug, Clone)]
+struct AuthCodeResult {
+    code: String,
+    state: String,
+}
+
+#[derive(Default)]
+pub(super) struct PendingAuthState {
+    sessions: Mutex<HashMap<String, PendingBrowserAuth>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WhoAmIResponse {
+    #[serde(rename = "UserId")]
+    user_id: String,
+}
+
+fn create_code_verifier() -> String {
+    format!(
+        "{}{}{}",
+        Uuid::new_v4().simple(),
+        Uuid::new_v4().simple(),
+        Uuid::new_v4().simple()
+    )
+}
+
+fn create_code_challenge(verifier: &str) -> String {
+    let digest = Sha256::digest(verifier.as_bytes());
+    URL_SAFE_NO_PAD.encode(digest)
+}
+
+fn read_auth_code_request(mut stream: std::net::TcpStream) -> Result<AuthCodeResult, String> {
+    let mut buffer = [0_u8; 8192];
+    let bytes_read = stream
+        .read(&mut buffer)
+        .map_err(|error| error.to_string())?;
+    let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+    let request_line = request
+        .lines()
+        .next()
+        .ok_or_else(|| "Browser redirect request was empty".to_string())?;
+    let path = request_line
+        .split_whitespace()
+        .nth(1)
+        .ok_or_else(|| "Browser redirect request was malformed".to_string())?;
+    let redirect_url =
+        Url::parse(&format!("{REDIRECT_URI}{path}")).map_err(|error| error.to_string())?;
+
+    let mut code = None;
+    let mut state = None;
+    let mut error = None;
+    let mut error_description = None;
+
+    for (key, value) in redirect_url.query_pairs() {
+        match key.as_ref() {
+            "code" => code = Some(value.into_owned()),
+            "state" => state = Some(value.into_owned()),
+            "error" => error = Some(value.into_owned()),
+            "error_description" => error_description = Some(value.into_owned()),
+            _ => {}
+        }
+    }
+
+    let response_html = if error.is_some() {
+        "<html><body><h1>OpenDataverse sign-in failed</h1><p>You can return to OpenDataverse.</p></body></html>"
+    } else {
+        "<html><body><h1>OpenDataverse sign-in complete</h1><p>You can return to OpenDataverse.</p></body></html>"
+    };
+
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        response_html.len(),
+        response_html
+    );
+    let _ = stream.write_all(response.as_bytes());
+
+    if let Some(error) = error {
+        return Err(format!(
+            "{}: {}",
+            error,
+            error_description.unwrap_or_default()
+        ));
+    }
+
+    Ok(AuthCodeResult {
+        code: code.ok_or_else(|| "Browser redirect did not include an auth code".to_string())?,
+        state: state.ok_or_else(|| "Browser redirect did not include state".to_string())?,
+    })
 }
 
 #[tauri::command]
@@ -221,7 +277,8 @@ pub(super) async fn complete_browser_auth(
     }
 
     let token = token_from_response(
-        serde_json::from_str(&body).map_err(|error| format!("Parse token response: {error}"))?,
+        serde_json::from_str::<TokenResponse>(&body)
+            .map_err(|error| format!("Parse token response: {error}"))?,
     )?;
     save_token(&app, &environment.id, &token)?;
 

@@ -1,5 +1,5 @@
 import { appVersion } from "@/core/build-info"
-import { isTauriRuntime } from "@/core/desktop/bridge"
+import { isTauriRuntime } from "@/core/desktop/runtime"
 
 export async function getRunningAppVersion() {
   if (!isTauriRuntime()) {

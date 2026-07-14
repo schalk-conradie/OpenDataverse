@@ -26,6 +26,23 @@ Read `PRODUCT.md`, `DESIGN.md`, and this file before editing any UI. These three
 - Inter Variable as the sole UI typeface
 - Lucide icons
 
+## Architecture boundaries
+
+- Each folder under `src/modules/` owns its UI, pure domain transforms, typed
+  Tauri gateway, browser-preview behavior, and focused tests.
+- `src/core/` contains only independently shared application/runtime concepts.
+  Core code must not import feature modules or feature mock data.
+- `src/components/app-shell/` owns shell dialogs, notifications, and tool-window
+  composition. Keep `App.tsx` focused on composing shell state and layout.
+- Keep tool metadata and lazy component mapping together in
+  `src/modules/tool-registry.ts`; do not add a second tool-id switch.
+- `src-tauri/src/backend/mod.rs` is only the Tauri composition root. Shared
+  storage and authenticated Dataverse transport belong in named modules, and
+  production backend modules use explicit imports rather than `use super::*`.
+- Renderer-to-Tauri command names and payload shapes are compatibility
+  contracts. Update the command-contract check whenever a deliberate IPC change
+  is introduced.
+
 ## Tokens
 
 All color, radius, and typography tokens live in `src/index.css`. Reference them through Tailwind utilities (`bg-primary`, `text-muted-foreground`, `rounded-md`, `border-border`) or shadcn variables (`--background`, `--foreground`, `--muted`). Do not introduce arbitrary one-off colors or radii in module code.

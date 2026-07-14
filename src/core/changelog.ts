@@ -11,6 +11,17 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.65",
+    date: "2026-07-10",
+    title: "Architecture and maintainability",
+    changes: [
+      "Changed feature modules to own their Dataverse command gateways and browser-preview behavior instead of routing every tool through one shared bridge.",
+      "Split app-shell concerns, workspace transitions, feature domain logic, and Tauri storage and Dataverse transport into focused modules with expanded characterization tests.",
+      "Added automated renderer-to-Tauri command contract verification and strict Rust Clippy checks to the quality workflow.",
+      "Removed unused renderer-facing AI helper commands while keeping the same internal read-only AI tool behavior.",
+    ],
+  },
+  {
     version: "0.1.64",
     date: "2026-07-06",
     title: "Environment selector ordering",
