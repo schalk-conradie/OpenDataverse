@@ -762,13 +762,19 @@ mod tests {
         assert_eq!(provider, "codex");
         assert_eq!(
             normalize_ai_model(&provider, None).expect("default model should normalize"),
-            "gpt-5.4-mini"
+            "gpt-5.6-sol"
         );
         assert_eq!(
             normalize_ai_reasoning_effort(&provider, None)
                 .expect("default reasoning effort should normalize"),
-            "medium"
+            "low"
         );
+        for model in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+            assert_eq!(
+                normalize_ai_model(&provider, Some(model)).expect("GPT-5.6 model should normalize"),
+                model
+            );
+        }
         assert!(normalize_ai_model(&provider, Some("not-a-model")).is_err());
         assert!(normalize_ai_provider(Some("not-a-provider")).is_err());
     }

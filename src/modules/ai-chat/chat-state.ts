@@ -35,7 +35,7 @@ export const defaultAiChatState: AiChatWindowState = {
   composerValue: "",
   pendingAttachments: undefined,
   running: false,
-  settingsVersion: 5,
+  settingsVersion: 6,
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -127,7 +127,8 @@ export function getAiChatWindowState(
   const legacyDefaultModel =
     (settingsVersion === undefined && candidate.model === "gpt-5.5") ||
     (provider === "codex" &&
-      (settingsVersion ?? 0) < 5 &&
+      !threadHasMessages &&
+      (settingsVersion ?? 0) < 6 &&
       candidate.model === "gpt-5.4-mini")
   const model =
     isAiChatModel(provider, candidate.model) && !legacyDefaultModel
@@ -136,9 +137,14 @@ export function getAiChatWindowState(
         ? threadCandidate.model
         : defaultModelByProvider[provider]
   const legacyDefaultReasoning =
-    settingsVersion === undefined &&
-    (candidate.reasoningEffort === "xhigh" ||
-      candidate.reasoningEffort === "low")
+    (settingsVersion === undefined &&
+      (candidate.reasoningEffort === "xhigh" ||
+        candidate.reasoningEffort === "low")) ||
+    (provider === "codex" &&
+      !threadHasMessages &&
+      (settingsVersion ?? 0) < 6 &&
+      candidate.model === "gpt-5.4-mini" &&
+      candidate.reasoningEffort === "medium")
   const reasoningEffort =
     isAiReasoningEffort(provider, candidate.reasoningEffort) &&
     !legacyDefaultReasoning
@@ -172,6 +178,6 @@ export function getAiChatWindowState(
         ? candidate.running
         : defaultAiChatState.running,
     error: optionalString(candidate.error),
-    settingsVersion: settingsVersion ?? defaultAiChatState.settingsVersion,
+    settingsVersion: defaultAiChatState.settingsVersion,
   }
 }

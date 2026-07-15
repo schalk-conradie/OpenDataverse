@@ -11,6 +11,16 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.66",
+    date: "2026-07-15",
+    title: "Codex GPT-5.6 models",
+    changes: [
+      "Added GPT-5.6 Sol, Terra, and Luna to the Codex model selectors while keeping existing models available for compatibility.",
+      "Changed new Codex chats to default to GPT-5.6 Sol with Light reasoning.",
+      "Updated the embedded Codex SDK and CLI so GPT-5.6 models can run from OpenDataverse, and refreshed the Claude Agent SDK to its latest release.",
+    ],
+  },
+  {
     version: "0.1.65",
     date: "2026-07-10",
     title: "Architecture and maintainability",

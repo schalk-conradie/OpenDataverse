@@ -44,6 +44,24 @@ describe("AI chat model catalog", () => {
     }
   })
 
+  it("offers every GPT-5.6 Codex model", () => {
+    expect(modelOptionsByProvider.codex.map((option) => option.value)).toEqual(
+      expect.arrayContaining([
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+      ]),
+    )
+  })
+
+  it("defaults Codex to GPT-5.6 Sol with Light reasoning", () => {
+    expect(defaultModelByProvider.codex).toBe("gpt-5.6-sol")
+    expect(defaultReasoningByProvider.codex).toBe("low")
+    expect(
+      reasoningOptionsByProvider.codex.find((option) => option.value === "low"),
+    ).toEqual({ value: "low", label: "Light" })
+  })
+
   it("falls back to the provider default for invalid models", () => {
     expect(modelForProvider("codex", "not-a-model")).toBe(
       defaultModelByProvider.codex,

@@ -81,7 +81,7 @@ describe("AI chat window state parsing", () => {
       composerValue: "Draft",
       pendingAttachments: attachmentBundle,
       running: true,
-      settingsVersion: 5,
+      settingsVersion: 6,
     })
     expect(state.thread).toMatchObject({
       id: thread.id,
@@ -147,5 +147,49 @@ describe("AI chat window state parsing", () => {
     expect(migrated.reasoningEffort).toBe(defaultAiChatState.reasoningEffort)
     expect(current.model).toBe("gpt-5.5")
     expect(current.reasoningEffort).toBe("xhigh")
+  })
+
+  it("migrates the previous Codex default without changing saved chats", () => {
+    const migrated = getAiChatWindowState({
+      state: {
+        aiChat: {
+          provider: "codex",
+          model: "gpt-5.4-mini",
+          reasoningEffort: "medium",
+          composerValue: "",
+          running: false,
+          settingsVersion: 5,
+        },
+      },
+    })
+    const savedChat = getAiChatWindowState({
+      state: {
+        aiChat: {
+          thread: {
+            ...thread,
+            provider: "codex",
+            model: "gpt-5.4-mini",
+            reasoningEffort: "medium",
+          },
+          provider: "codex",
+          model: "gpt-5.4-mini",
+          reasoningEffort: "medium",
+          composerValue: "",
+          running: false,
+          settingsVersion: 5,
+        },
+      },
+    })
+
+    expect(migrated).toMatchObject({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "low",
+      settingsVersion: 6,
+    })
+    expect(savedChat).toMatchObject({
+      model: "gpt-5.4-mini",
+      reasoningEffort: "medium",
+      settingsVersion: 6,
+    })
   })
 })
