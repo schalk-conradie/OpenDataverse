@@ -1,5 +1,5 @@
 use super::super::dataverse::{
-    json_bool, json_expanded_string, json_i32, json_lookup_id, json_string,
+    json_bool, json_expanded_string, json_i32, json_lookup_id, json_string, localized_label,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -199,6 +199,14 @@ pub(in crate::backend) struct PluginStepImageSummary {
 pub(in crate::backend) struct PluginMessageSummary {
     id: String,
     name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(in crate::backend) struct PluginFilteringAttributeSummary {
+    logical_name: String,
+    display_name: String,
+    attribute_type: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -723,6 +731,19 @@ pub(super) fn plugin_message_from_value(value: &Value) -> Option<PluginMessageSu
     Some(PluginMessageSummary {
         id: json_string(value, "sdkmessageid")?,
         name: json_string(value, "name").unwrap_or_else(|| "Message".to_string()),
+    })
+}
+
+pub(super) fn plugin_filtering_attribute_from_value(
+    value: &Value,
+) -> Option<PluginFilteringAttributeSummary> {
+    let logical_name = json_string(value, "LogicalName")?;
+
+    Some(PluginFilteringAttributeSummary {
+        display_name: localized_label(value, "DisplayName", &logical_name),
+        logical_name,
+        attribute_type: json_string(value, "AttributeType")
+            .unwrap_or_else(|| "Unknown".to_string()),
     })
 }
 

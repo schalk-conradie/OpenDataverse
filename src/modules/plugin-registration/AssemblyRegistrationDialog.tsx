@@ -4,7 +4,7 @@ import type {
   ReactElement,
   SetStateAction,
 } from "react"
-import { AlertTriangle, Check, FileSearch, Loader2 } from "lucide-react"
+import { AlertTriangle, FileSearch, Loader2 } from "lucide-react"
 
 import type {
   PluginAssemblyInspection,
@@ -67,6 +67,11 @@ export function AssemblyRegistrationDialog({
   onToggleType,
   onSubmit,
 }: AssemblyRegistrationDialogProps): ReactElement {
+  const registerableTypes =
+    inspection?.discoveredTypes.filter(
+      (type) => type.kind !== "unknown" && !type.isAbstract,
+    ) ?? []
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-3xl">
@@ -76,25 +81,35 @@ export function AssemblyRegistrationDialog({
               {target ? "Update Assembly" : "Register Assembly"}
             </DialogTitle>
             <DialogDescription className="sr-only">
-              Register or update a Dataverse plug-in assembly.
+              {target
+                ? "Select a replacement assembly and choose its registerable types."
+                : "Register a Dataverse plug-in assembly."}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
-            <Input value={form.localPath} readOnly />
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onChooseFile}
-              disabled={inspecting}
-            >
-              {inspecting ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <FileSearch />
-              )}
-              Inspect
-            </Button>
+          <div className="grid gap-2">
+            <Label htmlFor="plugin-assembly-file">Assembly</Label>
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+              <Input
+                id="plugin-assembly-file"
+                value={form.localPath}
+                placeholder="Select a compiled assembly"
+                readOnly
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={onChooseFile}
+                disabled={inspecting}
+              >
+                {inspecting ? (
+                  <Loader2 className="animate-spin" />
+                ) : (
+                  <FileSearch />
+                )}
+                Select
+              </Button>
+            </div>
           </div>
 
           {inspection?.warnings.length ? (
@@ -108,7 +123,9 @@ export function AssemblyRegistrationDialog({
             </div>
           ) : null}
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          {!target && (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="plugin-assembly-name">Name</Label>
               <Input
@@ -215,51 +232,54 @@ export function AssemblyRegistrationDialog({
                 }
               />
             </div>
-          </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="plugin-assembly-description">Description</Label>
+                <Input
+                  id="plugin-assembly-description"
+                  value={form.description}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+            </>
+          )}
 
           <div className="grid gap-2">
-            <Label htmlFor="plugin-assembly-description">Description</Label>
-            <Input
-              id="plugin-assembly-description"
-              value={form.description}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  description: event.target.value,
-                }))
-              }
-            />
-          </div>
-
-          <div className="grid gap-2">
-            <Label>Types</Label>
+            <Label>Plug-ins and workflow activities</Label>
             <div className="max-h-40 overflow-auto rounded-lg border border-border bg-background p-2">
-              {(inspection?.discoveredTypes ?? []).length === 0 ? (
+              {registerableTypes.length === 0 ? (
                 <p className="py-3 text-center text-xs text-muted-foreground">
                   Inspect an assembly to select registerable types.
                 </p>
               ) : (
                 <div className="grid gap-1">
-                  {inspection?.discoveredTypes.map((type) => (
-                    <button
+                  {registerableTypes.map((type) => (
+                    <label
                       key={type.fullName}
-                      type="button"
                       className={cn(
-                        "flex items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors",
+                        "flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors",
                         selectedTypeNames.includes(type.fullName)
                           ? "border-primary bg-primary/5"
                           : "border-border bg-background hover:bg-muted/60",
                       )}
-                      onClick={() => onToggleType(type.fullName)}
                     >
-                      <span className="flex size-4 items-center justify-center rounded border border-border bg-background">
-                        {selectedTypeNames.includes(type.fullName) && (
-                          <Check className="size-3 text-primary" />
-                        )}
-                      </span>
+                      <input
+                        type="checkbox"
+                        className="size-4 accent-primary"
+                        checked={selectedTypeNames.includes(type.fullName)}
+                        onChange={() => onToggleType(type.fullName)}
+                      />
                       <span className="min-w-0 flex-1 truncate">{type.fullName}</span>
-                      <Badge variant="outline">{type.kind}</Badge>
-                    </button>
+                      <Badge variant="outline">
+                        {type.kind === "workflow" ? "Workflow" : "Plug-in"}
+                      </Badge>
+                    </label>
                   ))}
                 </div>
               )}
@@ -267,7 +287,15 @@ export function AssemblyRegistrationDialog({
           </div>
 
           <DialogFooter>
-            <Button type="submit" disabled={saving}>
+            <Button
+              type="submit"
+              disabled={
+                saving ||
+                inspecting ||
+                !inspection ||
+                selectedTypeNames.length === 0
+              }
+            >
               {target ? "Update" : "Register"}
             </Button>
           </DialogFooter>

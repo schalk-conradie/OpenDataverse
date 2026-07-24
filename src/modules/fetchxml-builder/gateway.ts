@@ -44,10 +44,42 @@ const accountMetadata: FetchXmlEntityMetadata = {
       ],
     },
     {
+      logicalName: "creditonhold",
+      displayName: "Credit Hold",
+      attributeType: "Boolean",
+      isValidForRead: true,
+      optionValues: [
+        { value: 0, label: "No" },
+        { value: 1, label: "Yes" },
+      ],
+    },
+    {
+      logicalName: "numberofemployees",
+      displayName: "Number of Employees",
+      attributeType: "Integer",
+      isValidForRead: true,
+    },
+    {
+      logicalName: "revenue",
+      displayName: "Annual Revenue",
+      attributeType: "Money",
+      isValidForRead: true,
+    },
+    {
       logicalName: "createdon",
       displayName: "Created On",
       attributeType: "DateTime",
       isValidForRead: true,
+      dateTimeBehavior: "UserLocal",
+      dateTimeFormat: "DateAndTime",
+    },
+    {
+      logicalName: "new_renewaldate",
+      displayName: "Renewal Date",
+      attributeType: "DateTime",
+      isValidForRead: true,
+      dateTimeBehavior: "DateOnly",
+      dateTimeFormat: "DateOnly",
     },
   ],
   relationships: [

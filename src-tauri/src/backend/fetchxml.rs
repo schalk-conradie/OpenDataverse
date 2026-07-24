@@ -39,6 +39,10 @@ pub(super) struct FetchXmlAttributeSummary {
     is_valid_for_read: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     option_values: Vec<FetchXmlOptionValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    date_time_behavior: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    date_time_format: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -144,7 +148,201 @@ pub(super) fn fetchxml_attribute_from_value(value: &Value) -> Option<FetchXmlAtt
         attribute_type,
         is_valid_for_read,
         option_values: Vec::new(),
+        date_time_behavior: None,
+        date_time_format: None,
     })
+}
+
+fn option_value_from_metadata(value: &Value) -> Option<FetchXmlOptionValue> {
+    let raw_value = value.get("Value")?.as_i64()?;
+    let option_value = i32::try_from(raw_value).ok()?;
+
+    Some(FetchXmlOptionValue {
+        value: option_value,
+        label: localized_label(value, "Label", &option_value.to_string()),
+    })
+}
+
+fn option_values_from_typed_attribute(value: &Value) -> Vec<FetchXmlOptionValue> {
+    for option_set in ["OptionSet", "GlobalOptionSet"]
+        .iter()
+        .filter_map(|key| value.get(key))
+    {
+        let mut options = option_set
+            .get("Options")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(option_value_from_metadata)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        if options.is_empty() {
+            if let Some(false_option) = option_set
+                .get("FalseOption")
+                .and_then(option_value_from_metadata)
+            {
+                options.push(false_option);
+            }
+            if let Some(true_option) = option_set
+                .get("TrueOption")
+                .and_then(option_value_from_metadata)
+            {
+                options.push(true_option);
+            }
+        }
+
+        if !options.is_empty() {
+            return options;
+        }
+    }
+
+    Vec::new()
+}
+
+fn date_time_format(value: &Value) -> Option<String> {
+    json_string(value, "Format").or_else(|| {
+        value
+            .get("Format")
+            .and_then(Value::as_i64)
+            .and_then(|format| match format {
+                0 => Some("DateOnly".to_string()),
+                1 => Some("DateAndTime".to_string()),
+                _ => None,
+            })
+    })
+}
+
+fn enrich_fetchxml_attributes(attributes: &mut [FetchXmlAttributeSummary], typed_values: &[Value]) {
+    for value in typed_values {
+        let Some(logical_name) = json_string(value, "LogicalName") else {
+            continue;
+        };
+        let Some(attribute) = attributes
+            .iter_mut()
+            .find(|attribute| attribute.logical_name == logical_name)
+        else {
+            continue;
+        };
+        let option_values = option_values_from_typed_attribute(value);
+
+        if !option_values.is_empty() {
+            attribute.option_values = option_values;
+        }
+        attribute.date_time_behavior = json_string(value, "DateTimeBehavior").or_else(|| {
+            value
+                .get("DateTimeBehavior")
+                .and_then(|behavior| json_string(behavior, "Value"))
+        });
+        attribute.date_time_format = date_time_format(value);
+    }
+}
+
+#[cfg(test)]
+mod typed_attribute_tests {
+    use super::{
+        date_time_format, enrich_fetchxml_attributes, fetchxml_attribute_from_value,
+        option_values_from_typed_attribute,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn reads_local_and_global_choice_options() {
+        let local = json!({
+            "OptionSet": {
+                "Options": [
+                    {
+                        "Value": 1,
+                        "Label": {
+                            "UserLocalizedLabel": { "Label": "Preferred" }
+                        }
+                    }
+                ]
+            }
+        });
+        let global = json!({
+            "OptionSet": null,
+            "GlobalOptionSet": {
+                "Options": [
+                    {
+                        "Value": 2,
+                        "Label": {
+                            "UserLocalizedLabel": { "Label": "Standard" }
+                        }
+                    }
+                ]
+            }
+        });
+
+        assert_eq!(
+            option_values_from_typed_attribute(&local)[0].label,
+            "Preferred"
+        );
+        assert_eq!(option_values_from_typed_attribute(&global)[0].value, 2);
+    }
+
+    #[test]
+    fn enriches_boolean_and_date_time_attributes() {
+        let mut attributes = vec![
+            fetchxml_attribute_from_value(&json!({
+                "LogicalName": "creditonhold",
+                "AttributeType": "Boolean",
+                "DisplayName": {
+                    "UserLocalizedLabel": { "Label": "Credit Hold" }
+                }
+            }))
+            .expect("boolean attribute"),
+            fetchxml_attribute_from_value(&json!({
+                "LogicalName": "renewaldate",
+                "AttributeType": "DateTime",
+                "DisplayName": {
+                    "UserLocalizedLabel": { "Label": "Renewal Date" }
+                }
+            }))
+            .expect("date attribute"),
+        ];
+
+        enrich_fetchxml_attributes(
+            &mut attributes,
+            &[
+                json!({
+                    "LogicalName": "creditonhold",
+                    "OptionSet": {
+                        "FalseOption": {
+                            "Value": 0,
+                            "Label": {
+                                "UserLocalizedLabel": { "Label": "No" }
+                            }
+                        },
+                        "TrueOption": {
+                            "Value": 1,
+                            "Label": {
+                                "UserLocalizedLabel": { "Label": "Yes" }
+                            }
+                        }
+                    }
+                }),
+                json!({
+                    "LogicalName": "renewaldate",
+                    "DateTimeBehavior": { "Value": "DateOnly" },
+                    "Format": 0
+                }),
+            ],
+        );
+
+        assert_eq!(attributes[0].option_values.len(), 2);
+        assert_eq!(
+            attributes[1].date_time_behavior.as_deref(),
+            Some("DateOnly")
+        );
+        assert_eq!(attributes[1].date_time_format.as_deref(), Some("DateOnly"));
+        assert_eq!(
+            date_time_format(&json!({ "Format": 1 })).as_deref(),
+            Some("DateAndTime")
+        );
+    }
 }
 
 pub(super) async fn advanced_find_entity_logical_names(
@@ -370,22 +568,83 @@ pub(super) async fn get_fetchxml_entity_metadata(
     .await?;
     let entity = fetchxml_entity_summary_from_value(&entity_value);
 
-    let attribute_values = dataverse_get_collection_values(
-        &app,
-        &environment,
-        &format!("/EntityDefinitions(LogicalName='{logical_name}')/Attributes"),
-        vec![(
-            "$select".to_string(),
-            "LogicalName,AttributeType,DisplayName,IsValidForRead,IsValidForAdvancedFind"
-                .to_string(),
-        )],
-    )
-    .await?;
+    let attributes_path = format!("/EntityDefinitions(LogicalName='{logical_name}')/Attributes");
+    let picklist_path =
+        format!("{attributes_path}/Microsoft.Dynamics.CRM.PicklistAttributeMetadata");
+    let multi_select_path =
+        format!("{attributes_path}/Microsoft.Dynamics.CRM.MultiSelectPicklistAttributeMetadata");
+    let state_path = format!("{attributes_path}/Microsoft.Dynamics.CRM.StateAttributeMetadata");
+    let status_path = format!("{attributes_path}/Microsoft.Dynamics.CRM.StatusAttributeMetadata");
+    let boolean_path = format!("{attributes_path}/Microsoft.Dynamics.CRM.BooleanAttributeMetadata");
+    let date_time_path =
+        format!("{attributes_path}/Microsoft.Dynamics.CRM.DateTimeAttributeMetadata");
+    let enum_query = || {
+        vec![
+            ("$select".to_string(), "LogicalName".to_string()),
+            (
+                "$expand".to_string(),
+                "OptionSet($select=Options),GlobalOptionSet($select=Options)".to_string(),
+            ),
+        ]
+    };
+    let (
+        attribute_values,
+        picklist_values,
+        multi_select_values,
+        state_values,
+        status_values,
+        boolean_values,
+        date_time_values,
+    ) = tokio::join!(
+        dataverse_get_collection_values(
+            &app,
+            &environment,
+            &attributes_path,
+            vec![(
+                "$select".to_string(),
+                "LogicalName,AttributeType,DisplayName,IsValidForRead,IsValidForAdvancedFind"
+                    .to_string(),
+            )],
+        ),
+        dataverse_get_collection_values(&app, &environment, &picklist_path, enum_query(),),
+        dataverse_get_collection_values(&app, &environment, &multi_select_path, enum_query(),),
+        dataverse_get_collection_values(&app, &environment, &state_path, enum_query(),),
+        dataverse_get_collection_values(&app, &environment, &status_path, enum_query(),),
+        dataverse_get_collection_values(
+            &app,
+            &environment,
+            &boolean_path,
+            vec![
+                ("$select".to_string(), "LogicalName".to_string()),
+                ("$expand".to_string(), "OptionSet".to_string()),
+            ],
+        ),
+        dataverse_get_collection_values(
+            &app,
+            &environment,
+            &date_time_path,
+            vec![(
+                "$select".to_string(),
+                "LogicalName,Format,DateTimeBehavior".to_string(),
+            )],
+        ),
+    );
+    let attribute_values = attribute_values?;
     let mut attributes = attribute_values
         .iter()
         .filter(|value| is_advanced_find_attribute(value))
         .filter_map(fetchxml_attribute_from_value)
         .collect::<Vec<_>>();
+    for typed_values in [
+        picklist_values?,
+        multi_select_values?,
+        state_values?,
+        status_values?,
+        boolean_values?,
+        date_time_values?,
+    ] {
+        enrich_fetchxml_attributes(&mut attributes, &typed_values);
+    }
     sort_fetchxml_attributes(&mut attributes);
 
     let mut relationships = Vec::new();

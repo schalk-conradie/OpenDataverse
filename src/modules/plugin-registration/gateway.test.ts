@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import type { DataverseEnvironment } from "@/core/dataverse/schemas"
 import {
   getPluginRegistrationSnapshot,
+  listPluginFilteringAttributes,
   listPluginStepImages,
   listPluginSteps,
   listPluginTypes,
@@ -56,5 +57,16 @@ describe("plugin-registration browser-preview gateway", () => {
       id: "assembly-preview",
       message: "Browser preview disabled the component.",
     })
+  })
+
+  it("provides browser-preview filtering attributes", async () => {
+    await expect(
+      listPluginFilteringAttributes(environment, "account"),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ logicalName: "name" }),
+        expect.objectContaining({ logicalName: "revenue" }),
+      ]),
+    )
   })
 })

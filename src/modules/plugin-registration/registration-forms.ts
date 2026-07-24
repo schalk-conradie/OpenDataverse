@@ -25,6 +25,7 @@ export type StepForm = {
   pluginTypeId: string
   serviceEndpointId: string
   messageId: string
+  messageText: string
   messageFilterId: string
   name: string
   stage: number
@@ -96,6 +97,12 @@ export function makeStepForm(
     serviceEndpointId:
       step?.serviceEndpointId ?? snapshot.endpoints[0]?.id ?? "",
     messageId: step?.messageId ?? snapshot.messages[0]?.id ?? "",
+    messageText:
+      step?.messageName ??
+      snapshot.messages.find(
+        (message) => message.id === (step?.messageId ?? snapshot.messages[0]?.id),
+      )?.name ??
+      "",
     messageFilterId: step?.messageFilterId ?? "__none__",
     name: step?.name ?? "",
     stage: step?.stage ?? 20,

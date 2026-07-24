@@ -60,6 +60,7 @@ pub(crate) fn run() {
             plugins::list_plugin_step_images,
             plugins::list_plugin_messages,
             plugins::list_plugin_message_filters,
+            plugins::list_plugin_filtering_attributes,
             plugins::list_plugin_service_endpoints,
             plugins::list_plugin_system_users,
             plugins::get_plugin_registration_snapshot,

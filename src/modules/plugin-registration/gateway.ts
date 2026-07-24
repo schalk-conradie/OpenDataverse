@@ -8,6 +8,7 @@ import {
   type PluginAssemblySummary,
   type PluginDependencyReport,
   type PluginExportInput,
+  type PluginFilteringAttributeSummary,
   type PluginMessageFilterSummary,
   type PluginMessageSummary,
   type PluginPackageSummary,
@@ -161,6 +162,26 @@ export async function listPluginMessageFilters(
     "./mock-data"
   )
   return mockPluginMessageFilters.filter((filter) => filter.messageId === messageId)
+}
+
+export async function listPluginFilteringAttributes(
+  environment: DataverseEnvironment,
+  entityLogicalName: string,
+): Promise<PluginFilteringAttributeSummary[]> {
+  if (isTauriRuntime()) {
+    return invoke<PluginFilteringAttributeSummary[]>(
+      "list_plugin_filtering_attributes",
+      {
+        environment,
+        entityLogicalName,
+      },
+    )
+  }
+
+  const { mockPluginFilteringAttributesByEntity } = await import(
+    "./mock-data"
+  )
+  return mockPluginFilteringAttributesByEntity[entityLogicalName] ?? []
 }
 
 export async function listPluginServiceEndpoints(

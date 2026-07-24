@@ -3,6 +3,7 @@ import type {
   PluginAssemblySummary,
   PluginDependencyReport,
   PluginEditableState,
+  PluginFilteringAttributeSummary,
   PluginMessageFilterSummary,
   PluginMessageSummary,
   PluginOptionSummary,
@@ -192,6 +193,8 @@ export const mockPluginMessages: PluginMessageSummary[] = [
   { id: "a1f35f90-0000-4000-9000-000000000003", name: "Delete" },
   { id: "a1f35f90-0000-4000-9000-000000000004", name: "Associate" },
   { id: "a1f35f90-0000-4000-9000-000000000005", name: "Disassociate" },
+  { id: "a1f35f90-0000-4000-9000-000000000006", name: "Retrieve" },
+  { id: "a1f35f90-0000-4000-9000-000000000007", name: "RetrieveMultiple" },
 ]
 
 export const mockPluginMessageFilters: PluginMessageFilterSummary[] = [
@@ -219,7 +222,69 @@ export const mockPluginMessageFilters: PluginMessageFilterSummary[] = [
     primaryEntity: "account",
     isCustomProcessingStepAllowed: true,
   },
+  {
+    id: "cf5d7c4a-0000-4000-9000-000000000005",
+    messageId: mockPluginMessages[5].id,
+    primaryEntity: "account",
+    isCustomProcessingStepAllowed: true,
+  },
+  {
+    id: "cf5d7c4a-0000-4000-9000-000000000006",
+    messageId: mockPluginMessages[6].id,
+    primaryEntity: "account",
+    isCustomProcessingStepAllowed: true,
+  },
 ]
+
+export const mockPluginFilteringAttributesByEntity: Record<
+  string,
+  PluginFilteringAttributeSummary[]
+> = {
+  account: [
+    {
+      logicalName: "accountnumber",
+      displayName: "Account Number",
+      attributeType: "String",
+    },
+    {
+      logicalName: "creditonhold",
+      displayName: "Credit Hold",
+      attributeType: "Boolean",
+    },
+    {
+      logicalName: "name",
+      displayName: "Account Name",
+      attributeType: "String",
+    },
+    {
+      logicalName: "numberofemployees",
+      displayName: "Number of Employees",
+      attributeType: "Integer",
+    },
+    {
+      logicalName: "revenue",
+      displayName: "Annual Revenue",
+      attributeType: "Money",
+    },
+  ],
+  contact: [
+    {
+      logicalName: "emailaddress1",
+      displayName: "Email",
+      attributeType: "String",
+    },
+    {
+      logicalName: "firstname",
+      displayName: "First Name",
+      attributeType: "String",
+    },
+    {
+      logicalName: "lastname",
+      displayName: "Last Name",
+      attributeType: "String",
+    },
+  ],
+}
 
 export const mockPluginServiceEndpoints: PluginServiceEndpointSummary[] = [
   {
@@ -432,6 +497,16 @@ export const mockPluginAssemblyInspection: PluginAssemblyInspection = {
       isAbstract: false,
       isPublic: true,
       implementsIPlugin: true,
+    },
+    {
+      fullName: "Contoso.Workflows.CalculateAccountScore",
+      name: "CalculateAccountScore",
+      namespace: "Contoso.Workflows",
+      kind: "workflow",
+      isAbstract: false,
+      isPublic: true,
+      implementsIPlugin: false,
+      baseType: "System.Activities.CodeActivity",
     },
   ],
   warnings: ["Assembly is not strong-name signed."],

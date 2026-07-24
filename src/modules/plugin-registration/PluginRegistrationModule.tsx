@@ -892,6 +892,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
 
       <StepRegistrationDialog
         open={stepOpen}
+        environment={environment as DataverseEnvironment}
         form={stepForm}
         setForm={setStepForm}
         snapshot={formSnapshot}

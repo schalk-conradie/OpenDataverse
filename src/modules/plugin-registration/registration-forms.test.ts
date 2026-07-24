@@ -60,6 +60,7 @@ describe("plug-in registration form defaults", () => {
       pluginTypeId: mockPluginTypes[0].id,
       serviceEndpointId: mockPluginServiceEndpoints[0].id,
       messageId: formSnapshot.messages[0].id,
+      messageText: formSnapshot.messages[0].name,
       messageFilterId: "__none__",
       name: "",
       stage: 20,

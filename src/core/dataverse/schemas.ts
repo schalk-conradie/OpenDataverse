@@ -191,6 +191,8 @@ export type FetchXmlAttributeSummary = {
   attributeType: string
   isValidForRead: boolean
   optionValues?: FetchXmlOptionValue[]
+  dateTimeBehavior?: string
+  dateTimeFormat?: string
 }
 
 export type FetchXmlRelationshipSummary = {
@@ -490,6 +492,12 @@ export type PluginStepImageSummary = {
 export type PluginMessageSummary = {
   id: string
   name: string
+}
+
+export type PluginFilteringAttributeSummary = {
+  logicalName: string
+  displayName: string
+  attributeType: string
 }
 
 export type PluginMessageFilterSummary = {

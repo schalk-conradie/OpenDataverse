@@ -54,7 +54,6 @@ export type FilterOperator = {
   value: string
   label: string
   requiresValue: boolean
-  valueMode?: "text" | "option"
 }
 
 const textOperators: readonly FilterOperator[] = [
@@ -82,12 +81,11 @@ const numericOperators: readonly FilterOperator[] = [
 ]
 
 const optionOperators: readonly FilterOperator[] = [
-  { value: "eq", label: "Equals", requiresValue: true, valueMode: "option" },
+  { value: "eq", label: "Equals", requiresValue: true },
   {
     value: "ne",
     label: "Does not equal",
     requiresValue: true,
-    valueMode: "option",
   },
   { value: "not-null", label: "Contains data", requiresValue: false },
   { value: "null", label: "Does not contain data", requiresValue: false },

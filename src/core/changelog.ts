@@ -11,6 +11,22 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.69",
+    date: "2026-07-24",
+    title: "FetchXML results and CSV export",
+    changes: [
+      "Added a dedicated FetchXML Builder Results tab with CSV export and automatic navigation after query execution.",
+      "Refined the FetchXML filter card padding and reduced spacing between its header, conditions, and actions.",
+      "Changed FetchXML filter fields and related-table controls to scale with narrower desktop windows instead of being clipped by fixed minimum widths.",
+      "Added data-aware FetchXML filter controls for dates, date-times, numbers, booleans, and Dataverse choice values.",
+      "Added vertical breathing room around the FetchXML Builder table and execution toolbar.",
+      "Simplified plug-in assembly updates to selecting a replacement assembly and choosing the plug-in and workflow activity types to register.",
+      "Changed plug-in step message selection to a searchable autocomplete and removed the 300-message query cap so standard messages such as Retrieve and RetrieveMultiple remain available.",
+      "Replaced the native plug-in message suggestion popup with an anchored in-app list that stays aligned beneath the Message field.",
+      "Added an XrmToolBox-style filtering attribute picker for supported plug-in step Message/Entity combinations, with explicit guidance when filtering attributes are unavailable.",
+    ],
+  },
+  {
     version: "0.1.68",
     date: "2026-07-24",
     title: "Form Logic generation errors",

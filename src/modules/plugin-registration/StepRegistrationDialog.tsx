@@ -4,8 +4,11 @@ import type {
   ReactElement,
   SetStateAction,
 } from "react"
+import { useState } from "react"
+import { ListFilter } from "lucide-react"
 
 import type {
+  DataverseEnvironment,
   PluginMessageFilterSummary,
   PluginRegistrationSnapshot,
 } from "@/core/dataverse/schemas"
@@ -27,10 +30,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { cn } from "@/lib/utils"
+import {
+  getFilteringAttributeSupport,
+  parseFilteringAttributes,
+} from "./filtering-attributes"
+import { FilteringAttributesDialog } from "./FilteringAttributesDialog"
+import {
+  filterPluginMessages,
+  findPluginMessageByName,
+} from "./message-autocomplete"
 import type { StepForm } from "./registration-forms"
 
 type StepRegistrationDialogProps = {
   open: boolean
+  environment: DataverseEnvironment
   form: StepForm
   setForm: Dispatch<SetStateAction<StepForm>>
   snapshot: PluginRegistrationSnapshot
@@ -42,6 +56,7 @@ type StepRegistrationDialogProps = {
 
 export function StepRegistrationDialog({
   open,
+  environment,
   form,
   setForm,
   snapshot,
@@ -50,10 +65,81 @@ export function StepRegistrationDialog({
   onOpenChange,
   onSubmit,
 }: StepRegistrationDialogProps): ReactElement {
+  const selectedMessage = snapshot.messages.find(
+    (message) => message.id === form.messageId,
+  )
+  const matchedMessage = findPluginMessageByName(
+    snapshot.messages,
+    form.messageText,
+  )
+  const filteredMessages = filterPluginMessages(
+    snapshot.messages,
+    form.messageText,
+  )
+  const [messageOptionsOpen, setMessageOptionsOpen] = useState(false)
+  const [activeMessageIndex, setActiveMessageIndex] = useState(0)
+  const [filteringAttributesOpen, setFilteringAttributesOpen] = useState(false)
+  const filteringAttributeSupport = getFilteringAttributeSupport(
+    snapshot.messages,
+    form.messageId,
+    messageFilters,
+    form.messageFilterId,
+  )
+
+  function selectMessage(message: (typeof snapshot.messages)[number]) {
+    setForm((current) => ({
+      ...current,
+      messageText: message.name,
+      messageId: message.id,
+      messageFilterId:
+        message.id === current.messageId ? current.messageFilterId : "__none__",
+      filteringAttributes:
+        message.id === current.messageId ? current.filteringAttributes : "",
+    }))
+    setMessageOptionsOpen(false)
+  }
+
+  function moveActiveMessage(nextIndex: number) {
+    if (filteredMessages.length === 0) {
+      return
+    }
+
+    const boundedIndex = Math.max(
+      0,
+      Math.min(nextIndex, filteredMessages.length - 1),
+    )
+    setActiveMessageIndex(boundedIndex)
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById(`plugin-step-message-option-${boundedIndex}`)
+        ?.scrollIntoView({ block: "nearest" })
+    })
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setMessageOptionsOpen(false)
+            setFilteringAttributesOpen(false)
+          }
+          onOpenChange(nextOpen)
+        }}
+      >
       <DialogContent className="sm:max-w-3xl">
-        <form onSubmit={onSubmit} className="grid gap-4">
+        <form
+          onSubmit={(event) => {
+            if (!matchedMessage) {
+              event.preventDefault()
+              return
+            }
+
+            onSubmit(event)
+          }}
+          className="grid gap-4"
+        >
           <DialogHeader>
             <DialogTitle>{form.stepId ? "Edit Step" : "Register Step"}</DialogTitle>
             <DialogDescription className="sr-only">
@@ -144,28 +230,117 @@ export function StepRegistrationDialog({
               </div>
             )}
             <div className="grid gap-2">
-              <Label>Message</Label>
-              <Select
-                value={form.messageId}
-                onValueChange={(value) =>
-                  setForm((current) => ({
-                    ...current,
-                    messageId: value,
-                    messageFilterId: "__none__",
-                  }))
-                }
-              >
-                <SelectTrigger className="bg-background">
-                  <SelectValue placeholder="Select message" />
-                </SelectTrigger>
-                <SelectContent>
-                  {snapshot.messages.map((message) => (
-                    <SelectItem key={message.id} value={message.id}>
-                      {message.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label htmlFor="plugin-step-message">Message</Label>
+              <div className="relative">
+                <Input
+                  id="plugin-step-message"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={messageOptionsOpen}
+                  aria-controls="plugin-step-message-options"
+                  aria-activedescendant={
+                    messageOptionsOpen && filteredMessages.length > 0
+                      ? `plugin-step-message-option-${activeMessageIndex}`
+                      : undefined
+                  }
+                  value={form.messageText}
+                  placeholder={`Search ${snapshot.messages.length} messages`}
+                  autoComplete="off"
+                  onFocus={() => {
+                    setActiveMessageIndex(0)
+                    setMessageOptionsOpen(true)
+                  }}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    const message = findPluginMessageByName(
+                      snapshot.messages,
+                      value,
+                    )
+
+                    setActiveMessageIndex(0)
+                    setMessageOptionsOpen(true)
+                    setForm((current) => {
+                      if (message && message.id !== current.messageId) {
+                        return {
+                          ...current,
+                          messageText: value,
+                          messageId: message.id,
+                          messageFilterId: "__none__",
+                          filteringAttributes: "",
+                        }
+                      }
+
+                      return {
+                        ...current,
+                        messageText: value,
+                      }
+                    })
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown") {
+                      event.preventDefault()
+                      setMessageOptionsOpen(true)
+                      moveActiveMessage(activeMessageIndex + 1)
+                    } else if (event.key === "ArrowUp") {
+                      event.preventDefault()
+                      setMessageOptionsOpen(true)
+                      moveActiveMessage(activeMessageIndex - 1)
+                    } else if (
+                      event.key === "Enter" &&
+                      messageOptionsOpen &&
+                      filteredMessages[activeMessageIndex]
+                    ) {
+                      event.preventDefault()
+                      selectMessage(filteredMessages[activeMessageIndex])
+                    } else if (event.key === "Escape") {
+                      setMessageOptionsOpen(false)
+                    }
+                  }}
+                  onBlur={() => {
+                    setMessageOptionsOpen(false)
+                    if (!matchedMessage) {
+                      setForm((current) => ({
+                        ...current,
+                        messageText: selectedMessage?.name ?? "",
+                      }))
+                    }
+                  }}
+                />
+                {messageOptionsOpen && (
+                  <div
+                    id="plugin-step-message-options"
+                    role="listbox"
+                    className="absolute top-full left-0 z-[60] mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg shadow-black/10"
+                  >
+                    {filteredMessages.length === 0 ? (
+                      <p className="px-2 py-3 text-center text-xs text-muted-foreground">
+                        No messages match your search.
+                      </p>
+                    ) : (
+                      filteredMessages.map((message, index) => (
+                        <button
+                          key={message.id}
+                          id={`plugin-step-message-option-${index}`}
+                          type="button"
+                          role="option"
+                          aria-selected={message.id === form.messageId}
+                          className={cn(
+                            "flex w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted",
+                            index === activeMessageIndex && "bg-muted",
+                            message.id === form.messageId &&
+                              "font-medium text-primary",
+                          )}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onMouseEnter={() => setActiveMessageIndex(index)}
+                          onClick={() => selectMessage(message)}
+                        >
+                          {message.name}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="grid gap-2">
               <Label>Entity</Label>
@@ -175,6 +350,10 @@ export function StepRegistrationDialog({
                   setForm((current) => ({
                     ...current,
                     messageFilterId: value,
+                    filteringAttributes:
+                      value === current.messageFilterId
+                        ? current.filteringAttributes
+                        : "",
                   }))
                 }
               >
@@ -272,16 +451,30 @@ export function StepRegistrationDialog({
             </div>
             <div className="grid gap-2 sm:col-span-2">
               <Label htmlFor="plugin-step-filtering">Filtering Attributes</Label>
-              <Input
-                id="plugin-step-filtering"
-                value={form.filteringAttributes}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    filteringAttributes: event.target.value,
-                  }))
-                }
-              />
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                <Input
+                  id="plugin-step-filtering"
+                  value={form.filteringAttributes}
+                  readOnly
+                  placeholder="All attributes"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!filteringAttributeSupport.supported}
+                  onClick={() => setFilteringAttributesOpen(true)}
+                >
+                  <ListFilter className="size-4" />
+                  Select attributes
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {filteringAttributeSupport.supported
+                  ? form.filteringAttributes
+                    ? `${parseFilteringAttributes(form.filteringAttributes).length} attributes selected.`
+                    : "No attributes selected; the step will run for every update."
+                  : filteringAttributeSupport.message}
+              </p>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="plugin-step-config">Unsecure Configuration</Label>
@@ -314,12 +507,24 @@ export function StepRegistrationDialog({
           </div>
 
           <DialogFooter>
-            <Button type="submit" disabled={saving}>
+            <Button type="submit" disabled={saving || !matchedMessage}>
               Save Step
             </Button>
           </DialogFooter>
         </form>
-      </DialogContent>
-    </Dialog>
+        </DialogContent>
+      </Dialog>
+      {filteringAttributesOpen && filteringAttributeSupport.supported ? (
+        <FilteringAttributesDialog
+          environment={environment}
+          entityLogicalName={filteringAttributeSupport.entityLogicalName}
+          initialValue={form.filteringAttributes}
+          onOpenChange={setFilteringAttributesOpen}
+          onApply={(filteringAttributes) =>
+            setForm((current) => ({ ...current, filteringAttributes }))
+          }
+        />
+      ) : null}
+    </>
   )
 }

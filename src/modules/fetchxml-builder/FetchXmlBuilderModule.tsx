@@ -4,10 +4,12 @@ import Editor from "@monaco-editor/react"
 import {
   Code2,
   Copy,
+  Download,
   Loader2,
   Play,
   Plus,
   Search,
+  Table2,
   Trash2,
 } from "lucide-react"
 
@@ -62,13 +64,16 @@ import {
   type RelatedFilterNode,
 } from "@/modules/fetchxml-builder/designer-domain"
 import { buildDesignerFetchXml } from "@/modules/fetchxml-builder/designer-xml"
+import { buildFetchXmlCsv } from "@/modules/fetchxml-builder/result-export"
+import { valueControlForAttribute } from "@/modules/fetchxml-builder/value-input"
 import { useWorkspaceStore } from "@/store/workspace-store"
 
 type FetchXmlBuilderModuleProps = {
   window: ToolWindow
 }
 
-type DesignerTab = "designer" | "fetchxml"
+type BuilderTab = "designer" | "fetchxml" | "results"
+type QuerySourceTab = Exclude<BuilderTab, "results">
 
 const selectClassName =
   "h-8 min-w-0 border border-input bg-background px-2 text-xs outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
@@ -220,14 +225,16 @@ function ConditionRow({
   )
   const operators = operatorsForAttribute(attribute)
   const operator = operatorByValue(condition.operator, attribute)
+  const valueControl = valueControlForAttribute(attribute, operator)
 
   return (
-    <div className="grid min-w-[780px] grid-cols-[28px_minmax(180px,1fr)_180px_minmax(180px,1fr)_32px] items-center gap-2 bg-background p-2">
+    <div className="grid w-full min-w-0 grid-cols-[28px_minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1fr)_32px] items-center gap-2 bg-background p-2">
       <div className="flex size-7 items-center justify-center">
         <input type="checkbox" aria-label="Select condition" />
       </div>
       <select
         className={selectClassName}
+        aria-label="Field"
         value={condition.attribute ?? ""}
         onChange={(event) => {
           const nextAttribute = attributes.find(
@@ -250,6 +257,7 @@ function ConditionRow({
       </select>
       <select
         className={selectClassName}
+        aria-label="Operator"
         value={operator.value}
         onChange={(event) =>
           onChange({ operator: event.target.value, value: "" })
@@ -262,14 +270,15 @@ function ConditionRow({
         ))}
       </select>
       {operator.requiresValue ? (
-        operator.valueMode === "option" && attribute?.optionValues?.length ? (
+        valueControl.kind === "select" ? (
           <select
             className={selectClassName}
+            aria-label="Value"
             value={condition.value}
             onChange={(event) => onChange({ value: event.target.value })}
           >
             <option value="">Value</option>
-            {attribute.optionValues.map((option) => (
+            {valueControl.options.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -278,9 +287,13 @@ function ConditionRow({
         ) : (
           <Input
             className="h-8 text-xs"
+            aria-label="Value"
+            type={valueControl.type}
+            step={valueControl.step}
+            min={valueControl.min}
             value={condition.value}
             onChange={(event) => onChange({ value: event.target.value })}
-            placeholder="Value"
+            placeholder={valueControl.placeholder}
           />
         )
       ) : (
@@ -336,11 +349,11 @@ function FilterGroupEditor({
   return (
     <section
       className={cn(
-        "min-w-[860px] rounded-lg border border-border pl-4",
-        depth > 0 && "bg-muted/40 p-3",
+        "w-full min-w-0 rounded-lg border border-border p-4",
+        depth > 0 && "bg-muted/40",
       )}
     >
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-2 flex items-center gap-2">
         <select
           className={cn(selectClassName, "w-24 font-medium uppercase")}
           value={group.conjunction}
@@ -354,13 +367,13 @@ function FilterGroupEditor({
           <option value="and">AND</option>
           <option value="or">OR</option>
         </select>
-        <div className="grid grid-cols-[minmax(180px,1fr)_180px_minmax(180px,1fr)] gap-2 px-2 text-xs font-medium text-muted-foreground">
+        <div className="grid min-w-0 flex-1 grid-cols-[minmax(0,1.4fr)_minmax(0,0.9fr)_minmax(0,1fr)] gap-2 px-2 text-xs font-medium text-muted-foreground">
           <span>Field</span>
           <span>Operator</span>
           <span>Value</span>
         </div>
       </div>
-      <div className="grid gap-3">
+      <div className="grid gap-2">
         {group.children.map((child) => {
           if (child.type === "condition") {
             return (
@@ -420,7 +433,7 @@ function FilterGroupEditor({
           )
         })}
       </div>
-      <div className="mt-3 flex gap-2">
+      <div className="mt-2 flex flex-wrap gap-2">
         <Button
           type="button"
           variant="outline"
@@ -499,8 +512,8 @@ function RelatedBlockEditor({
   )
 
   return (
-    <section className="min-w-[860px] bg-muted/50 p-3">
-      <div className="mb-3 grid grid-cols-[28px_minmax(220px,1fr)_180px_32px] items-end gap-2">
+    <section className="w-full min-w-0 bg-muted/50 p-3">
+      <div className="mb-3 grid grid-cols-[28px_minmax(0,1fr)_minmax(0,0.6fr)_32px] items-end gap-2">
         <div className="flex size-7 items-center justify-center">
           <input type="checkbox" aria-label="Select related table" />
         </div>
@@ -598,22 +611,38 @@ function ResultTable({
 }) {
   if (!result) {
     return (
-      <div className="flex h-full items-center justify-center border bg-background text-xs text-muted-foreground">
-        Execute a query to view results.
+      <div className="flex h-full items-center justify-center rounded-xl border border-border bg-muted/30 p-6 text-center">
+        <div>
+          <div className="mx-auto flex size-11 items-center justify-center rounded-xl border border-border bg-background">
+            <Table2 className="size-5 text-muted-foreground" />
+          </div>
+          <h3 className="mt-3 text-sm font-semibold">No results yet</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Execute a query to view and export its rows.
+          </p>
+        </div>
       </div>
     )
   }
 
   if (result.rows.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center border bg-background text-xs text-muted-foreground">
-        No rows returned.
+      <div className="flex h-full items-center justify-center rounded-xl border border-border bg-muted/30 p-6 text-center">
+        <div>
+          <div className="mx-auto flex size-11 items-center justify-center rounded-xl border border-border bg-background">
+            <Table2 className="size-5 text-muted-foreground" />
+          </div>
+          <h3 className="mt-3 text-sm font-semibold">No rows returned</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Adjust the query filters or row limit, then execute it again.
+          </p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="h-full overflow-auto border bg-background">
+    <div className="h-full overflow-auto rounded-lg border border-border bg-background">
       <Table>
         <TableHeader>
           <TableRow>
@@ -647,7 +676,7 @@ export function FetchXmlBuilderModule({
     config,
     toolWindow.environmentId ?? config.currentEnvironmentId,
   )
-  const [activeTab, setActiveTab] = useState<DesignerTab>("designer")
+  const [activeTab, setActiveTab] = useState<BuilderTab>("designer")
   const [selectedBaseEntityName, setSelectedBaseEntityName] = useState("")
   const [relatedMetadataByEntity, setRelatedMetadataByEntity] = useState(
     () => new Map<string, FetchXmlEntityMetadata>(),
@@ -809,7 +838,9 @@ export function FetchXmlBuilderModule({
     setRootGroup((current) => removeNode(current, nodeId))
   }
 
-  async function runQuery(mode: DesignerTab = activeTab) {
+  async function runQuery(
+    mode: QuerySourceTab = activeTab === "fetchxml" ? "fetchxml" : "designer",
+  ) {
     if (!environment) {
       setExecutionError("Select an environment before executing FetchXML.")
       return
@@ -829,10 +860,12 @@ export function FetchXmlBuilderModule({
       const nextResult = await executeFetchXml(environment, xml)
       setResult(nextResult)
       setFetchXml(xml)
+      setActiveTab("results")
       setLastMessage(`Returned ${nextResult.rows.length} row(s)`)
     } catch (error) {
       const message = formatErrorMessage(error, "FetchXML execution failed")
       setExecutionError(message)
+      setActiveTab("results")
       setLastMessage(message)
     } finally {
       setExecuting(false)
@@ -846,6 +879,27 @@ export function FetchXmlBuilderModule({
 
     await navigator.clipboard.writeText(text)
     setLastMessage("Copied to clipboard")
+  }
+
+  function exportCsv() {
+    if (!result) {
+      return
+    }
+
+    const csv = buildFetchXmlCsv(result, columnLabel)
+    const blob = new Blob([`\uFEFF${csv}`], {
+      type: "text/csv;charset=utf-8",
+    })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+
+    link.href = url
+    link.download = `${baseEntityName || "fetchxml-results"}.csv`
+    document.body.append(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    setLastMessage(`Exported ${result.rows.length} row(s) as CSV`)
   }
 
   if (!environment) {
@@ -863,8 +917,8 @@ export function FetchXmlBuilderModule({
   }
 
   return (
-    <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_260px] border-l bg-background">
-      <header className="flex min-h-14 items-center justify-between gap-3 border-b px-4">
+    <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] border-l bg-background">
+      <header className="flex min-h-14 items-center justify-between gap-3 border-b px-4 py-2">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold">FetchXML Builder</h2>
           <p className="truncate text-xs text-muted-foreground">
@@ -910,13 +964,16 @@ export function FetchXmlBuilderModule({
 
       <Tabs
         value={activeTab}
-        onValueChange={(value) => setActiveTab(value as DesignerTab)}
+        onValueChange={(value) => setActiveTab(value as BuilderTab)}
         className="min-h-0 gap-0"
       >
         <div className="flex h-10 items-center justify-between border-b px-4">
           <TabsList variant="line">
             <TabsTrigger value="designer">Designer</TabsTrigger>
             <TabsTrigger value="fetchxml">FetchXML</TabsTrigger>
+            <TabsTrigger value="results">
+              Results{result ? ` (${result.rows.length})` : ""}
+            </TabsTrigger>
           </TabsList>
           {manualXmlEdited && (
             <Badge variant="outline" className="text-[11px]">
@@ -926,7 +983,7 @@ export function FetchXmlBuilderModule({
         </div>
 
         <TabsContent value="designer" className="min-h-0 overflow-hidden">
-          <div className="grid h-full min-h-0 grid-cols-[320px_minmax(0,1fr)]">
+          <div className="grid h-full min-h-0 grid-cols-[minmax(260px,320px)_minmax(0,1fr)]">
             <ColumnSelector
               metadata={baseMetadata}
               selectedColumns={selectedColumns}
@@ -936,7 +993,7 @@ export function FetchXmlBuilderModule({
               }}
             />
             <ScrollArea className="min-h-0">
-              <div className="min-w-[920px] p-4">
+              <div className="w-full min-w-0 p-4">
                 {baseMetadataQuery.isLoading ? (
                   <div className="flex h-40 items-center justify-center gap-2 text-xs text-muted-foreground">
                     <Loader2 className="size-4 animate-spin" />
@@ -1023,60 +1080,78 @@ export function FetchXmlBuilderModule({
             />
           </div>
         </TabsContent>
-      </Tabs>
 
-      <footer className="grid min-h-0 grid-cols-[minmax(0,1.4fr)_minmax(360px,0.8fr)] gap-3 border-t bg-muted/30 p-3">
-        <ResultTable result={result} columnLabel={columnLabel} />
-        <section className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <h3 className="text-xs font-medium">Exports</h3>
-              {selectedEntity && (
-                <p className="text-[11px] text-muted-foreground">
-                  {displayEntityName(selectedEntity)}
-                </p>
-              )}
+        <TabsContent value="results" className="min-h-0">
+          <div className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto]">
+            <div className="flex items-center justify-between gap-3 border-b px-4 py-2">
+              <div className="min-w-0">
+                <h3 className="text-xs font-medium">
+                  {result
+                    ? `${result.rows.length} row${result.rows.length === 1 ? "" : "s"} returned`
+                    : "Query results"}
+                </h3>
+                {selectedEntity && (
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {displayEntityName(selectedEntity)}
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={exportCsv}
+                  disabled={!result}
+                >
+                  <Download />
+                  CSV
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void copyText(visibleFetchXml)}
+                >
+                  <Copy />
+                  FetchXML
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void copyText(result?.webApiUrl)}
+                  disabled={!result?.webApiUrl}
+                >
+                  <Copy />
+                  Web API
+                </Button>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void copyText(visibleFetchXml)}
-              >
-                <Copy />
-                FetchXML
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void copyText(result?.webApiUrl)}
-                disabled={!result?.webApiUrl}
-              >
-                <Copy />
-                Web API
-              </Button>
+            {executionError && (
+              <div className="m-3 mb-0 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                {executionError}
+              </div>
+            )}
+            <div className="min-h-0 p-3">
+              <ResultTable result={result} columnLabel={columnLabel} />
             </div>
+            <section className="border-t bg-muted/30 px-4 py-3">
+              <div>
+                <Label className="text-[11px] text-muted-foreground">
+                  Web API URL
+                </Label>
+                <textarea
+                  className="mt-1 h-12 w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 font-mono text-[11px] outline-none"
+                  readOnly
+                  value={result?.webApiUrl ?? ""}
+                  placeholder="Execute a query to generate the Web API fetchXml URL."
+                />
+              </div>
+            </section>
           </div>
-          {executionError && (
-            <div className="border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {executionError}
-            </div>
-          )}
-          <div className="min-h-0 border bg-background p-2">
-            <Label className="text-[11px] text-muted-foreground">
-              Web API URL
-            </Label>
-            <textarea
-              className="mt-1 h-[calc(100%-1.25rem)] w-full resize-none bg-transparent font-mono text-[11px] outline-none"
-              readOnly
-              value={result?.webApiUrl ?? ""}
-              placeholder="Execute a query to generate the Web API fetchXml URL."
-            />
-          </div>
-        </section>
-      </footer>
+        </TabsContent>
+      </Tabs>
     </section>
   )
 }

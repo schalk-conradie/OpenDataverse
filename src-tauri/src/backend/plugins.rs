@@ -4,15 +4,17 @@ mod read_model;
 use self::{
     assembly_inspection::{inspect_plugin_assembly_bytes, PluginAssemblyInspection},
     read_model::{
-        plugin_assembly_from_value, plugin_endpoint_from_value, plugin_message_filter_from_value,
+        plugin_assembly_from_value, plugin_endpoint_from_value,
+        plugin_filtering_attribute_from_value, plugin_message_filter_from_value,
         plugin_message_from_value, plugin_options_deployment, plugin_options_endpoint_auth_type,
         plugin_options_endpoint_contract, plugin_options_image_type, plugin_options_isolation,
         plugin_options_mode, plugin_options_source_type, plugin_options_stage,
         plugin_package_from_value, plugin_step_from_value, plugin_step_image_from_value,
         plugin_type_from_value, plugin_user_from_value, reject_read_only_component,
-        PluginAssemblySummary, PluginMessageFilterSummary, PluginMessageSummary,
-        PluginPackageSummary, PluginRegistrationSnapshot, PluginServiceEndpointSummary,
-        PluginStepImageSummary, PluginStepSummary, PluginSystemUserSummary, PluginTypeSummary,
+        PluginAssemblySummary, PluginFilteringAttributeSummary, PluginMessageFilterSummary,
+        PluginMessageSummary, PluginPackageSummary, PluginRegistrationSnapshot,
+        PluginServiceEndpointSummary, PluginStepImageSummary, PluginStepSummary,
+        PluginSystemUserSummary, PluginTypeSummary,
     },
 };
 use super::solutions::{get_solution_component_dependencies, SolutionDependencyReport};
@@ -61,6 +63,7 @@ pub(super) struct UpdatePluginAssemblyInput {
     source_type: i32,
     #[serde(default)]
     description: Option<String>,
+    type_names: Vec<String>,
     #[serde(default)]
     solution_unique_name: Option<String>,
 }
@@ -269,17 +272,60 @@ pub(super) fn sanitize_optional_string(value: Option<String>) -> Option<String> 
         .filter(|value| !value.is_empty())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct PluginTypeRegistration {
+    type_name: String,
+    is_workflow_activity: bool,
+}
+
+fn selected_plugin_type_registrations(
+    inspection: &PluginAssemblyInspection,
+    selected_type_names: &[String],
+) -> Vec<PluginTypeRegistration> {
+    plugin_type_registrations_from_discovered(
+        inspection.discovered_types.iter().map(|item| {
+            (
+                item.full_name.as_str(),
+                item.kind.as_str(),
+                item.is_abstract,
+            )
+        }),
+        selected_type_names,
+    )
+}
+
+fn plugin_type_registrations_from_discovered<'a>(
+    discovered_types: impl IntoIterator<Item = (&'a str, &'a str, bool)>,
+    selected_type_names: &[String],
+) -> Vec<PluginTypeRegistration> {
+    let selected_type_names = selected_type_names
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+
+    discovered_types
+        .into_iter()
+        .filter(|(full_name, kind, is_abstract)| {
+            *kind != "unknown" && !is_abstract && selected_type_names.contains(full_name)
+        })
+        .map(|(full_name, kind, _)| PluginTypeRegistration {
+            type_name: full_name.to_string(),
+            is_workflow_activity: kind == "workflow",
+        })
+        .collect()
+}
+
 pub(super) async fn create_plugin_type_records(
     app: &AppHandle,
     environment: &DataverseEnvironment,
     assembly_id: &str,
-    type_names: &[String],
+    registrations: &[PluginTypeRegistration],
     solution_unique_name: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let mut ids = Vec::new();
 
-    for type_name in type_names {
-        let type_name = validate_plugin_type_name(type_name)?;
+    for registration in registrations {
+        let type_name = validate_plugin_type_name(&registration.type_name)?;
         let friendly_name = type_name
             .rsplit('.')
             .next()
@@ -290,7 +336,7 @@ pub(super) async fn create_plugin_type_records(
           "name": type_name,
           "typename": type_name,
           "friendlyname": friendly_name,
-          "isworkflowactivity": false,
+          "isworkflowactivity": registration.is_workflow_activity,
           "pluginassemblyid@odata.bind": format!("/pluginassemblies({assembly_id})")
         });
         let (body, entity_id) = dataverse_post_json_with_headers(
@@ -313,6 +359,31 @@ pub(super) async fn create_plugin_type_records(
     }
 
     Ok(ids)
+}
+
+async fn existing_plugin_type_names(
+    app: &AppHandle,
+    environment: &DataverseEnvironment,
+    assembly_id: &str,
+) -> Result<HashSet<String>, String> {
+    let values = dataverse_get_collection_values(
+        app,
+        environment,
+        "/plugintypes",
+        vec![
+            ("$select".to_string(), "typename".to_string()),
+            (
+                "$filter".to_string(),
+                format!("_pluginassemblyid_value eq {assembly_id}"),
+            ),
+        ],
+    )
+    .await?;
+
+    Ok(values
+        .iter()
+        .filter_map(|value| json_string(value, "typename"))
+        .collect())
 }
 
 #[tauri::command]
@@ -505,26 +576,25 @@ pub(super) async fn list_plugin_messages(
     app: AppHandle,
     environment: DataverseEnvironment,
 ) -> Result<Vec<PluginMessageSummary>, String> {
-    let values = dataverse_get_collection_values(
-        &app,
-        &environment,
-        "/sdkmessages",
-        vec![
-            (
-                "$select".to_string(),
-                "sdkmessageid,name,isprivate".to_string(),
-            ),
-            ("$filter".to_string(), "isprivate eq false".to_string()),
-            ("$orderby".to_string(), "name asc".to_string()),
-            ("$top".to_string(), "300".to_string()),
-        ],
-    )
-    .await?;
+    let values =
+        dataverse_get_collection_values(&app, &environment, "/sdkmessages", plugin_message_query())
+            .await?;
 
     Ok(values
         .iter()
         .filter_map(plugin_message_from_value)
         .collect())
+}
+
+fn plugin_message_query() -> Vec<(String, String)> {
+    vec![
+        (
+            "$select".to_string(),
+            "sdkmessageid,name,isprivate".to_string(),
+        ),
+        ("$filter".to_string(), "isprivate eq false".to_string()),
+        ("$orderby".to_string(), "name asc".to_string()),
+    ]
 }
 
 #[tauri::command]
@@ -557,6 +627,32 @@ pub(super) async fn list_plugin_message_filters(
     Ok(values
         .iter()
         .filter_map(plugin_message_filter_from_value)
+        .collect())
+}
+
+#[tauri::command]
+pub(super) async fn list_plugin_filtering_attributes(
+    app: AppHandle,
+    environment: DataverseEnvironment,
+    entity_logical_name: String,
+) -> Result<Vec<PluginFilteringAttributeSummary>, String> {
+    let entity_logical_name = validate_logical_name(&entity_logical_name)?;
+    let values = dataverse_get_collection_values(
+        &app,
+        &environment,
+        &format!("/EntityDefinitions(LogicalName='{entity_logical_name}')/Attributes"),
+        vec![(
+            "$select".to_string(),
+            "LogicalName,DisplayName,AttributeType,AttributeOf,IsValidForUpdate".to_string(),
+        )],
+    )
+    .await?;
+
+    Ok(values
+        .iter()
+        .filter(|value| json_bool(value, "IsValidForUpdate").unwrap_or(false))
+        .filter(|value| value.get("AttributeOf").map(Value::is_null).unwrap_or(true))
+        .filter_map(plugin_filtering_attribute_from_value)
         .collect())
 }
 
@@ -744,11 +840,12 @@ pub(super) async fn register_plugin_assembly(
     } else {
         input.type_names
     };
+    let registrations = selected_plugin_type_registrations(&inspection, &type_names);
     let created_types = create_plugin_type_records(
         &app,
         &environment,
         &assembly_id,
-        &type_names,
+        &registrations,
         input.solution_unique_name.as_deref(),
     )
     .await?;
@@ -783,6 +880,7 @@ pub(super) async fn update_plugin_assembly(
             input.local_path, error
         )
     })?;
+    let inspection = inspect_plugin_assembly_bytes(&input.local_path, &bytes)?;
     let content = BASE64.encode(&bytes);
     let source_hash = Sha256::digest(&bytes)
         .iter()
@@ -792,6 +890,8 @@ pub(super) async fn update_plugin_assembly(
         .file_name()
         .and_then(|value| value.to_str())
         .unwrap_or("assembly.dll");
+    let existing_type_names =
+        existing_plugin_type_names(&app, &environment, &input.assembly_id).await?;
     let mut payload = serde_json::json!({
       "name": input.name.trim(),
       "version": input.version.trim(),
@@ -816,6 +916,18 @@ pub(super) async fn update_plugin_assembly(
         &payload,
     )
     .await?;
+    let registrations = selected_plugin_type_registrations(&inspection, &input.type_names)
+        .into_iter()
+        .filter(|registration| !existing_type_names.contains(&registration.type_name))
+        .collect::<Vec<_>>();
+    let created_types = create_plugin_type_records(
+        &app,
+        &environment,
+        &input.assembly_id,
+        &registrations,
+        input.solution_unique_name.as_deref(),
+    )
+    .await?;
     add_registration_component_to_solution(
         &app,
         &environment,
@@ -827,7 +939,12 @@ pub(super) async fn update_plugin_assembly(
 
     Ok(PluginWriteResult {
         id: Some(input.assembly_id),
-        message: format!("Updated {}", input.name),
+        message: format!(
+            "Updated {} and registered {} new type{}",
+            input.name,
+            created_types.len(),
+            if created_types.len() == 1 { "" } else { "s" }
+        ),
     })
 }
 
@@ -1505,4 +1622,52 @@ pub(super) async fn export_plugin_registration(
         id: None,
         message: format!("Exported plugin registration to {}", input.local_path),
     })
+}
+
+#[cfg(test)]
+mod type_registration_tests {
+    use super::{
+        plugin_message_query, plugin_type_registrations_from_discovered, PluginTypeRegistration,
+    };
+
+    #[test]
+    fn keeps_selected_plugins_and_workflows_with_their_dataverse_kind() {
+        let selected = vec![
+            "Contoso.Plugins.AccountPlugin".to_string(),
+            "Contoso.Workflows.CalculateScore".to_string(),
+        ];
+        let registrations = plugin_type_registrations_from_discovered(
+            [
+                ("Contoso.Plugins.AccountPlugin", "plugin", false),
+                ("Contoso.Workflows.CalculateScore", "workflow", false),
+                ("Contoso.AbstractPlugin", "plugin", true),
+                ("Contoso.Helper", "unknown", false),
+            ],
+            &selected,
+        );
+
+        assert_eq!(
+            registrations,
+            vec![
+                PluginTypeRegistration {
+                    type_name: "Contoso.Plugins.AccountPlugin".to_string(),
+                    is_workflow_activity: false,
+                },
+                PluginTypeRegistration {
+                    type_name: "Contoso.Workflows.CalculateScore".to_string(),
+                    is_workflow_activity: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn message_query_uses_paging_instead_of_truncating_the_result_set() {
+        let query = plugin_message_query();
+
+        assert!(!query.iter().any(|(key, _)| key == "$top"));
+        assert!(query
+            .iter()
+            .any(|(key, value)| key == "$orderby" && value == "name asc"));
+    }
 }
