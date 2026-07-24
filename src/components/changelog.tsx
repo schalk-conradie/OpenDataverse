@@ -16,14 +16,10 @@ import { changelogEntries, latestChangelogEntry } from "@/core/changelog"
 import { cn } from "@/lib/utils"
 
 type ChangelogContentProps = {
-  appVersion: string
   className?: string
 }
 
-export function ChangelogContent({
-  appVersion,
-  className,
-}: ChangelogContentProps) {
+export function ChangelogContent({ className }: ChangelogContentProps) {
   return (
     <div
       className={cn(
@@ -33,7 +29,7 @@ export function ChangelogContent({
     >
       <div className="flex min-h-12 items-center justify-between gap-4 rounded-lg border bg-background px-3">
         <div className="min-w-0">
-          <div className="text-sm font-medium">OpenDataverse {appVersion}</div>
+          <div className="text-sm font-medium">OpenDataverse</div>
           <div className="truncate text-xs text-muted-foreground">
             {appNightlyLabel}
           </div>
@@ -80,13 +76,11 @@ export function ChangelogContent({
 }
 
 type ChangelogDialogProps = {
-  appVersion: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
 export function ChangelogDialog({
-  appVersion,
   open,
   onOpenChange,
 }: ChangelogDialogProps) {
@@ -103,7 +97,7 @@ export function ChangelogDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <ChangelogContent appVersion={appVersion} />
+        <ChangelogContent />
 
         <DialogFooter>
           <Button type="button" onClick={() => onOpenChange(false)}>

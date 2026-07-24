@@ -24,6 +24,8 @@ export const changelogEntries: ChangelogEntry[] = [
       "Changed plug-in step message selection to a searchable autocomplete and removed the 300-message query cap so standard messages such as Retrieve and RetrieveMultiple remain available.",
       "Replaced the native plug-in message suggestion popup with an anchored in-app list that stays aligned beneath the Message field.",
       "Added an XrmToolBox-style filtering attribute picker for supported plug-in step Message/Entity combinations, with explicit guidance when filtering attributes are unavailable.",
+      "Changed Form Logic Copilot to require a safe global library declaration and generate idempotent field OnChange registration through the single manually registered form OnLoad handler.",
+      "Simplified the changelog header and kept the latest changelog version in its badge.",
     ],
   },
   {

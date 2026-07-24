@@ -5,7 +5,6 @@ import {
   type SetStateAction,
 } from "react"
 
-import { appVersion } from "@/core/build-info"
 import {
   getChangelogBuildId,
   markChangelogBuildSeen,
@@ -15,14 +14,12 @@ import { getRunningAppVersion } from "@/core/desktop/app-version"
 import { useWorkspaceStore } from "@/store/workspace-store"
 
 type AppStartupState = {
-  runningAppVersion: string
   changelogOpen: boolean
   setChangelogOpen: Dispatch<SetStateAction<boolean>>
 }
 
 export function useAppStartup(): AppStartupState {
   const hydrate = useWorkspaceStore((state) => state.hydrate)
-  const [runningAppVersion, setRunningAppVersion] = useState(appVersion)
   const [changelogOpen, setChangelogOpen] = useState(false)
 
   useEffect(() => {
@@ -38,8 +35,6 @@ export function useAppStartup(): AppStartupState {
         return
       }
 
-      setRunningAppVersion(version)
-
       const buildId = getChangelogBuildId(version)
       if (shouldShowChangelogForBuild(buildId)) {
         markChangelogBuildSeen(buildId)
@@ -54,5 +49,5 @@ export function useAppStartup(): AppStartupState {
     }
   }, [])
 
-  return { runningAppVersion, changelogOpen, setChangelogOpen }
+  return { changelogOpen, setChangelogOpen }
 }

@@ -112,7 +112,7 @@ function App() {
     () => new Set<string>(),
   )
 
-  const { runningAppVersion, changelogOpen, setChangelogOpen } = useAppStartup()
+  const { changelogOpen, setChangelogOpen } = useAppStartup()
   const { availableUpdate, installingUpdate, updateProgress, installUpdate } =
     useAppUpdater()
 
@@ -206,7 +206,6 @@ function App() {
   return (
     <>
       <ChangelogDialog
-        appVersion={runningAppVersion}
         open={changelogOpen}
         onOpenChange={setChangelogOpen}
       />
@@ -484,7 +483,7 @@ function App() {
           </section>
 
           <footer className="border-t border-sidebar-border p-3">
-            <SettingsDialog appVersion={runningAppVersion} />
+            <SettingsDialog />
             {lastMessage && (
               <>
                 <Separator className="my-3" />

@@ -140,8 +140,8 @@ function labelFromElement(element: FormXmlElement, fallback: string): string {
   const labels = directChild(element, "labels")
   const label = labels
     ? Array.from(labels.children).find(
-        (child) => child.tagName.toLowerCase() === "label",
-      )
+      (child) => child.tagName.toLowerCase() === "label",
+    )
     : undefined
 
   return (
@@ -412,7 +412,7 @@ The following context was derived from the selected Dataverse table metadata and
 
 ${JSON.stringify(compactPromptContext(input.context), null, 2)}
 
-Default manual binding note: register ${libraryName}.onLoad on the form OnLoad event unless the request clearly requires a different exposed handler.
+Manual binding contract: register only ${libraryName}.onLoad on the form OnLoad event and pass the execution context as its first parameter. Do not require field OnChange handlers to be registered in the form designer.
 
 Return only a compact JSON object with these string properties:
 - logicalName
@@ -422,7 +422,7 @@ Return only a compact JSON object with these string properties:
 
 Return valid JSON only. Do not include a provider name, explanation, markdown fence, or any text before or after the JSON object.
 
-The source must be production-oriented JavaScript for a Dataverse web resource. Follow YAGNI: implement only the requested behavior, prefer the smallest clear script, and do not add speculative helpers, abstractions, configuration, event handlers, or defensive wrappers. Use normal Dataverse client API calls such as executionContext.getFormContext() directly. Do not wrap Dataverse APIs in typeof function checks. Use simple null checks only for returned attributes, controls, tabs, or sections before calling methods on them. Declare var ${libraryName} = ${libraryName} || {}, and expose only the handlers needed by the request directly on ${libraryName}. Create ${libraryName}.onLoad by default. Do not create OnChange handlers unless the request explicitly needs logic to run when a field value changes. Avoid markdown.`
+The source must be production-oriented JavaScript for a Dataverse web resource. Follow YAGNI: implement only the requested behavior, prefer the smallest clear script, and do not add speculative helpers, abstractions, configuration, event handlers, or defensive wrappers. Use normal Dataverse client API calls such as executionContext.getFormContext() directly. Do not wrap Dataverse APIs in typeof function checks. Use simple null checks only for returned attributes, controls, tabs, or sections before calling methods on them. The first executable statement must be exactly var ${libraryName} = ${libraryName} || {};. Never use const or let for this global namespace declaration. Expose only the handlers needed by the request directly on ${libraryName}. Create ${libraryName}.onLoad by default. When the requested behavior must run after a field value changes, ${libraryName}.onLoad must register the handler through attribute.addOnChange(handler), first call attribute.removeOnChange(handler) so repeated form loads do not accumulate duplicate registrations, and invoke the handler once during OnLoad to establish the initial form state. If a control notification depends on field values, register its validation handler for every field whose changes can make that notification valid or invalid. Do not rely on manual field OnChange registration in the form designer. Avoid markdown.`
 }
 
 export function buildRevisionPrompt(input: {
@@ -449,7 +449,7 @@ Return only a compact JSON object with:
 
 Return valid JSON only. Do not include a provider name, explanation, markdown fence, or any text before or after the JSON object.
 
-Follow YAGNI: make the smallest clear change, preserve existing structure where possible, use only form context fields/controls/tabs/sections listed above, and do not add speculative helpers, abstractions, configuration, event handlers, or defensive wrappers. Keep executionContext.getFormContext(), do not add typeof function checks around Dataverse APIs, use simple null checks only for returned form objects, keep handlers exposed directly on ${libraryName}, and do not add new event handlers unless the requested change needs them. Avoid markdown.`
+Follow YAGNI: make the smallest clear change, preserve existing structure where possible, use only form context fields/controls/tabs/sections listed above, and do not add speculative helpers, abstractions, configuration, event handlers, or defensive wrappers. Keep executionContext.getFormContext(), do not add typeof function checks around Dataverse APIs, and use simple null checks only for returned form objects. The first executable statement must be exactly var ${libraryName} = ${libraryName} || {};. Never use const or let for this global namespace declaration. Keep handlers exposed directly on ${libraryName}. Only ${libraryName}.onLoad is registered manually in the form designer. When the requested behavior must run after a field value changes, ${libraryName}.onLoad must register the handler through attribute.addOnChange(handler), first call attribute.removeOnChange(handler) so repeated form loads do not accumulate duplicate registrations, and invoke the handler once during OnLoad to establish the initial form state. If a control notification depends on field values, register its validation handler for every field whose changes can make that notification valid or invalid. Do not rely on manual field OnChange registration in the form designer, and do not add new event handlers unless the requested change needs them. Avoid markdown.`
 }
 
 export function bindingSuggestionsForContext(
@@ -460,7 +460,7 @@ export function bindingSuggestionsForContext(
   }
 
   const namespace = libraryObjectName(context)
-  const suggestions: BindingSuggestion[] = [
+  return [
     {
       id: `${context.raw.form.id}-onload`,
       target: `${context.raw.form.name} form`,
@@ -469,23 +469,6 @@ export function bindingSuggestionsForContext(
       status: "ready",
     },
   ]
-  const onchangeOwners = context.events
-    .filter(
-      (event) => event.ownerType === "control" && event.eventName === "onchange",
-    )
-    .map((event) => event.owner)
-
-  for (const owner of Array.from(new Set(onchangeOwners)).slice(0, 4)) {
-    suggestions.push({
-      id: `${context.raw.form.id}-${owner}-onchange`,
-      target: owner,
-      eventLabel: "Field OnChange",
-      handler: `${namespace}.on${pascalToken(owner)}Change`,
-      status: "review",
-    })
-  }
-
-  return suggestions
 }
 
 export function browserPreviewGeneratedDraft(

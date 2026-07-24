@@ -349,6 +349,15 @@ describe("Form Logic domain", () => {
       "Hide the status field for new records.",
     )
     expect(generationPrompt).toContain("AccountLibrary.onLoad")
+    expect(generationPrompt).toContain(
+      "first call attribute.removeOnChange(handler)",
+    )
+    expect(generationPrompt).toContain(
+      "Do not rely on manual field OnChange registration",
+    )
+    expect(generationPrompt).toContain(
+      "first executable statement must be exactly var AccountLibrary = AccountLibrary || {};",
+    )
     expect(generationPrompt).not.toContain("<form>")
     expect(revisionPrompt).toContain(
       "Keep the field visible for administrators.",
@@ -356,9 +365,15 @@ describe("Form Logic domain", () => {
     expect(revisionPrompt).toContain(
       "var AccountLibrary = AccountLibrary || {};",
     )
+    expect(revisionPrompt).toContain(
+      "Only AccountLibrary.onLoad is registered manually",
+    )
+    expect(revisionPrompt).toContain(
+      "first call attribute.removeOnChange(handler)",
+    )
   })
 
-  it("suggests one OnLoad binding and at most four unique OnChange bindings", () => {
+  it("suggests only the manually registered OnLoad binding", () => {
     const context = parseFormXml(formContext, parseTestXml)
     const suggestions = bindingSuggestionsForContext({
       ...context,
@@ -405,34 +420,6 @@ describe("Form Logic domain", () => {
         eventLabel: "Form OnLoad",
         handler: "AccountLibrary.onLoad",
         status: "ready",
-      },
-      {
-        id: "account-main-form-statuscode-onchange",
-        target: "statuscode",
-        eventLabel: "Field OnChange",
-        handler: "AccountLibrary.onStatuscodeChange",
-        status: "review",
-      },
-      {
-        id: "account-main-form-primarycontactid-onchange",
-        target: "primarycontactid",
-        eventLabel: "Field OnChange",
-        handler: "AccountLibrary.onPrimarycontactidChange",
-        status: "review",
-      },
-      {
-        id: "account-main-form-credit-limit-onchange",
-        target: "credit-limit",
-        eventLabel: "Field OnChange",
-        handler: "AccountLibrary.onCreditLimitChange",
-        status: "review",
-      },
-      {
-        id: "account-main-form-address1_city-onchange",
-        target: "address1_city",
-        eventLabel: "Field OnChange",
-        handler: "AccountLibrary.onAddress1CityChange",
-        status: "review",
       },
     ])
   })

@@ -34,7 +34,7 @@ const appearanceModeLabels: Record<AppearanceMode, string> = {
   dark: "Dark",
 }
 
-export function SettingsDialog({ appVersion }: { appVersion: string }) {
+export function SettingsDialog() {
   const appearanceThemeId = useWorkspaceStore(
     (state) => state.userSettings.appearance.theme,
   )
@@ -189,7 +189,7 @@ export function SettingsDialog({ appVersion }: { appVersion: string }) {
             value="changelog"
             className="min-h-0 overflow-hidden pt-3"
           >
-            <ChangelogContent appVersion={appVersion} />
+            <ChangelogContent />
           </TabsContent>
         </Tabs>
       </DialogContent>
