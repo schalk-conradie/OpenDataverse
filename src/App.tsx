@@ -5,7 +5,6 @@ import {
   Loader2,
   Plus,
   RefreshCw,
-  X,
 } from "lucide-react"
 
 import { AppNotificationCenter } from "@/components/app-shell/app-notification-center"
@@ -14,6 +13,7 @@ import {
   ManageEnvironmentsDialog,
 } from "@/components/app-shell/environment-dialogs"
 import { SettingsDialog } from "@/components/app-shell/settings-dialog"
+import { ToolTabStrip } from "@/components/app-shell/tool-tab-strip"
 import { ToolWindowContent } from "@/components/app-shell/tool-window-content"
 import { useAppPresentation } from "@/components/app-shell/use-app-presentation"
 import { useAppStartup } from "@/components/app-shell/use-app-startup"
@@ -497,57 +497,13 @@ function App() {
         </aside>
 
         <section className="flex min-w-0 min-h-0 flex-col bg-muted/30">
-          <div className="flex h-10 items-end overflow-x-auto border-b border-border bg-background px-2">
-            {openWindows.map((window) => {
-              const tool = getToolDefinition(window.toolId)
-              const windowEnvironment = getEnvironmentById(
-                config,
-                window.environmentId ?? config.currentEnvironmentId,
-              )
-              const active = window.id === activeWindowId
-
-              return (
-                <button
-                  key={window.id}
-                  className={cn(
-                    "group/tab relative flex h-9 max-w-64 items-center gap-2 rounded-t-md border border-b-0 px-3 text-left text-xs transition-all",
-                    active
-                      ? "z-10 bg-muted text-foreground"
-                      : "bg-background text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                  )}
-                  type="button"
-                  onClick={() => activateWindow(window.id)}
-                >
-                  {active && (
-                    <span className="absolute inset-x-3 top-0 h-0.5 rounded-full bg-primary" />
-                  )}
-                  <tool.icon className="size-3.5 shrink-0 text-muted-foreground group-hover/tab:text-foreground" />
-                  <span className="min-w-0 flex-1 truncate">
-                    {window.title}
-                    {windowEnvironment ? ` - ${windowEnvironment.name}` : ""}
-                  </span>
-                  <span
-                    className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-muted-foreground/20 hover:text-foreground"
-                    role="button"
-                    tabIndex={0}
-                    aria-label="Close tab"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      closeWindow(window.id)
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.stopPropagation()
-                        closeWindow(window.id)
-                      }
-                    }}
-                  >
-                    <X className="size-3" />
-                  </span>
-                </button>
-              )
-            })}
-          </div>
+          <ToolTabStrip
+            activeWindowId={activeWindowId}
+            config={config}
+            openWindows={openWindows}
+            onActivateWindow={activateWindow}
+            onCloseWindow={closeWindow}
+          />
 
           <div className="min-h-0 flex-1">
             {loadState === "loading" && (

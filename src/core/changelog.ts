@@ -11,6 +11,15 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.67",
+    date: "2026-07-24",
+    title: "Tool tab navigation",
+    changes: [
+      "Replaced the tool tab bar's visible horizontal scrollbar with compact left and right navigation controls while keeping trackpad scrolling available.",
+      "Changed overflowing tool tabs to keep the active tab visible as tabs are opened or selected.",
+    ],
+  },
+  {
     version: "0.1.66",
     date: "2026-07-15",
     title: "Codex GPT-5.6 models",
