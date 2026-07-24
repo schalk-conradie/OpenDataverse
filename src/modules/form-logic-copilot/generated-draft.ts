@@ -7,26 +7,37 @@ export type GeneratedDraft = {
 }
 
 function parseDraftJson(jsonText: string): GeneratedDraft | undefined {
+  let parsed: Partial<GeneratedDraft>
+
   try {
-    const parsed = JSON.parse(jsonText) as Partial<GeneratedDraft>
-
-    if (!parsed.source || typeof parsed.source !== "string") {
-      return undefined
-    }
-
-    return {
-      source: parsed.source,
-      logicalName:
-        typeof parsed.logicalName === "string" ? parsed.logicalName : undefined,
-      displayName:
-        typeof parsed.displayName === "string" ? parsed.displayName : undefined,
-      description:
-        typeof parsed.description === "string" ? parsed.description : undefined,
-      response:
-        typeof parsed.response === "string" ? parsed.response : undefined,
-    }
+    parsed = JSON.parse(jsonText) as Partial<GeneratedDraft>
   } catch {
     return undefined
+  }
+
+  if (typeof parsed.source !== "string") {
+    return undefined
+  }
+
+  if (!parsed.source.trim()) {
+    const explanation = [parsed.description, parsed.response].find(
+      (value) => typeof value === "string" && value.trim(),
+    )
+    throw new Error(
+      explanation?.trim() ?? "AI did not generate JavaScript source.",
+    )
+  }
+
+  return {
+    source: parsed.source,
+    logicalName:
+      typeof parsed.logicalName === "string" ? parsed.logicalName : undefined,
+    displayName:
+      typeof parsed.displayName === "string" ? parsed.displayName : undefined,
+    description:
+      typeof parsed.description === "string" ? parsed.description : undefined,
+    response:
+      typeof parsed.response === "string" ? parsed.response : undefined,
   }
 }
 

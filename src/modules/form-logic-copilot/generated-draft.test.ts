@@ -17,6 +17,21 @@ describe("Form Logic Copilot generated draft parser", () => {
     })
   })
 
+  it("surfaces the provider explanation when a valid draft has no source", () => {
+    expect(() =>
+      parseGeneratedDraft(
+        JSON.stringify({
+          logicalName: "account",
+          description:
+            "Cannot generate the script because Account Number is not present in the selected form metadata.",
+          source: "",
+        }),
+      ),
+    ).toThrow(
+      "Cannot generate the script because Account Number is not present in the selected form metadata.",
+    )
+  })
+
   it("recovers embedded JSON when provider text precedes it", () => {
     expect(
       parseGeneratedDraft(`Codex generated this draft:

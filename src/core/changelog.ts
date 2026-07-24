@@ -11,6 +11,14 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.68",
+    date: "2026-07-24",
+    title: "Form Logic generation errors",
+    changes: [
+      "Changed Form Logic Copilot to show the AI provider's explanation when it cannot generate JavaScript from the selected form metadata instead of reporting the valid response as malformed.",
+    ],
+  },
+  {
     version: "0.1.67",
     date: "2026-07-24",
     title: "Tool tab navigation",
