@@ -29,7 +29,10 @@ import {
   editorLanguageForWebResource,
   editorPathForWebResource,
 } from "./intellisense"
-import { webResourceTypeLabel } from "./resource-presentation"
+import {
+  isWebResourceEditable,
+  webResourceTypeLabel,
+} from "./resource-presentation"
 
 export type ResourceContentSaveAction = "save" | "publish"
 
@@ -86,7 +89,11 @@ export function ResourceViewerDialog({
   const dirty = !isBinaryContent && draftContent !== savedContent
   const isSaving = Boolean(savingAction)
   const canEdit = Boolean(
-    content && !isBinaryContent && !loading && !error && !resource?.isManaged,
+    content &&
+      !isBinaryContent &&
+      !loading &&
+      !error &&
+      isWebResourceEditable(resource),
   )
   const editMode = editResourceId === resourceId && canEdit
   const actionErrorMessage =

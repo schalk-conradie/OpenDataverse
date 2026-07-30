@@ -27,6 +27,8 @@ pub(super) struct WebResourceApiItem {
     version: Option<i64>,
     #[serde(rename = "ismanaged")]
     is_managed: bool,
+    #[serde(rename = "iscustomizable")]
+    is_customizable: Option<Value>,
     #[serde(rename = "modifiedon")]
     modified_on: Option<String>,
     #[serde(rename = "_modifiedby_value")]
@@ -64,6 +66,8 @@ pub(super) struct WebResource {
     resource_type: String,
     version: String,
     is_managed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    is_customizable: Option<bool>,
     solution: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     modified_on: Option<String>,
@@ -412,6 +416,13 @@ fn web_resource_list_filter(include_managed: bool) -> String {
     filters.join(" and ")
 }
 
+fn managed_property_value(value: Option<&Value>) -> Option<bool> {
+    value.and_then(|item| {
+        item.as_bool()
+            .or_else(|| item.get("Value").and_then(Value::as_bool))
+    })
+}
+
 fn web_resource_content_from_api(
     resource: WebResourceContentApiItem,
 ) -> Result<WebResourceContent, String> {
@@ -499,7 +510,7 @@ pub(super) async fn list_web_resources(
         &[
             (
                 "$select",
-                "webresourceid,name,webresourcetype,versionnumber,ismanaged,modifiedon,_modifiedby_value",
+                "webresourceid,name,webresourcetype,versionnumber,ismanaged,iscustomizable,modifiedon,_modifiedby_value",
             ),
             (
                 "$expand",
@@ -526,6 +537,7 @@ pub(super) async fn list_web_resources(
                 .map(|version| version.to_string())
                 .unwrap_or_default(),
             is_managed: resource.is_managed,
+            is_customizable: managed_property_value(resource.is_customizable.as_ref()),
             solution: "Dataverse".to_string(),
             modified_on: resource.modified_on,
             modified_by: user_from_api(resource.modified_by, resource.modified_by_id),
@@ -749,6 +761,25 @@ mod tests {
         let managed_filter = web_resource_list_filter(true);
         assert!(managed_filter.contains("iscustomizable/Value eq true"));
         assert!(!managed_filter.contains("ismanaged eq false"));
+    }
+
+    #[test]
+    fn reads_web_resource_customizability_from_managed_property() {
+        let value = serde_json::json!({
+            "webresourceid": "resource-id",
+            "name": "new_/scripts/main.js",
+            "webresourcetype": 3,
+            "versionnumber": 1,
+            "ismanaged": true,
+            "iscustomizable": { "Value": true }
+        });
+        let resource: WebResourceApiItem =
+            serde_json::from_value(value).expect("web resource response should deserialize");
+
+        assert_eq!(
+            managed_property_value(resource.is_customizable.as_ref()),
+            Some(true)
+        );
     }
 
     #[test]

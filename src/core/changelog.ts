@@ -11,6 +11,15 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.70",
+    date: "2026-07-30",
+    title: "Customizable managed web resources",
+    changes: [
+      "Allowed Webresource Management to edit and publish managed web resources when Dataverse marks their IsCustomizable.Value property as true.",
+      "Kept non-customizable managed resources read-only and carried the native Dataverse customizability flag into the editor state.",
+    ],
+  },
+  {
     version: "0.1.69",
     date: "2026-07-24",
     title: "FetchXML results and CSV export",
