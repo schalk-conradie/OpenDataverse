@@ -917,7 +917,7 @@ export function FetchXmlBuilderModule({
   }
 
   return (
-    <section className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] border-l bg-background">
+    <section className="grid h-full min-h-0 min-w-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden border-l bg-background">
       <header className="flex min-h-14 items-center justify-between gap-3 border-b px-4 py-2">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold">FetchXML Builder</h2>
@@ -965,7 +965,7 @@ export function FetchXmlBuilderModule({
       <Tabs
         value={activeTab}
         onValueChange={(value) => setActiveTab(value as BuilderTab)}
-        className="min-h-0 gap-0"
+        className="min-h-0 min-w-0 gap-0"
       >
         <div className="flex h-10 items-center justify-between border-b px-4">
           <TabsList variant="line">
@@ -1081,8 +1081,13 @@ export function FetchXmlBuilderModule({
           </div>
         </TabsContent>
 
-        <TabsContent value="results" className="min-h-0">
-          <div className="grid h-full min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto]">
+        <TabsContent value="results" className="min-h-0 min-w-0 overflow-hidden">
+          <div className={cn(
+            "grid h-full min-h-0 min-w-0 grid-cols-1",
+            executionError
+              ? "grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+              : "grid-rows-[auto_minmax(0,1fr)_auto]",
+          )}>
             <div className="flex items-center justify-between gap-3 border-b px-4 py-2">
               <div className="min-w-0">
                 <h3 className="text-xs font-medium">
@@ -1133,7 +1138,7 @@ export function FetchXmlBuilderModule({
                 {executionError}
               </div>
             )}
-            <div className="min-h-0 p-3">
+            <div className="min-h-0 min-w-0 p-3">
               <ResultTable result={result} columnLabel={columnLabel} />
             </div>
             <section className="border-t bg-muted/30 px-4 py-3">

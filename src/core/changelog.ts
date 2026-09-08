@@ -11,6 +11,15 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.71",
+    date: "2026-09-08",
+    title: "FetchXML results scrolling",
+    changes: [
+      "Fixed wide FetchXML results so columns scroll inside the table instead of expanding the application window.",
+      "Kept the results table in the flexible content row with the Web API URL below it, and expanded browser-preview results to cover wide tables.",
+    ],
+  },
+  {
     version: "0.1.70",
     date: "2026-07-30",
     title: "Customizable managed web resources",
