@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
+import { z } from "zod"
 
 import { isTauriRuntime } from "@/core/desktop/runtime"
 import {
@@ -17,6 +18,29 @@ import type {
   WebResourceBinding,
   WebResourceContent,
 } from "@/core/dataverse/schemas"
+
+const webResourceBindingStatusSchema = z.object({
+  state: z.enum(["upToDate", "outOfDate", "missingLocal"]),
+  localModifiedOn: z.number().optional(),
+  publishedModifiedOn: z.string().optional(),
+  publishedVersion: z.string().optional(),
+})
+
+export type WebResourceBindingStatus = z.infer<typeof webResourceBindingStatusSchema>
+
+export async function checkWebResourceBinding(
+  environment: DataverseEnvironment,
+  binding: WebResourceBinding,
+): Promise<WebResourceBindingStatus> {
+  if (isTauriRuntime()) {
+    return webResourceBindingStatusSchema.parse(
+      await invoke("check_web_resource_binding", { environment, binding }),
+    )
+  }
+
+  const { mockBindingStatus } = await import("./mock-data")
+  return mockBindingStatus(binding.webResourceId)
+}
 
 function browserWebResourceContent(resource: WebResource): WebResourceContent {
   const lowerName = resource.name.toLowerCase()

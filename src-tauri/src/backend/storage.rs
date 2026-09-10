@@ -23,7 +23,7 @@ pub(super) struct DataverseEnvironment {
 #[serde(rename_all = "camelCase")]
 pub(super) struct WebResourceBinding {
     id: String,
-    environment_id: String,
+    pub(super) environment_id: String,
     pub(super) local_path: String,
     pub(super) web_resource_name: String,
     pub(super) web_resource_id: String,

@@ -8,7 +8,7 @@ use super::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{fs, path::PathBuf};
+use std::{fs, io::Read, path::PathBuf};
 use tauri::AppHandle;
 
 #[derive(Debug, Deserialize)]
@@ -95,6 +95,101 @@ pub(super) struct PublishResult {
     web_resource_id: String,
     web_resource_name: String,
     message: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PublishedWebResourceSnapshot {
+    content: String,
+    modifiedon: Option<String>,
+    versionnumber: Option<i64>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+enum BindingPublishState {
+    UpToDate,
+    OutOfDate,
+    MissingLocal,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct WebResourceBindingStatus {
+    state: BindingPublishState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    local_modified_on: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    published_modified_on: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    published_version: Option<String>,
+}
+
+fn compare_published_binding(
+    local_path: &str,
+    published: PublishedWebResourceSnapshot,
+) -> Result<WebResourceBindingStatus, String> {
+    let published_bytes = BASE64
+        .decode(&published.content)
+        .map_err(|error| format!("Decode published web resource: {error}"))?;
+    let mut status = WebResourceBindingStatus {
+        state: BindingPublishState::MissingLocal,
+        local_modified_on: None,
+        published_modified_on: published.modifiedon,
+        published_version: published.versionnumber.map(|version| version.to_string()),
+    };
+    let mut file = match fs::File::open(local_path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(status),
+        Err(error) => return Err(format!("Read local file {local_path}: {error}")),
+    };
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
+    let modified = metadata.modified().map_err(|error| error.to_string())?;
+    let mut local_bytes = Vec::new();
+    file.read_to_end(&mut local_bytes)
+        .map_err(|error| format!("Read local file {local_path}: {error}"))?;
+    // A build may replace the path while the open file still points at its old contents.
+    let current = fs::metadata(local_path).map_err(|error| error.to_string())?;
+    if current.modified().map_err(|error| error.to_string())? != modified
+        || current.len() != metadata.len()
+    {
+        return Err("Local file changed during comparison. Refresh to check again.".to_string());
+    }
+    status.local_modified_on = Some(
+        modified
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_millis() as i64,
+    );
+    status.state = if local_bytes == published_bytes {
+        BindingPublishState::UpToDate
+    } else {
+        BindingPublishState::OutOfDate
+    };
+    Ok(status)
+}
+
+#[tauri::command]
+pub(super) async fn check_web_resource_binding(
+    app: AppHandle,
+    environment: DataverseEnvironment,
+    binding: WebResourceBinding,
+) -> Result<WebResourceBindingStatus, String> {
+    if binding.environment_id != environment.id {
+        return Err("Binding belongs to a different environment.".to_string());
+    }
+    let resource_id = uuid::Uuid::parse_str(&binding.web_resource_id)
+        .map_err(|error| format!("Invalid web resource ID: {error}"))?;
+    // Normal Retrieve returns the published definition; RetrieveUnpublished would compare drafts.
+    let body = dataverse_get(
+        &app,
+        &environment,
+        &format!("/webresourceset({resource_id})"),
+        &[("$select", "content,modifiedon,versionnumber")],
+    )
+    .await?;
+    let published = serde_json::from_str::<PublishedWebResourceSnapshot>(&body)
+        .map_err(|error| format!("Read published web resource: {error}"))?;
+    compare_published_binding(&binding.local_path, published)
 }
 
 #[derive(Debug, Serialize)]
@@ -739,6 +834,73 @@ pub(super) async fn delete_web_resources(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn published_snapshot(bytes: &[u8]) -> PublishedWebResourceSnapshot {
+        PublishedWebResourceSnapshot {
+            content: BASE64.encode(bytes),
+            modifiedon: Some("2026-09-01T09:00:00Z".to_string()),
+            versionnumber: Some(69863297),
+        }
+    }
+
+    #[test]
+    fn binding_freshness_uses_bytes_instead_of_timestamps() {
+        let path = std::env::temp_dir().join(format!("binding-{}", uuid::Uuid::new_v4()));
+        let local_path = path.to_str().unwrap();
+        fs::write(&path, [0, 255, 10]).unwrap();
+        let before = fs::metadata(&path).unwrap().modified().unwrap();
+        let matching =
+            compare_published_binding(local_path, published_snapshot(&[0, 255, 10])).unwrap();
+        assert_eq!(matching.state, BindingPublishState::UpToDate);
+        assert!(matching.local_modified_on.unwrap() > 0);
+
+        fs::write(&path, [0, 254, 10]).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(before))
+            .unwrap();
+        let changed =
+            compare_published_binding(local_path, published_snapshot(&[0, 255, 10])).unwrap();
+        assert_eq!(changed.state, BindingPublishState::OutOfDate);
+        assert_eq!(changed.local_modified_on, matching.local_modified_on);
+
+        fs::write(&path, []).unwrap();
+        let empty = compare_published_binding(local_path, published_snapshot(&[])).unwrap();
+        assert_eq!(empty.state, BindingPublishState::UpToDate);
+        fs::remove_file(&path).unwrap();
+        let missing = compare_published_binding(local_path, published_snapshot(&[])).unwrap();
+        assert_eq!(
+            serde_json::to_value(missing).unwrap(),
+            serde_json::json!({
+                "state": "missingLocal",
+                "publishedModifiedOn": "2026-09-01T09:00:00Z",
+                "publishedVersion": "69863297"
+            })
+        );
+    }
+
+    #[test]
+    fn binding_freshness_preserves_read_and_content_errors() {
+        let directory = std::env::temp_dir();
+        assert!(compare_published_binding(
+            directory.to_str().unwrap(),
+            published_snapshot(b"content")
+        )
+        .is_err());
+        let mut invalid = published_snapshot(b"content");
+        invalid.content = "not base64!".to_string();
+        assert!(compare_published_binding("missing-local-file", invalid)
+            .unwrap_err()
+            .contains("Decode published"));
+        assert!(
+            serde_json::from_str::<PublishedWebResourceSnapshot>(r#"{"modifiedon":null}"#).is_err()
+        );
+        assert!(
+            serde_json::from_str::<PublishedWebResourceSnapshot>(r#"{"content":null}"#).is_err()
+        );
+    }
 
     #[test]
     fn web_resource_list_filter_includes_raster_images() {

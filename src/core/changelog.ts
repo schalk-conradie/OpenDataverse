@@ -11,6 +11,15 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.72",
+    date: "2026-09-10",
+    title: "Webresource binding freshness",
+    changes: [
+      "Added local and Dataverse modification times and a published-content status to web resource bindings.",
+      "Compare bound file bytes with the published Dataverse resource, refresh after publishing and every 30 seconds while visible, and show missing files and comparison failures explicitly.",
+    ],
+  },
+  {
     version: "0.1.71",
     date: "2026-09-08",
     title: "FetchXML results scrolling",

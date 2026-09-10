@@ -22,13 +22,14 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { TabsContent } from "@/components/ui/tabs"
-import type { WebResourceBinding } from "@/core/dataverse/schemas"
+import type { DataverseEnvironment, WebResourceBinding } from "@/core/dataverse/schemas"
+import { BindingStatusCells } from "./BindingStatusCells"
 import type { BindingTreeFolder, BindingTreeRow } from "./tree-model"
 
 type BindingsTabProps = {
   bindingCount: number
   collapsedFolderIds: ReadonlySet<string>
-  environmentName: string
+  environment: DataverseEnvironment
   publishingIds: ReadonlySet<string>
   rows: readonly BindingTreeRow[]
   onPublish: (binding: WebResourceBinding) => void
@@ -70,7 +71,7 @@ function summarizeLocalPath(folder: BindingTreeFolder): string {
 export function BindingsTab({
   bindingCount,
   collapsedFolderIds,
-  environmentName,
+  environment,
   publishingIds,
   rows,
   onPublish,
@@ -81,14 +82,20 @@ export function BindingsTab({
   return (
     <TabsContent
       value="bindings"
-      className="min-h-0 flex-1 overflow-auto p-3"
+      className="min-h-0 min-w-0 flex-1 overflow-auto p-3"
     >
+      <p className="mb-3 text-xs text-muted-foreground">
+        Compares local files with published content every 30 seconds while visible.
+        Last updated shows file and Dataverse modification times, not the time of publication.
+      </p>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[38%]">Web Resource</TableHead>
+            <TableHead>Web Resource</TableHead>
             <TableHead>Local File</TableHead>
             <TableHead>Version</TableHead>
+            <TableHead>Last updated</TableHead>
+            <TableHead>Published status</TableHead>
             <TableHead>Auto</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -152,6 +159,8 @@ export function BindingsTab({
                     {localPathSummary}
                   </TableCell>
                   <TableCell className="text-muted-foreground">-</TableCell>
+                  <TableCell />
+                  <TableCell />
                   <TableCell>
                     <span className="text-xs text-muted-foreground">
                       {formatAutoPublishCount(
@@ -184,14 +193,19 @@ export function BindingsTab({
                   </div>
                 </TableCell>
                 <TableCell
-                  className="max-w-72 truncate font-mono text-xs"
+                  className="max-w-48 truncate font-mono text-xs"
                   title={binding.localPath}
                 >
                   {binding.localPath}
                 </TableCell>
-                <TableCell>{binding.lastKnownVersion || "-"}</TableCell>
+                <BindingStatusCells
+                  binding={binding}
+                  environment={environment}
+                  publishing={publishingIds.has(binding.id)}
+                />
                 <TableCell>
                   <Switch
+                    aria-label={`Auto-publish ${binding.webResourceName}`}
                     checked={binding.autoPublish}
                     onCheckedChange={(autoPublish) =>
                       onToggleAutoPublish(binding.id, autoPublish)
@@ -229,13 +243,13 @@ export function BindingsTab({
           })}
           {bindingCount === 0 && (
             <TableRow>
-              <TableCell colSpan={5} className="h-40 text-center">
-                <div className="flex flex-col items-center justify-center gap-3 text-muted-foreground">
-                  <div className="flex size-10 items-center justify-center rounded-full border border-border bg-muted/60">
+              <TableCell colSpan={7} className="h-40 text-center">
+                <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-border bg-muted/30 p-6 text-muted-foreground">
+                  <div className="flex size-10 items-center justify-center rounded-xl border border-border bg-background p-3">
                     <FileSymlink className="size-4" />
                   </div>
                   <div className="text-sm">
-                    No local files bound to {environmentName}
+                    No local files bound to {environment.name}
                   </div>
                   <p className="max-w-xs text-xs">
                     Bind a web resource to a local file to enable auto-publish on

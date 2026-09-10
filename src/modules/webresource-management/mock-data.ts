@@ -2,6 +2,21 @@ import type {
   WebResource,
   WebResourceActivity,
 } from "@/core/dataverse/schemas"
+import type { WebResourceBindingStatus } from "./gateway"
+
+export function mockBindingStatus(webResourceId: string): WebResourceBindingStatus {
+  const resource = mockWebResources.find((resource) => resource.id === webResourceId)
+  if (webResourceId.endsWith("004")) {
+    throw new Error("Browser preview: Dataverse could not be reached. Refresh to retry.")
+  }
+  return {
+    state: webResourceId.endsWith("003") ? "missingLocal"
+      : webResourceId.endsWith("001") ? "outOfDate" : "upToDate",
+    publishedModifiedOn: resource?.modifiedOn,
+    publishedVersion: resource?.version,
+    localModifiedOn: webResourceId.endsWith("003") ? undefined : Date.parse("2026-09-10T09:20:00Z"),
+  }
+}
 
 export const mockWebResources: WebResource[] = [
   {

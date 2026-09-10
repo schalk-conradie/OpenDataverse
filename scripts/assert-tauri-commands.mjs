@@ -68,6 +68,13 @@ if (duplicateRegistrations.length > 0) {
 }
 
 const registeredCommandSet = new Set(registeredCommands)
+// The binding freshness command uses the same environment and binding payload as publishing.
+const webResourceBackend = await readFile(
+  path.join(root, "src-tauri/src/backend/web_resources.rs"), "utf8",
+)
+if (!/async fn check_web_resource_binding\(\s*app: AppHandle,\s*environment: DataverseEnvironment,\s*binding: WebResourceBinding,\s*\) -> Result<WebResourceBindingStatus, String>/.test(webResourceBackend)) {
+  throw new Error("Web resource binding freshness command payload contract changed")
+}
 const missingHandlers = [...invokedCommands]
   .filter((command) => !registeredCommandSet.has(command))
   .sort()

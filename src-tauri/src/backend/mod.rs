@@ -43,6 +43,7 @@ pub(crate) fn run() {
             web_resources::delete_web_resources,
             web_resources::save_web_resource_content,
             web_resources::publish_web_resource,
+            web_resources::check_web_resource_binding,
             solutions::list_solutions,
             solutions::list_solution_components,
             solutions::get_solution_component_dependencies,

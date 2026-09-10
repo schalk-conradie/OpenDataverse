@@ -656,10 +656,18 @@ export function WebResourceManagementModule({
         `${trigger === "auto" ? "Auto-publish failed: " : ""}${formatErrorMessage(error, "Publish failed")}`,
       )
     } finally {
+      // Discard comparisons started before this publish, including an initial pending read.
+      await queryClient.cancelQueries({
+        queryKey: ["webResourceBindingStatus", environment.id, binding.webResourceId],
+      })
       setBindingPublishing(binding.id, false)
+      await queryClient.invalidateQueries({
+        queryKey: ["webResourceBindingStatus", environment.id, binding.webResourceId],
+      })
     }
   }, [
     environment,
+    queryClient,
     refetchActivity,
     refetchResources,
     resources,
@@ -718,7 +726,13 @@ export function WebResourceManagementModule({
       setLastMessage(formatErrorMessage(error, "Could not save web resource"))
       throw error
     } finally {
+      await queryClient.cancelQueries({
+        queryKey: ["webResourceBindingStatus", environment.id, content.id],
+      })
       setSavingResourceAction(undefined)
+      await queryClient.invalidateQueries({
+        queryKey: ["webResourceBindingStatus", environment.id, content.id],
+      })
     }
   }
 
@@ -845,7 +859,7 @@ export function WebResourceManagementModule({
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col border-l border-border bg-background">
+    <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-l border-border bg-background">
       <ResourceViewerDialog
         open={resourceViewerOpen}
         onOpenChange={setResourceViewerOpen}
@@ -956,6 +970,9 @@ export function WebResourceManagementModule({
             aria-label="Refresh"
             onClick={() => {
               void resourceQuery.refetch()
+              void queryClient.invalidateQueries({
+                queryKey: ["webResourceBindingStatus", environment.id],
+              })
               if (resourceViewerOpen && selectedResourceId) {
                 void resourceContentQuery.refetch()
               }
@@ -992,7 +1009,7 @@ export function WebResourceManagementModule({
         </div>
       </header>
 
-      <Tabs defaultValue="resources" className="flex min-h-0 flex-1 flex-col">
+      <Tabs defaultValue="resources" className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
           <TabsList>
             <TabsTrigger value="resources">Resources</TabsTrigger>
@@ -1097,7 +1114,7 @@ export function WebResourceManagementModule({
         <BindingsTab
           bindingCount={bindings.length}
           collapsedFolderIds={collapsedBindingFolderIds}
-          environmentName={environment.name}
+          environment={environment}
           publishingIds={publishingIds}
           rows={bindingTreeRows}
           onPublish={(binding) => {
