@@ -18,6 +18,7 @@ import {
   formatBytes,
   formatDate,
   kindLabel,
+  pluginTypeLabel,
   registryItemKey,
   registryItems,
   registryItemState,
@@ -176,7 +177,7 @@ describe("plug-in registry item view models", () => {
           .map((item) => [item.kind, componentTypeForItem(item)]),
       ),
     ).toEqual({
-      package: 10029,
+      package: 0,
       assembly: 91,
       type: 90,
       step: 92,
@@ -184,6 +185,13 @@ describe("plug-in registry item view models", () => {
       endpoint: 95,
     })
     expect(kindLabel("endpoint")).toBe("Endpoint")
+  })
+
+  it("shows the class name when a package type has a generated GUID label", () => {
+    expect(pluginTypeLabel({
+      ...mockPluginTypes[0],
+      friendlyName: "{99236621-4486-4d57-8a77-de98c3e3f6d0}",
+    })).toBe("AccountPreValidation")
   })
 
   it("derives managed and step states before presenting their labels", () => {

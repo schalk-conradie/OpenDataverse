@@ -11,6 +11,25 @@ const changelogSeenStorageKey = "opendataverse.changelog.last-seen-build"
 
 export const changelogEntries: ChangelogEntry[] = [
   {
+    version: "0.1.74",
+    date: "2026-09-23",
+    title: "Plug-in message picker",
+    changes: [
+      "Limited step messages and entity choices to visible Dataverse events that allow custom processing steps, following the Plug-in Registration Tool eligibility rules.",
+      "Sorted message suggestions alphabetically and placed an exact typed match before related names.",
+    ],
+  },
+  {
+    version: "0.1.73",
+    date: "2026-09-23",
+    title: "Plug-in registration workflow",
+    changes: [
+      "Moved step and image registration onto their parent plug-in type or step, kept registered branches open after saving, kept forms open on write errors, and generated step names from the selected message and entity.",
+      "Added NuGet plug-in package registration, update, and unregister actions with local manifest inspection, publisher-prefix validation, solution-scoped creation, and browser-preview records.",
+      "Used assembly metadata for standalone DLL registration and required signed public plug-in types, Sandbox isolation, and Database storage.",
+    ],
+  },
+  {
     version: "0.1.72",
     date: "2026-09-10",
     title: "Webresource binding freshness",

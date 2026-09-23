@@ -1,6 +1,7 @@
 import type {
   PluginAssemblyInspection,
   PluginAssemblySummary,
+  PluginMessageFilterSummary,
   PluginRegistrationSnapshot,
   PluginServiceEndpointSummary,
   PluginStepImageSummary,
@@ -79,8 +80,8 @@ export function makeAssemblyForm(
     culture: inspection?.culture ?? assembly?.culture ?? "neutral",
     publicKeyToken:
       inspection?.publicKeyToken ?? assembly?.publicKeyToken ?? "null",
-    isolationMode: assembly?.isolationMode ?? 2,
-    sourceType: assembly?.sourceType ?? 0,
+    isolationMode: 2,
+    sourceType: 0,
     description: assembly?.description ?? "",
     solutionUniqueName: "",
   }
@@ -96,11 +97,11 @@ export function makeStepForm(
     pluginTypeId: step?.pluginTypeId ?? snapshot.types[0]?.id ?? "",
     serviceEndpointId:
       step?.serviceEndpointId ?? snapshot.endpoints[0]?.id ?? "",
-    messageId: step?.messageId ?? snapshot.messages[0]?.id ?? "",
+    messageId: step?.messageId ?? "",
     messageText:
       step?.messageName ??
       snapshot.messages.find(
-        (message) => message.id === (step?.messageId ?? snapshot.messages[0]?.id),
+        (message) => message.id === step?.messageId,
       )?.name ??
       "",
     messageFilterId: step?.messageFilterId ?? "__none__",
@@ -118,6 +119,24 @@ export function makeStepForm(
     enabled: step?.stateCode !== 1,
     solutionUniqueName: "",
   }
+}
+
+export function generatedStepName(
+  form: StepForm,
+  snapshot: PluginRegistrationSnapshot,
+  messageFilters: readonly PluginMessageFilterSummary[],
+): string {
+  const handler = form.handlerType === "plugintype"
+    ? snapshot.types.find((type) => type.id === form.pluginTypeId)?.typeName
+    : snapshot.endpoints.find((endpoint) => endpoint.id === form.serviceEndpointId)?.name
+  const message = snapshot.messages.find((item) => item.id === form.messageId)?.name
+  if (!handler || !message) {
+    return ""
+  }
+
+  const entity = messageFilters.find((filter) => filter.id === form.messageFilterId)
+    ?.primaryEntity ?? "any entity"
+  return `${handler}: ${message} of ${entity}`
 }
 
 export function makeImageForm(

@@ -184,7 +184,7 @@ export async function choosePluginAssemblyFile() {
 
 export async function choosePluginPackageFile() {
   if (!isTauriRuntime()) {
-    return "/workspace/bin/Contoso.Plugins.1.0.0.nupkg"
+    return "/workspace/bin/new_PreviewPluginPackage.1.0.0.nupkg"
   }
 
   const selected = await open({
@@ -193,7 +193,7 @@ export async function choosePluginPackageFile() {
     filters: [
       {
         name: "Plugin packages",
-        extensions: ["nupkg", "zip"],
+        extensions: ["nupkg"],
       },
     ],
   })

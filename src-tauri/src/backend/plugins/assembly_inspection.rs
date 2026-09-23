@@ -12,7 +12,7 @@ pub(super) struct PluginDiscoveredType {
     namespace: Option<String>,
     pub(super) kind: String,
     pub(super) is_abstract: bool,
-    is_public: bool,
+    pub(super) is_public: bool,
     implements_i_plugin: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     base_type: Option<String>,
@@ -25,13 +25,13 @@ pub(in crate::backend) struct PluginAssemblyInspection {
     file_name: String,
     size_bytes: u64,
     file_hash: String,
-    assembly_name: String,
-    version: String,
-    culture: String,
-    public_key_token: String,
+    pub(super) assembly_name: String,
+    pub(super) version: String,
+    pub(super) culture: String,
+    pub(super) public_key_token: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     target_framework: Option<String>,
-    strong_name_signed: bool,
+    pub(super) strong_name_signed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     clr_metadata_version: Option<String>,
     pub(super) discovered_types: Vec<PluginDiscoveredType>,
@@ -227,7 +227,7 @@ pub(super) fn inspect_plugin_assembly_bytes(
     let discovered_types = discover_plugin_types(&metadata);
     let registerable_count = discovered_types
         .iter()
-        .filter(|item| item.kind != "unknown" && !item.is_abstract)
+        .filter(|item| item.kind != "unknown" && !item.is_abstract && item.is_public)
         .count();
     let mut warnings = Vec::new();
     let public_key_token = assembly

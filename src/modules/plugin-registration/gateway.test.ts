@@ -7,7 +7,11 @@ import {
   listPluginStepImages,
   listPluginSteps,
   listPluginTypes,
+  registerPluginPackage,
+  registerPluginStep,
   setPluginComponentState,
+  unregisterPluginPackage,
+  unregisterPluginStep,
 } from "@/modules/plugin-registration/gateway"
 
 const environment: DataverseEnvironment = {
@@ -68,5 +72,55 @@ describe("plugin-registration browser-preview gateway", () => {
         expect.objectContaining({ logicalName: "revenue" }),
       ]),
     )
+  })
+
+  it("shows registered packages, assemblies, and types in the browser preview", async () => {
+    const registration = await registerPluginPackage(environment, {
+      localPath: "/workspace/bin/new_PreviewPluginPackage.1.0.0.nupkg",
+      solutionUniqueName: "PreviewSolution",
+    })
+    if (!registration.id) throw new Error("Preview package id is missing")
+
+    try {
+      const snapshot = await getPluginRegistrationSnapshot(environment)
+      const assembly = snapshot.assemblies.find(
+        (item) => item.packageId === registration.id,
+      )
+      if (!assembly) throw new Error("Preview package assembly is missing")
+      expect(snapshot.packages.some((item) => item.id === registration.id)).toBe(true)
+      expect(assembly.name).toBe("new_PreviewPluginPackage")
+      expect((await listPluginTypes(environment, assembly.id)).some(
+        (item) => item.packageId === registration.id,
+      )).toBe(true)
+    } finally {
+      await unregisterPluginPackage(environment, registration.id)
+    }
+  })
+
+  it("reads a newly registered step from its selected plug-in type", async () => {
+    const snapshot = await getPluginRegistrationSnapshot(environment)
+    const pluginType = (await listPluginTypes(environment, snapshot.assemblies[0].id))[0]
+    const message = snapshot.messages.find((item) => item.name === "Create")
+    if (!pluginType || !message) throw new Error("Preview registration data is missing")
+    const registration = await registerPluginStep(environment, {
+      handlerType: "plugintype",
+      pluginTypeId: pluginType.id,
+      messageId: message.id,
+      name: `${pluginType.typeName}: Create of account`,
+      stage: 20,
+      mode: 0,
+      rank: 1,
+      supportedDeployment: 0,
+      enabled: true,
+    })
+    if (!registration.id) throw new Error("Preview step id is missing")
+
+    try {
+      expect((await listPluginSteps(environment, { pluginTypeId: pluginType.id }))
+        .some((item) => item.id === registration.id && item.messageName === "Create"))
+        .toBe(true)
+    } finally {
+      await unregisterPluginStep(environment, registration.id)
+    }
   })
 })

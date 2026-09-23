@@ -15,6 +15,8 @@ The existing OpenDataverse architecture keeps Dataverse auth and token refresh i
 
 Build Plugin Registration as a native OpenDataverse tool.
 
+The registration workflow follows Microsoft's Plug-in Registration Tool: register a signed standalone assembly or a publisher-prefixed NuGet plug-in package, then register steps from a plug-in type and images from a step. Package creation uses the selected unmanaged solution's publisher prefix and solution-scoped Web API header. The app still owns these operations without launching PRT.
+
 The app must not launch or require XrmToolBox, Microsoft PRT, `pac`, Visual Studio, Windows, or an installed .NET runtime at app runtime. The Tauri/Rust backend owns:
 
 - local plug-in assembly and package inspection

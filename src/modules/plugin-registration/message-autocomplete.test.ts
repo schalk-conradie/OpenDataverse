@@ -24,4 +24,28 @@ describe("plug-in message autocomplete", () => {
     expect(filterPluginMessages(messages, "")).toEqual(messages)
     expect(filterPluginMessages(messages, "multiple")).toEqual([messages[1]])
   })
+
+  it("sorts all messages alphabetically and puts an exact search match first", () => {
+    const unsorted: PluginMessageSummary[] = [
+      { id: "multiple", name: "UpdateMultiple" },
+      { id: "create", name: "Create" },
+      { id: "internal", name: "_UpdateBatch" },
+      { id: "account", name: "AccountUpdate" },
+      { id: "update", name: "Update" },
+    ]
+
+    expect(filterPluginMessages(unsorted, "").map((message) => message.name)).toEqual([
+      "AccountUpdate",
+      "Create",
+      "Update",
+      "_UpdateBatch",
+      "UpdateMultiple",
+    ])
+    expect(filterPluginMessages(unsorted, "update").map((message) => message.name)).toEqual([
+      "Update",
+      "UpdateMultiple",
+      "AccountUpdate",
+      "_UpdateBatch",
+    ])
+  })
 })

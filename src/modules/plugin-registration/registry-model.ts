@@ -132,7 +132,8 @@ export function componentTypeForItem(item: RegistryItem): number {
     case "endpoint":
       return 95
     case "package":
-      return 10029
+      // Package component types vary by Dataverse environment; Rust resolves the row.
+      return 0
   }
 }
 
@@ -170,12 +171,20 @@ function typeItem(item: PluginTypeSummary): RegistryItem {
   return {
     kind: "type",
     id: item.id,
-    title: item.friendlyName || item.typeName,
+    title: pluginTypeLabel(item),
     subtitle: item.typeName,
     managed: item.isManaged,
     editable: item.editable,
     data: item,
   }
+}
+
+export function pluginTypeLabel(item: PluginTypeSummary): string {
+  const friendlyName = item.friendlyName.trim()
+  if (friendlyName && !/^\{?[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\}?$/i.test(friendlyName)) {
+    return friendlyName
+  }
+  return item.typeName.split(".").at(-1) ?? item.typeName
 }
 
 function stepItem(item: PluginStepSummary): RegistryItem {

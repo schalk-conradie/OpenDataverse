@@ -604,6 +604,28 @@ export type PluginAssemblyInspection = {
   warnings: string[]
 }
 
+export type PluginPackageInspection = {
+  localPath: string
+  fileName: string
+  sizeBytes: number
+  name: string
+  version: string
+  assemblyFiles: string[]
+}
+
+export const registerPluginPackageInputSchema = z.object({
+  localPath: z.string().trim().min(1, "Select a NuGet plug-in package"),
+  solutionUniqueName: z.string().trim().min(1, "Select an unmanaged solution"),
+})
+
+export const updatePluginPackageInputSchema = z.object({
+  packageId: z.string().trim().min(1, "Package is required"),
+  localPath: z.string().trim().min(1, "Select a NuGet plug-in package"),
+})
+
+export type RegisterPluginPackageInput = z.infer<typeof registerPluginPackageInputSchema>
+export type UpdatePluginPackageInput = z.infer<typeof updatePluginPackageInputSchema>
+
 export const registerPluginAssemblyInputSchema = z.object({
   localPath: z.string().trim().min(1, "Select a compiled plug-in assembly"),
   name: z.string().trim().min(1, "Assembly name is required"),

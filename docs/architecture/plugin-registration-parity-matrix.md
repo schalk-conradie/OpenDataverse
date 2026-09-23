@@ -2,7 +2,7 @@
 
 Date: 2026-06-18
 
-Baseline: current XrmToolBox Plugin Registration workflow, excluding Plug-in Profiler/debug replay by project decision.
+Baseline: Microsoft Plug-in Registration Tool workflow, excluding Plug-in Profiler/debug replay by project decision.
 
 ## Commands And Dialogs
 
@@ -24,7 +24,8 @@ Baseline: current XrmToolBox Plugin Registration workflow, excluding Plug-in Pro
 | Managed/system safety | Prevent managed/Microsoft component edits/removes | Shipped | Managed registration rows are excluded from the default working set; conservative editability reasons are still surfaced in the read model and enforced again in Rust before writes. |
 | Managed read-only browse | Inspect managed registrations without edit/update actions | Gap | Can be added later as an explicit read-only mode, separate from the unmanaged registration workflow. |
 | Package browse | Read plug-in packages | Shipped | Package records are listed when present. |
-| Package upload/update | Register/update NuGet plug-in package content | Gap | Needs a safe native package upload path and package artifact validation. |
+| Package upload/update | Register/update NuGet plug-in package content | Shipped | Inspects the NuGet manifest and contained assemblies, requires the selected solution's publisher prefix in the package id, and creates the package in that solution. |
+| Package unregister | Remove a plug-in package after its steps are removed | Shipped | Dataverse rejects removal while dependent steps remain. |
 | Filtering attribute picker | Pick fields from entity metadata | Gap | Current UI accepts comma-separated attributes. |
 | Bulk enable/disable | Enable/disable across assemblies/types/packages/endpoints | Gap | Individual step state is implemented. |
 | Active layers | Detect/remove active unmanaged layers | Gap | Not implemented; needs Dataverse action availability checks and confirmation design. |
@@ -36,7 +37,7 @@ Baseline: current XrmToolBox Plugin Registration workflow, excluding Plug-in Pro
 | --- | --- |
 | `pluginassemblies` | Read, create, update, delete, add to solution. |
 | `plugintypes` | Read, create, delete, add to solution. |
-| `pluginpackages` | Read-only snapshot. |
+| `pluginpackages` | Read, create, update content, delete, and add to an unmanaged solution. |
 | `sdkmessages` | Read public messages. |
 | `sdkmessagefilters` | Read filters with `iscustomprocessingstepallowed`. |
 | `sdkmessageprocessingsteps` | Read, create, update, delete, enable/disable, add to solution. |
@@ -60,4 +61,5 @@ Baseline: current XrmToolBox Plugin Registration workflow, excluding Plug-in Pro
 | Managed/system edit/delete prevention | Shipped |
 | Secure config write-only behavior after save | Shipped |
 | Update steps with all attributes warning | Gap |
-| Native package content validation | Gap |
+| NuGet manifest and library DLL validation | Shipped |
+| NuGet dependency compatibility validation | Gap |

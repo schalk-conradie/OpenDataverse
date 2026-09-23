@@ -13,7 +13,9 @@ Use a disposable unmanaged Dataverse development environment.
 - Open Plugin Registration and confirm assemblies, types, steps, images, messages, filters, endpoints, users, and packages load.
 - Inspect the test DLL and confirm assembly name, version, culture, public key token, target framework, hash, size, and discovered types appear.
 - Register the test assembly and selected type into the unmanaged solution.
+- Register a NuGet plug-in package whose id starts with the selected unmanaged solution's publisher prefix. Confirm its assembly and types appear under the package, then update it with the same package id and version.
 - Create a synchronous Update step for `account` with filtering attributes and unsecure configuration.
+- Confirm the Message picker is alphabetical, puts an exact typed match first, and excludes messages without a visible filter that allows custom steps.
 - Save secure configuration on the step, refresh, and confirm only secure config presence is shown.
 - Add a pre-image for the Update step and confirm attributes persist.
 - Disable and re-enable the step.
@@ -21,6 +23,7 @@ Use a disposable unmanaged Dataverse development environment.
 - Load dependencies for the assembly, plug-in type, step, image, and endpoint.
 - Export the selected registration snapshot to JSON.
 - Delete the image, endpoint step, endpoint, plug-in step, plug-in type, and assembly.
+- Unregister the test plug-in package after removing its steps.
 
 ## Guard Checks
 

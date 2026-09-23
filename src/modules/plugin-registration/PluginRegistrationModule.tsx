@@ -5,13 +5,10 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
-  FileSearch,
-  ImagePlus,
   Loader2,
   PlugZap,
   RefreshCw,
   Search,
-  Server,
 } from "lucide-react"
 
 import {
@@ -19,25 +16,31 @@ import {
   getPluginComponentDependencies,
   getPluginRegistrationSnapshot,
   inspectPluginAssembly,
+  inspectPluginPackage,
   listPluginMessageFilters,
+  listPluginRegistrationSolutions,
   listPluginStepImages,
   listPluginSteps,
   listPluginTypes,
   registerPluginAssembly,
+  registerPluginPackage,
   registerPluginServiceEndpoint,
   registerPluginStep,
   registerPluginStepImage,
   setPluginStepState,
   unregisterPluginAssembly,
+  unregisterPluginPackage,
   unregisterPluginServiceEndpoint,
   unregisterPluginStep,
   unregisterPluginStepImage,
   unregisterPluginType,
   updatePluginAssembly,
+  updatePluginPackage,
 } from "@/modules/plugin-registration/gateway"
 import { formatErrorMessage } from "@/core/errors"
 import {
   choosePluginAssemblyFile,
+  choosePluginPackageFile,
   choosePluginRegistrationExportFile,
 } from "@/core/desktop/file-dialog"
 import {
@@ -45,6 +48,8 @@ import {
   type DataverseEnvironment,
   type PluginAssemblyInspection,
   type PluginAssemblySummary,
+  type PluginPackageInspection,
+  type PluginPackageSummary,
   type PluginDependencyReport,
   type PluginRegistrationSnapshot,
   type PluginServiceEndpointSummary,
@@ -54,6 +59,12 @@ import {
   type ToolWindow,
 } from "@/core/dataverse/schemas"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
@@ -78,6 +89,7 @@ import {
   type RegistryTreeRow,
 } from "./registry-model"
 import {
+  generatedStepName,
   makeAssemblyForm,
   makeEndpointForm,
   makeImageForm,
@@ -88,6 +100,7 @@ import {
   type StepForm,
 } from "./registration-forms"
 import { AssemblyRegistrationDialog } from "./AssemblyRegistrationDialog"
+import { PackageRegistrationDialog } from "./PackageRegistrationDialog"
 import { EndpointRegistrationDialog } from "./EndpointRegistrationDialog"
 import { ImageRegistrationDialog } from "./ImageRegistrationDialog"
 import { PluginRegistrationDetails } from "./PluginRegistrationDetails"
@@ -155,6 +168,11 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
     makeAssemblyForm(),
   )
   const [selectedTypeNames, setSelectedTypeNames] = useState<string[]>([])
+  const [packageOpen, setPackageOpen] = useState(false)
+  const [packageTarget, setPackageTarget] = useState<PluginPackageSummary>()
+  const [packagePath, setPackagePath] = useState("")
+  const [packageInspection, setPackageInspection] = useState<PluginPackageInspection>()
+  const [packageSolution, setPackageSolution] = useState("")
   const [stepOpen, setStepOpen] = useState(false)
   const [stepForm, setStepForm] = useState<StepForm>(() =>
     makeStepForm(emptySnapshot),
@@ -235,6 +253,12 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
   })
   const messageFilters = filtersQuery.data ?? []
 
+  const packageSolutionsQuery = useQuery({
+    queryKey: ["plugin-registration-solutions", environment?.id],
+    enabled: Boolean(environment && packageOpen && !packageTarget),
+    queryFn: () => listPluginRegistrationSolutions(environment as DataverseEnvironment),
+  })
+
   function clearTreeChildren() {
     setExpandedKeys(new Set())
     setLoadingChildKeys(new Set())
@@ -250,19 +274,83 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
     setLastMessage(message)
   }
 
-  const invalidateSnapshot = async () => {
+  const refreshRegistrations = async () => {
     await queryClient.invalidateQueries({
       queryKey: ["plugin-registration-snapshot", environment?.id],
     })
+
+    if (!environment) {
+      return
+    }
+
+    const [assemblies, types, endpoints, images] = await Promise.all([
+      Promise.all(
+        Object.keys(typesByAssembly).map(async (id) =>
+          [id, await listPluginTypes(environment, id)] as const,
+        ),
+      ),
+      Promise.all(
+        Object.keys(stepsByType).map(async (id) =>
+          [id, await listPluginSteps(environment, { pluginTypeId: id })] as const,
+        ),
+      ),
+      Promise.all(
+        Object.keys(stepsByEndpoint).map(async (id) =>
+          [id, await listPluginSteps(environment, { serviceEndpointId: id })] as const,
+        ),
+      ),
+      Promise.all(
+        Object.keys(imagesByStep).map(async (id) =>
+          [id, await listPluginStepImages(environment, id)] as const,
+        ),
+      ),
+    ])
+    setTypesByAssembly(Object.fromEntries(assemblies))
+    setStepsByType(Object.fromEntries(types))
+    setStepsByEndpoint(Object.fromEntries(endpoints))
+    setImagesByStep(Object.fromEntries(images))
   }
 
   const writeMutation = useMutation({
-    mutationFn: async (operation: () => Promise<{ message: string }>) =>
-      operation(),
-    onSuccess: async (result) => {
+    mutationFn: async ({ operation }: {
+      operation: () => Promise<{ id?: string; message: string }>
+      selectKind?: RegistryKind
+      revealParent?: { kind: "type" | "endpoint" | "step"; id: string }
+    }) => operation(),
+    onSuccess: async (result, action) => {
       setLastMessage(result.message)
-      clearTreeChildren()
-      await invalidateSnapshot()
+      if (result.id && action.selectKind) {
+        setSelected({ kind: action.selectKind, id: result.id })
+      }
+      try {
+        await refreshRegistrations()
+        if (result.id && action.selectKind === "assembly" && environment) {
+          const assemblyId = result.id
+          setExpandedKeys((current) => new Set(current).add(`assembly:${assemblyId}`))
+          const pluginTypes = await listPluginTypes(environment, assemblyId)
+          setTypesByAssembly((current) => ({ ...current, [assemblyId]: pluginTypes }))
+        }
+        if (result.id && action.selectKind === "package") {
+          setExpandedKeys((current) => new Set(current).add(`package:${result.id}`))
+        }
+        if (action.revealParent && environment) {
+          const { kind, id } = action.revealParent
+          setExpandedKeys((current) => new Set(current).add(`${kind}:${id}`))
+          if (kind === "type") {
+            const steps = await listPluginSteps(environment, { pluginTypeId: id })
+            setStepsByType((current) => ({ ...current, [id]: steps }))
+          } else if (kind === "endpoint") {
+            const steps = await listPluginSteps(environment, { serviceEndpointId: id })
+            setStepsByEndpoint((current) => ({ ...current, [id]: steps }))
+          } else {
+            const images = await listPluginStepImages(environment, id)
+            setImagesByStep((current) => ({ ...current, [id]: images }))
+          }
+        }
+      } catch (error) {
+        clearTreeChildren()
+        showError("Registration saved, refresh failed", error, "Registration saved, but the list could not be refreshed")
+      }
     },
     onError: (error) => {
       showError("Operation failed", error, "Operation failed")
@@ -276,7 +364,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
       setAssemblyForm(makeAssemblyForm(result, assemblyTarget))
       setSelectedTypeNames(
         result.discoveredTypes
-          .filter((type) => type.kind !== "unknown" && !type.isAbstract)
+          .filter((type) => type.kind !== "unknown" && !type.isAbstract && type.isPublic)
           .map((type) => type.fullName),
       )
       setLastMessage(`Inspected ${result.fileName}`)
@@ -284,6 +372,15 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
     onError: (error) => {
       showError("Inspection failed", error, "Inspection failed")
     },
+  })
+
+  const inspectPackageMutation = useMutation({
+    mutationFn: inspectPluginPackage,
+    onSuccess: (inspection) => {
+      setPackageInspection(inspection)
+      setLastMessage(`Inspected ${inspection.fileName}`)
+    },
+    onError: (error) => showError("Package inspection failed", error, "Package inspection failed"),
   })
 
   const dependenciesMutation = useMutation({
@@ -417,6 +514,36 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
     )
   }
 
+  function openPackageDialog(target?: PluginPackageSummary) {
+    setPackageTarget(target)
+    setPackagePath("")
+    setPackageInspection(undefined)
+    setPackageSolution("")
+    setPackageOpen(true)
+  }
+
+  async function choosePackageFile() {
+    const localPath = await choosePluginPackageFile()
+    if (!localPath) return
+    setPackagePath(localPath)
+    setPackageInspection(undefined)
+    inspectPackageMutation.mutate(localPath)
+  }
+
+  function submitPackage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!environment || !packageInspection) return
+    writeMutation.mutate({
+      operation: () => packageTarget
+        ? updatePluginPackage(environment, { packageId: packageTarget.id, localPath: packagePath })
+        : registerPluginPackage(environment, {
+            localPath: packagePath,
+            solutionUniqueName: packageSolution,
+          }),
+      selectKind: "package",
+    }, { onSuccess: () => setPackageOpen(false) })
+  }
+
   function submitAssembly(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!environment) {
@@ -430,17 +557,12 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
       solutionUniqueName: assemblyForm.solutionUniqueName || undefined,
     }
 
-    writeMutation.mutate(async () => {
-      if (assemblyTarget) {
-        return updatePluginAssembly(environment, {
-          ...input,
-          assemblyId: assemblyTarget.id,
-        })
-      }
-
-      return registerPluginAssembly(environment, input)
-    })
-    setAssemblyOpen(false)
+    writeMutation.mutate({
+      operation: () => assemblyTarget
+        ? updatePluginAssembly(environment, { ...input, assemblyId: assemblyTarget.id })
+        : registerPluginAssembly(environment, input),
+      selectKind: "assembly",
+    }, { onSuccess: () => setAssemblyOpen(false) })
   }
 
   function openStepDialog(step?: PluginStepSummary) {
@@ -463,9 +585,10 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
       return
     }
 
-    writeMutation.mutate(() =>
-      registerPluginStep(environment, {
+    writeMutation.mutate({
+      operation: () => registerPluginStep(environment, {
         ...stepForm,
+        name: stepForm.name || generatedStepName(stepForm, formSnapshot, messageFilters),
         pluginTypeId:
           stepForm.handlerType === "plugintype"
             ? stepForm.pluginTypeId
@@ -488,8 +611,11 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
         description: stepForm.description || undefined,
         solutionUniqueName: stepForm.solutionUniqueName || undefined,
       }),
-    )
-    setStepOpen(false)
+      selectKind: "step",
+      revealParent: stepForm.handlerType === "plugintype"
+        ? { kind: "type", id: stepForm.pluginTypeId }
+        : { kind: "endpoint", id: stepForm.serviceEndpointId },
+    }, { onSuccess: () => setStepOpen(false) })
   }
 
   function openImageDialog(image?: PluginStepImageSummary) {
@@ -507,15 +633,16 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
       return
     }
 
-    writeMutation.mutate(() =>
-      registerPluginStepImage(environment, {
+    writeMutation.mutate({
+      operation: () => registerPluginStepImage(environment, {
         ...imageForm,
         attributes: imageForm.attributes || undefined,
         description: imageForm.description || undefined,
         solutionUniqueName: imageForm.solutionUniqueName || undefined,
       }),
-    )
-    setImageOpen(false)
+      selectKind: "image",
+      revealParent: { kind: "step", id: imageForm.stepId },
+    }, { onSuccess: () => setImageOpen(false) })
   }
 
   function openEndpointDialog(endpoint?: PluginServiceEndpointSummary) {
@@ -529,8 +656,8 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
       return
     }
 
-    writeMutation.mutate(() =>
-      registerPluginServiceEndpoint(environment, {
+    writeMutation.mutate({
+      operation: () => registerPluginServiceEndpoint(environment, {
         ...endpointForm,
         url: endpointForm.url || undefined,
         path: endpointForm.path || undefined,
@@ -539,8 +666,8 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
         description: endpointForm.description || undefined,
         solutionUniqueName: endpointForm.solutionUniqueName || undefined,
       }),
-    )
-    setEndpointOpen(false)
+      selectKind: "endpoint",
+    }, { onSuccess: () => setEndpointOpen(false) })
   }
 
   function guardedAction(item: RegistryItem, action: string) {
@@ -563,9 +690,10 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
       return
     }
 
-    writeMutation.mutate(() =>
-      setPluginStepState(environment, item.id, !item.enabled),
-    )
+    writeMutation.mutate({
+      operation: () => setPluginStepState(environment, item.id, !item.enabled),
+      selectKind: "step",
+    })
   }
 
   function deleteSelected(item: RegistryItem) {
@@ -590,7 +718,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
       return
     }
 
-    writeMutation.mutate(() => {
+    writeMutation.mutate({ operation: () => {
       switch (item.kind) {
         case "assembly":
           return unregisterPluginAssembly(environment, item.id)
@@ -603,11 +731,9 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
         case "endpoint":
           return unregisterPluginServiceEndpoint(environment, item.id)
         case "package":
-          return Promise.reject(
-            new Error("Package unregister is not enabled in this build."),
-          )
+          return unregisterPluginPackage(environment, item.id)
       }
-    })
+    } })
   }
 
   async function exportSnapshot() {
@@ -620,13 +746,13 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
       return
     }
 
-    writeMutation.mutate(() =>
+    writeMutation.mutate({ operation: () =>
       exportPluginRegistration(environment, {
         localPath,
         includeManaged: false,
         componentIds: selectedItem ? [selectedItem.id] : [],
       }),
-    )
+    })
   }
 
   if (!environment) {
@@ -656,7 +782,7 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
           <div className="min-w-0">
             <h2 className="truncate text-base font-semibold">Plugin Registration</h2>
             <p className="truncate text-xs text-muted-foreground">
-              {environment.name} · assemblies, steps, images, endpoints
+              {environment.name} · packages, assemblies, steps, images, endpoints
             </p>
           </div>
         </div>
@@ -677,22 +803,25 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
             )}
             Refresh
           </Button>
-          <Button variant="outline" size="sm" onClick={() => openAssemblyDialog()}>
-            <FileSearch />
-            Assembly
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => openStepDialog()}>
-            <PlugZap />
-            Step
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => openImageDialog()}>
-            <ImagePlus />
-            Image
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => openEndpointDialog()}>
-            <Server />
-            Endpoint
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                Register
+                <ChevronDown />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => openAssemblyDialog()}>
+                New assembly
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => openPackageDialog()}>
+                New package
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => openEndpointDialog()}>
+                New endpoint
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" size="icon-sm" onClick={exportSnapshot}>
             <Download />
           </Button>
@@ -859,9 +988,12 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
           dependencyReport={dependencyReport}
           dependenciesPending={dependenciesMutation.isPending}
           onEditAssembly={openAssemblyDialog}
+          onEditPackage={openPackageDialog}
           onEditStep={openStepDialog}
           onEditImage={openImageDialog}
           onEditEndpoint={openEndpointDialog}
+          onRegisterStep={() => openStepDialog()}
+          onRegisterImage={() => openImageDialog()}
           onToggleState={toggleSelectedState}
           onLoadDependencies={(item) => dependenciesMutation.mutate(item)}
           onUnregister={deleteSelected}
@@ -880,14 +1012,31 @@ export function PluginRegistrationModule({ window }: { window: ToolWindow }) {
         setForm={setAssemblyForm}
         inspection={inspection}
         selectedTypeNames={selectedTypeNames}
-        snapshot={snapshot}
-        messageFilterError={filtersQuery.isError ? filtersQuery.error : null}
         inspecting={inspectMutation.isPending}
         saving={writeMutation.isPending}
         onOpenChange={setAssemblyOpen}
         onChooseFile={() => void chooseAssemblyFile()}
         onToggleType={toggleDiscoveredType}
         onSubmit={submitAssembly}
+      />
+
+      <PackageRegistrationDialog
+        open={packageOpen}
+        target={packageTarget}
+        localPath={packagePath}
+        solutionUniqueName={packageSolution}
+        solutions={packageSolutionsQuery.data ?? []}
+        solutionsLoading={packageSolutionsQuery.isLoading}
+        solutionsError={packageSolutionsQuery.isError
+          ? formatErrorMessage(packageSolutionsQuery.error, "Solutions could not be loaded")
+          : undefined}
+        inspection={packageInspection}
+        inspecting={inspectPackageMutation.isPending}
+        saving={writeMutation.isPending}
+        onOpenChange={setPackageOpen}
+        onChooseFile={() => void choosePackageFile()}
+        onSolutionChange={setPackageSolution}
+        onSubmit={submitPackage}
       />
 
       <StepRegistrationDialog

@@ -14,6 +14,7 @@ import {
 
 import type {
   PluginAssemblySummary,
+  PluginPackageSummary,
   PluginDependencyReport,
   PluginServiceEndpointSummary,
   PluginStepImageSummary,
@@ -48,9 +49,12 @@ type PluginRegistrationDetailsProps = {
   dependencyReport?: PluginDependencyReport
   dependenciesPending: boolean
   onEditAssembly: (assembly: PluginAssemblySummary) => void
+  onEditPackage: (pluginPackage: PluginPackageSummary) => void
   onEditStep: (step: PluginStepSummary) => void
   onEditImage: (image: PluginStepImageSummary) => void
   onEditEndpoint: (endpoint: PluginServiceEndpointSummary) => void
+  onRegisterStep: () => void
+  onRegisterImage: () => void
   onToggleState: (item: RegistryItem) => void
   onLoadDependencies: (item: RegistryItem) => void
   onUnregister: (item: RegistryItem) => void
@@ -214,9 +218,12 @@ export function PluginRegistrationDetails({
   dependencyReport,
   dependenciesPending,
   onEditAssembly,
+  onEditPackage,
   onEditStep,
   onEditImage,
   onEditEndpoint,
+  onRegisterStep,
+  onRegisterImage,
   onToggleState,
   onLoadDependencies,
   onUnregister,
@@ -247,6 +254,24 @@ export function PluginRegistrationDetails({
               </div>
             )}
             <div className="mt-3 flex flex-wrap gap-2">
+              {item.kind === "package" && (
+                <Button variant="outline" size="sm" onClick={() => onEditPackage(item.data)}>
+                  <Archive />
+                  Update
+                </Button>
+              )}
+              {(item.kind === "type" || item.kind === "endpoint") && (
+                <Button variant="outline" size="sm" onClick={onRegisterStep}>
+                  <PlugZap />
+                  Register step
+                </Button>
+              )}
+              {item.kind === "step" && (
+                <Button variant="outline" size="sm" onClick={onRegisterImage}>
+                  <ImagePlus />
+                  Register image
+                </Button>
+              )}
               {item.kind === "assembly" && (
                 <Button variant="outline" size="sm" onClick={() => onEditAssembly(item.data)}>
                   <Archive />
@@ -290,17 +315,15 @@ export function PluginRegistrationDetails({
                 )}
                 Dependencies
               </Button>
-              {item.kind !== "package" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => onUnregister(item)}
-                >
-                  <Trash2 />
-                  Unregister
-                </Button>
-              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => onUnregister(item)}
+              >
+                <Trash2 />
+                Unregister
+              </Button>
             </div>
           </>
         ) : (

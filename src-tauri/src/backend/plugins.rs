@@ -1,8 +1,10 @@
 mod assembly_inspection;
+mod package_inspection;
 mod read_model;
 
 use self::{
     assembly_inspection::{inspect_plugin_assembly_bytes, PluginAssemblyInspection},
+    package_inspection::{inspect_plugin_package_bytes, PluginPackageInspection},
     read_model::{
         plugin_assembly_from_value, plugin_endpoint_from_value,
         plugin_filtering_attribute_from_value, plugin_message_filter_from_value,
@@ -22,7 +24,7 @@ use super::{
     dataverse::{
         dataverse_empty_request, dataverse_get_collection_values, dataverse_get_json_value,
         dataverse_json_request, dataverse_post_json_with_headers, guid_from_entity_id, json_bool,
-        json_lookup_id, json_string, validate_logical_name,
+        json_i32, json_lookup_id, json_string, validate_logical_name,
     },
     storage::DataverseEnvironment,
 };
@@ -66,6 +68,20 @@ pub(super) struct UpdatePluginAssemblyInput {
     type_names: Vec<String>,
     #[serde(default)]
     solution_unique_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct RegisterPluginPackageInput {
+    local_path: String,
+    solution_unique_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct UpdatePluginPackageInput {
+    package_id: String,
+    local_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,6 +251,27 @@ pub(super) async fn add_registration_component_to_solution(
     .await
 }
 
+async fn registered_component_type(
+    app: &AppHandle,
+    environment: &DataverseEnvironment,
+    component_id: &str,
+) -> Result<i32, String> {
+    let rows = dataverse_get_collection_values(
+        app,
+        environment,
+        "/solutioncomponents",
+        vec![
+            ("$select".to_string(), "componenttype".to_string()),
+            ("$filter".to_string(), format!("objectid eq {component_id}")),
+            ("$top".to_string(), "1".to_string()),
+        ],
+    )
+    .await?;
+    rows.first()
+        .and_then(|row| json_i32(row, "componenttype"))
+        .ok_or_else(|| "Dataverse did not expose the registered component type.".to_string())
+}
+
 pub(super) async fn assert_plugin_row_editable(
     app: &AppHandle,
     environment: &DataverseEnvironment,
@@ -288,14 +325,55 @@ fn selected_plugin_type_registrations(
                 item.full_name.as_str(),
                 item.kind.as_str(),
                 item.is_abstract,
+                item.is_public,
             )
         }),
         selected_type_names,
     )
 }
 
+struct StandaloneAssemblyFields<'a> {
+    name: &'a str,
+    version: &'a str,
+    culture: &'a str,
+    public_key_token: &'a str,
+    isolation_mode: i32,
+    source_type: i32,
+    type_names: &'a [String],
+}
+
+fn validate_standalone_assembly(
+    inspection: &PluginAssemblyInspection,
+    fields: StandaloneAssemblyFields<'_>,
+) -> Result<Vec<PluginTypeRegistration>, String> {
+    if !inspection.strong_name_signed {
+        return Err("A standalone plug-in assembly must be strong-name signed.".to_string());
+    }
+    if fields.isolation_mode != 2 || fields.source_type != 0 {
+        return Err(
+            "Dataverse Online requires Sandbox isolation and Database storage.".to_string(),
+        );
+    }
+    if fields.name.trim() != inspection.assembly_name
+        || fields.version.trim() != inspection.version
+        || fields.culture.trim() != inspection.culture
+        || fields.public_key_token.trim() != inspection.public_key_token
+    {
+        return Err("Assembly identity must match the selected DLL metadata.".to_string());
+    }
+
+    let registrations = selected_plugin_type_registrations(inspection, fields.type_names);
+    if registrations.is_empty() || registrations.len() != fields.type_names.len() {
+        return Err(
+            "Select at least one public plug-in or workflow activity type from the assembly."
+                .to_string(),
+        );
+    }
+    Ok(registrations)
+}
+
 fn plugin_type_registrations_from_discovered<'a>(
-    discovered_types: impl IntoIterator<Item = (&'a str, &'a str, bool)>,
+    discovered_types: impl IntoIterator<Item = (&'a str, &'a str, bool, bool)>,
     selected_type_names: &[String],
 ) -> Vec<PluginTypeRegistration> {
     let selected_type_names = selected_type_names
@@ -305,10 +383,13 @@ fn plugin_type_registrations_from_discovered<'a>(
 
     discovered_types
         .into_iter()
-        .filter(|(full_name, kind, is_abstract)| {
-            *kind != "unknown" && !is_abstract && selected_type_names.contains(full_name)
+        .filter(|(full_name, kind, is_abstract, is_public)| {
+            *kind != "unknown"
+                && !is_abstract
+                && *is_public
+                && selected_type_names.contains(full_name)
         })
-        .map(|(full_name, kind, _)| PluginTypeRegistration {
+        .map(|(full_name, kind, _, _)| PluginTypeRegistration {
             type_name: full_name.to_string(),
             is_workflow_activity: kind == "workflow",
         })
@@ -393,6 +474,163 @@ pub(super) fn inspect_plugin_assembly(
     let bytes = fs::read(&local_path)
         .map_err(|error| format!("Could not read plug-in assembly {}: {}", local_path, error))?;
     inspect_plugin_assembly_bytes(&local_path, &bytes)
+}
+
+#[tauri::command]
+pub(super) fn inspect_plugin_package(
+    local_path: String,
+) -> Result<PluginPackageInspection, String> {
+    let bytes = fs::read(&local_path)
+        .map_err(|error| format!("Could not read plug-in package {}: {}", local_path, error))?;
+    inspect_plugin_package_bytes(&local_path, &bytes)
+}
+
+#[tauri::command]
+pub(super) async fn register_plugin_package(
+    app: AppHandle,
+    environment: DataverseEnvironment,
+    input: RegisterPluginPackageInput,
+) -> Result<PluginWriteResult, String> {
+    let bytes = fs::read(&input.local_path).map_err(|error| {
+        format!(
+            "Could not read plug-in package {}: {}",
+            input.local_path, error
+        )
+    })?;
+    let inspection = inspect_plugin_package_bytes(&input.local_path, &bytes)?;
+    let solution_unique_name = validate_logical_name(&input.solution_unique_name)?;
+    let solutions = dataverse_get_collection_values(
+        &app,
+        &environment,
+        "/solutions",
+        vec![
+            ("$select".to_string(), "solutionid,uniquename".to_string()),
+            (
+                "$filter".to_string(),
+                format!("uniquename eq '{solution_unique_name}' and ismanaged eq false"),
+            ),
+            (
+                "$expand".to_string(),
+                "publisherid($select=customizationprefix)".to_string(),
+            ),
+        ],
+    )
+    .await?;
+    let prefix = solutions
+        .first()
+        .and_then(|solution| json_string(&solution["publisherid"], "customizationprefix"))
+        .ok_or_else(|| "The selected unmanaged solution has no publisher prefix.".to_string())?;
+    let required_prefix = format!("{prefix}_");
+    if !inspection
+        .name
+        .to_ascii_lowercase()
+        .starts_with(&required_prefix.to_ascii_lowercase())
+    {
+        return Err(format!(
+            "NuGet package id must start with the selected solution's publisher prefix: {required_prefix}"
+        ));
+    }
+    let unique_name = inspection.name.clone();
+    if unique_name.len() > 128 {
+        return Err("The publisher prefix and package id exceed Dataverse's 128-character unique-name limit.".to_string());
+    }
+    let (body, entity_id) = dataverse_post_json_with_headers(
+        &app,
+        &environment,
+        "/pluginpackages",
+        &serde_json::json!({
+            "name": inspection.name,
+            "uniquename": unique_name,
+            "version": inspection.version,
+            "content": BASE64.encode(&bytes),
+        }),
+        &[
+            ("Prefer", "return=representation".to_string()),
+            ("MSCRM.SolutionUniqueName", solution_unique_name.clone()),
+        ],
+    )
+    .await?;
+    let package_id = serde_json::from_str::<Value>(&body)
+        .ok()
+        .and_then(|value| json_string(&value, "pluginpackageid"))
+        .or_else(|| entity_id.as_deref().and_then(guid_from_entity_id))
+        .ok_or_else(|| "Dataverse did not return the created package id.".to_string())?;
+    Ok(PluginWriteResult {
+        id: Some(package_id),
+        message: format!("Registered plug-in package {}", inspection.name),
+    })
+}
+
+#[tauri::command]
+pub(super) async fn update_plugin_package(
+    app: AppHandle,
+    environment: DataverseEnvironment,
+    input: UpdatePluginPackageInput,
+) -> Result<PluginWriteResult, String> {
+    assert_plugin_row_editable(
+        &app,
+        &environment,
+        &format!("/pluginpackages({})", input.package_id),
+        &["name"],
+    )
+    .await?;
+    let bytes = fs::read(&input.local_path).map_err(|error| {
+        format!(
+            "Could not read plug-in package {}: {}",
+            input.local_path, error
+        )
+    })?;
+    let inspection = inspect_plugin_package_bytes(&input.local_path, &bytes)?;
+    let current = dataverse_get_json_value(
+        &app,
+        &environment,
+        &format!("/pluginpackages({})", input.package_id),
+        &[("$select", "name,uniquename,version")],
+    )
+    .await?;
+    if json_string(&current, "name").as_deref() != Some(&inspection.name)
+        || json_string(&current, "version").as_deref() != Some(&inspection.version)
+    {
+        return Err("The package id and version must match the existing registration.".to_string());
+    }
+    dataverse_json_request(
+        &app,
+        &environment,
+        reqwest::Method::PATCH,
+        &format!("/pluginpackages({})", input.package_id),
+        &serde_json::json!({ "content": BASE64.encode(&bytes) }),
+    )
+    .await?;
+    Ok(PluginWriteResult {
+        id: Some(input.package_id),
+        message: format!("Updated plug-in package {}", inspection.name),
+    })
+}
+
+#[tauri::command]
+pub(super) async fn unregister_plugin_package(
+    app: AppHandle,
+    environment: DataverseEnvironment,
+    package_id: String,
+) -> Result<PluginWriteResult, String> {
+    assert_plugin_row_editable(
+        &app,
+        &environment,
+        &format!("/pluginpackages({package_id})"),
+        &["name"],
+    )
+    .await?;
+    dataverse_empty_request(
+        &app,
+        &environment,
+        reqwest::Method::DELETE,
+        &format!("/pluginpackages({package_id})"),
+    )
+    .await?;
+    Ok(PluginWriteResult {
+        id: Some(package_id),
+        message: "Unregistered plug-in package".to_string(),
+    })
 }
 
 #[tauri::command]
@@ -592,7 +830,16 @@ fn plugin_message_query() -> Vec<(String, String)> {
             "$select".to_string(),
             "sdkmessageid,name,isprivate".to_string(),
         ),
-        ("$filter".to_string(), "isprivate eq false".to_string()),
+        (
+            "$filter".to_string(),
+            "isprivate eq false \
+             and name ne 'SetStateDynamicEntity' \
+             and name ne 'RemoveRelated' \
+             and name ne 'SetRelated' \
+             and name ne 'Execute' \
+             and sdkmessageid_sdkmessagefilter/any(s:s/iscustomprocessingstepallowed eq true and s/isvisible eq true)"
+                .to_string(),
+        ),
         ("$orderby".to_string(), "name asc".to_string()),
     ]
 }
@@ -615,7 +862,7 @@ pub(super) async fn list_plugin_message_filters(
       (
         "$filter".to_string(),
         format!(
-          "_sdkmessageid_value eq {} and iscustomprocessingstepallowed eq true",
+          "_sdkmessageid_value eq {} and iscustomprocessingstepallowed eq true and isvisible eq true",
           message_id.trim()
         ),
       ),
@@ -783,6 +1030,18 @@ pub(super) async fn register_plugin_assembly(
         )
     })?;
     let inspection = inspect_plugin_assembly_bytes(&input.local_path, &bytes)?;
+    let registrations = validate_standalone_assembly(
+        &inspection,
+        StandaloneAssemblyFields {
+            name: &input.name,
+            version: &input.version,
+            culture: &input.culture,
+            public_key_token: &input.public_key_token,
+            isolation_mode: input.isolation_mode,
+            source_type: input.source_type,
+            type_names: &input.type_names,
+        },
+    )?;
     let content = BASE64.encode(&bytes);
     let source_hash = Sha256::digest(&bytes)
         .iter()
@@ -830,17 +1089,6 @@ pub(super) async fn register_plugin_assembly(
         91,
     )
     .await?;
-    let type_names = if input.type_names.is_empty() {
-        inspection
-            .discovered_types
-            .iter()
-            .filter(|item| item.kind != "unknown" && !item.is_abstract)
-            .map(|item| item.full_name.clone())
-            .collect::<Vec<_>>()
-    } else {
-        input.type_names
-    };
-    let registrations = selected_plugin_type_registrations(&inspection, &type_names);
     let created_types = create_plugin_type_records(
         &app,
         &environment,
@@ -881,6 +1129,18 @@ pub(super) async fn update_plugin_assembly(
         )
     })?;
     let inspection = inspect_plugin_assembly_bytes(&input.local_path, &bytes)?;
+    let registrations = validate_standalone_assembly(
+        &inspection,
+        StandaloneAssemblyFields {
+            name: &input.name,
+            version: &input.version,
+            culture: &input.culture,
+            public_key_token: &input.public_key_token,
+            isolation_mode: input.isolation_mode,
+            source_type: input.source_type,
+            type_names: &input.type_names,
+        },
+    )?;
     let content = BASE64.encode(&bytes);
     let source_hash = Sha256::digest(&bytes)
         .iter()
@@ -916,7 +1176,7 @@ pub(super) async fn update_plugin_assembly(
         &payload,
     )
     .await?;
-    let registrations = selected_plugin_type_registrations(&inspection, &input.type_names)
+    let registrations = registrations
         .into_iter()
         .filter(|registration| !existing_type_names.contains(&registration.type_name))
         .collect::<Vec<_>>();
@@ -1563,6 +1823,11 @@ pub(super) async fn get_plugin_component_dependencies(
     object_id: String,
     component_type: i32,
 ) -> Result<SolutionDependencyReport, String> {
+    let component_type = if component_type == 0 {
+        registered_component_type(&app, &environment, &object_id).await?
+    } else {
+        component_type
+    };
     get_solution_component_dependencies(app, environment, object_id, component_type).await
 }
 
@@ -1638,10 +1903,11 @@ mod type_registration_tests {
         ];
         let registrations = plugin_type_registrations_from_discovered(
             [
-                ("Contoso.Plugins.AccountPlugin", "plugin", false),
-                ("Contoso.Workflows.CalculateScore", "workflow", false),
-                ("Contoso.AbstractPlugin", "plugin", true),
-                ("Contoso.Helper", "unknown", false),
+                ("Contoso.Plugins.AccountPlugin", "plugin", false, true),
+                ("Contoso.Workflows.CalculateScore", "workflow", false, true),
+                ("Contoso.AbstractPlugin", "plugin", true, true),
+                ("Contoso.PrivatePlugin", "plugin", false, false),
+                ("Contoso.Helper", "unknown", false, true),
             ],
             &selected,
         );
@@ -1669,5 +1935,21 @@ mod type_registration_tests {
         assert!(query
             .iter()
             .any(|(key, value)| key == "$orderby" && value == "name asc"));
+        let filter = query
+            .iter()
+            .find(|(key, _)| key == "$filter")
+            .unwrap()
+            .1
+            .as_str();
+        assert!(filter.contains("isprivate eq false"));
+        assert!(filter.contains("iscustomprocessingstepallowed eq true and s/isvisible eq true"));
+        for name in [
+            "SetStateDynamicEntity",
+            "RemoveRelated",
+            "SetRelated",
+            "Execute",
+        ] {
+            assert!(filter.contains(&format!("name ne '{name}'")));
+        }
     }
 }

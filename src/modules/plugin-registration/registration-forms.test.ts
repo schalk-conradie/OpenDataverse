@@ -11,6 +11,7 @@ import {
   mockPluginTypes,
 } from "./mock-data"
 import {
+  generatedStepName,
   makeAssemblyForm,
   makeEndpointForm,
   makeImageForm,
@@ -46,21 +47,21 @@ describe("plug-in registration form defaults", () => {
       version: mockPluginAssemblyInspection.version,
       culture: mockPluginAssemblyInspection.culture,
       publicKeyToken: mockPluginAssemblyInspection.publicKeyToken,
-      isolationMode: mockPluginAssemblies[1].isolationMode,
-      sourceType: mockPluginAssemblies[1].sourceType,
+      isolationMode: 2,
+      sourceType: 0,
       description: mockPluginAssemblies[1].description,
       solutionUniqueName: "",
     })
   })
 
-  it("selects the first loaded handler and message for a new step", () => {
+  it("selects the loaded handler but requires an explicit message for a new step", () => {
     expect(makeStepForm(formSnapshot)).toEqual({
       stepId: undefined,
       handlerType: "plugintype",
       pluginTypeId: mockPluginTypes[0].id,
       serviceEndpointId: mockPluginServiceEndpoints[0].id,
-      messageId: formSnapshot.messages[0].id,
-      messageText: formSnapshot.messages[0].name,
+      messageId: "",
+      messageText: "",
       messageFilterId: "__none__",
       name: "",
       stage: 20,
@@ -76,6 +77,16 @@ describe("plug-in registration form defaults", () => {
       enabled: true,
       solutionUniqueName: "",
     })
+  })
+
+  it("generates the PRT-style step name from the selected handler, message, and entity", () => {
+    const form = makeStepForm(formSnapshot)
+    form.messageId = formSnapshot.messages[0].id
+    form.messageText = formSnapshot.messages[0].name
+    form.messageFilterId = "cf5d7c4a-0000-4000-9000-000000000001"
+    expect(generatedStepName(form, formSnapshot, [
+      { id: form.messageFilterId, messageId: form.messageId, primaryEntity: "account", isCustomProcessingStepAllowed: true },
+    ])).toBe(`${mockPluginTypes[0].typeName}: Create of account`)
   })
 
   it("maps an existing step while keeping secure configuration write-only", () => {

@@ -1,18 +1,38 @@
 import type { PluginMessageSummary } from "@/core/dataverse/schemas"
 
+const messageCollator = new Intl.Collator("en", {
+  sensitivity: "base",
+  ignorePunctuation: true,
+  numeric: true,
+})
+
 export function filterPluginMessages(
   messages: readonly PluginMessageSummary[],
   value: string,
 ): PluginMessageSummary[] {
   const normalizedValue = value.trim().toLowerCase()
 
-  if (!normalizedValue) {
-    return [...messages]
-  }
+  const matches = normalizedValue
+    ? messages.filter((message) =>
+        message.name.toLowerCase().includes(normalizedValue),
+      )
+    : [...messages]
 
-  return messages.filter((message) =>
-    message.name.toLowerCase().includes(normalizedValue),
-  )
+  return matches.sort((left, right) => {
+    if (normalizedValue) {
+      const rank = (name: string) => {
+        const lowerName = name.toLowerCase()
+        if (lowerName === normalizedValue) return 0
+        if (lowerName.startsWith(normalizedValue)) return 1
+        return 2
+      }
+      const rankDifference = rank(left.name) - rank(right.name)
+      if (rankDifference !== 0) return rankDifference
+    }
+
+    return messageCollator.compare(left.name, right.name)
+      || left.name.localeCompare(right.name, "en")
+  })
 }
 
 export function findPluginMessageByName(

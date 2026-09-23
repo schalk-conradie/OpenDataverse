@@ -475,9 +475,9 @@ export const mockPluginAssemblyInspection: PluginAssemblyInspection = {
   assemblyName: "Contoso.AccountPlugins",
   version: "1.4.0.0",
   culture: "neutral",
-  publicKeyToken: "null",
+  publicKeyToken: "71e702ef4936973d",
   targetFramework: ".NETFramework,Version=v4.6.2",
-  strongNameSigned: false,
+  strongNameSigned: true,
   clrMetadataVersion: "v4.0.30319",
   discoveredTypes: [
     {
@@ -509,7 +509,7 @@ export const mockPluginAssemblyInspection: PluginAssemblyInspection = {
       baseType: "System.Activities.CodeActivity",
     },
   ],
-  warnings: ["Assembly is not strong-name signed."],
+  warnings: [],
 }
 
 export const mockPluginDependencyReport: PluginDependencyReport = {

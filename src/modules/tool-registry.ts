@@ -102,7 +102,7 @@ export const toolRegistry: ToolDefinition[] = [
   {
     id: "plugin-registration",
     title: "Plugin Registration",
-    description: "Unmanaged assemblies, steps, images, and endpoints",
+    description: "Unmanaged packages, assemblies, steps, and endpoints",
     icon: Puzzle,
     status: "ready",
     component: PluginRegistrationModule,

@@ -40,6 +40,7 @@ import {
   filterPluginMessages,
   findPluginMessageByName,
 } from "./message-autocomplete"
+import { pluginTypeLabel } from "./registry-model"
 import type { StepForm } from "./registration-forms"
 
 type StepRegistrationDialogProps = {
@@ -148,19 +149,21 @@ export function StepRegistrationDialog({
           </DialogHeader>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label htmlFor="plugin-step-name">Name</Label>
-              <Input
-                id="plugin-step-name"
-                value={form.name}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    name: event.target.value,
-                  }))
-                }
-              />
-            </div>
+            {form.stepId && (
+              <div className="grid gap-2">
+                <Label htmlFor="plugin-step-name">Name</Label>
+                <Input
+                  id="plugin-step-name"
+                  value={form.name}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+            )}
             <div className="grid gap-2">
               <Label>Handler</Label>
               <Select
@@ -198,7 +201,7 @@ export function StepRegistrationDialog({
                   <SelectContent>
                     {snapshot.types.map((type) => (
                       <SelectItem key={type.id} value={type.id}>
-                        {type.friendlyName || type.typeName}
+                        {pluginTypeLabel(type)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -508,7 +511,7 @@ export function StepRegistrationDialog({
 
           <DialogFooter>
             <Button type="submit" disabled={saving || !matchedMessage}>
-              Save Step
+              {form.stepId ? "Save changes" : "Register step"}
             </Button>
           </DialogFooter>
         </form>
